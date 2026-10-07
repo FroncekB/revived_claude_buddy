@@ -269,3 +269,16 @@ test('when the buddy is off, even its name goes to Claude', async ($, on) => {
   const passed = await $.prompt.submit({ text: 'Pip, hi', wait: false, origin: { kind: 'composer' } })
   expect(passed).toMatchObject({ text: 'Pip, hi' })
 })
+
+test("a subagent's failed tool doesn't leak into the main turn's reaction", async ($, on) => {
+  const clock = world(on, { buddy: RECORD })
+  engineBelow(on)
+  const prompts = model(on, null, 'Ouch.')
+  await $.session.start(START)
+  await $.tool.call({ tool: 'Bash', command: 'false', agentId: 'a1' })
+  await $.turn.complete({ ...TURN, durationMs: 130_000 })
+  await clock.settle()
+  const reactions = prompts.filter(p => p.includes('Failed tools'))
+  expect(reactions).toHaveLength(1)
+  expect(reactions[0]).toContain('Failed tools: none.')
+})

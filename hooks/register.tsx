@@ -287,8 +287,11 @@ export const register: Register = on => {
   on('tool.call', async ($, e, next) => {
     const ran = await next(e)
     try {
-      tally[e.tool] = (tally[e.tool] ?? 0) + 1
-      if (ran.deny === undefined && ran.isError === true) failedTools.push(e.tool)
+      // Main conversation only: a subagent's calls never reach the buddy's reactions.
+      if (e.agentId === undefined) {
+        tally[e.tool] = (tally[e.tool] ?? 0) + 1
+        if (ran.deny === undefined && ran.isError === true) failedTools.push(e.tool)
+      }
     } catch {
       // Counting never changes a tool call.
     }
