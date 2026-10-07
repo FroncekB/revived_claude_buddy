@@ -369,6 +369,29 @@ test('a reload after a failed write keeps the session-only buddy', async ($, on)
   expect(await cardText($)).toMatch(/^Pip\b/m)
 })
 
+test("a schema 1 copy left in state by a 0.1.x session's failed write is migrated, not trusted", async ($, on) => {
+  // A 0.1.x session whose last write failed holds its v1 record in state, marked unsaved, and a
+  // reload runs session.start again over it. The first session here stands in for that one: its
+  // writes of the record into state are rewritten to the v1 shape.
+  const shared = sharedStore(on, RECORD)
+  shared.refuse = true
+  let legacy = true
+  on('state.set', { plugin: 'buddy', key: 'record' }, async (_$, e, next) =>
+    next(legacy ? { ...e, value: RECORD as unknown as Saved } : e),
+  )
+  const clock = world(on, null)
+  await $.session.start(START)
+  const run = runner($)
+  expect(await run('off')).toBe('Could not save your buddy; it lives for this session only.')
+  legacy = false
+  shared.refuse = false
+  await $.session.start(START)
+  await clock.settle()
+  expect(await run('mute')).toBe('Pip will stay quiet unless spoken to.')
+  expect(shared.row).toMatchObject({ schema: 2, mode: 'muted' })
+  expect(activeOf(shared.row)?.soul.name).toBe('Pip')
+})
+
 test('a refused command registration still loads the buddy', async ($, on) => {
   mock.clock(on, { now: 1_000_000 })
   mock.store(on, { buddy: RECORD })

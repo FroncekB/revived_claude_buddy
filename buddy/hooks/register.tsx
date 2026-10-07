@@ -69,7 +69,9 @@ type Who = Pick<Buddy, 'seed' | 'soul'>
 
 const tint = (color: string | undefined) => (color ? { color } : {})
 
-// Module variables start over on a hot reload; nothing here needs to survive one.
+// Module variables start over on a hot reload; nothing here needs to survive one. The cost: the
+// old module's last commit can overlap the new one's first, or a flush cut off midway can lose
+// a turn's counts. Both are accepted losses, and a reload also frees a stuck commit chain.
 let timer: { cancel: () => void } | null = null
 let inFlight: { controller: AbortController; kind: 'react' | 'reply' } | null = null
 let cannedCount = 0
@@ -113,7 +115,11 @@ async function current($: EngineInterface): Promise<Stored> {
   const stored = classify(await $.store.get(STORE_KEY))
   if (stored.kind === 'damaged' || stored.kind === 'foreign') return stored
   const mine = await read($, record)
-  if (mine && (await read($, unsaved))) return { kind: 'ok', saved: mine }
+  if (mine && (await read($, unsaved))) {
+    // The copy may be from before a reload: a 0.1.x session leaves a schema 1 record here.
+    const own = classify(mine)
+    if (own.kind === 'ok') return own
+  }
   return stored
 }
 
