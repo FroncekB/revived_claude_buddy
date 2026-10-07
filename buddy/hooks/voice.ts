@@ -8,7 +8,7 @@ export const QUIP_COOLDOWN_MS = 180_000
 export const REPLY_FLOOR_MS = 5_000
 export const LONG_TURN_MS = 120_000
 export const QUIP_CHANCE = 0.25
-export const MAX_SAY = 90
+export const MAX_SAY = 160
 export const BUBBLE_TICKS = 24
 export const HEART_TICKS = 5
 
@@ -62,7 +62,11 @@ export function cleanSay(raw: string): string {
     .replace(/^'+|'+$/g, '')
     .replace(/\s+/g, ' ')
     .trim()
-  return text.length > MAX_SAY ? text.slice(0, MAX_SAY - 1) + '…' : text
+  if (text.length <= MAX_SAY) return text
+  // Cut after the last whole word; a single overlong word is cut where it stands.
+  const cut = text.slice(0, MAX_SAY - 1)
+  const space = cut.lastIndexOf(' ')
+  return (space > 0 ? cut.slice(0, space) : cut).replace(/[\s,;:]+$/, '') + '…'
 }
 
 function statLine(b: Bones): string {

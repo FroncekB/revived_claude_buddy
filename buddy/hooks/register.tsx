@@ -127,7 +127,7 @@ async function ask(
   inFlight = mine
   try {
     const result = await $.model.complete(
-      { model: 'haiku', system: personaSystem(rec.soul, bones), prompt, maxTokens: 60, timeoutMs: 8000 },
+      { model: 'haiku', system: personaSystem(rec.soul, bones), prompt, maxTokens: 80, timeoutMs: 8000 },
       { signal: mine.controller.signal },
     )
     if (mine.controller.signal.aborted || !result.isAnswered) return null
