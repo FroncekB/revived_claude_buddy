@@ -10,6 +10,9 @@ export type BuddyRecord = {
   rerolls: number
 }
 
+// The schema 1 record (base spec section 3), read only to migrate it.
+export type SavedV1 = BuddyRecord
+
 export type ToolGroup = 'shell' | 'edit' | 'read' | 'web' | 'agent' | 'mcp' | 'other'
 
 // One buddy's lifetime counts. Main-conversation events only.
@@ -29,6 +32,23 @@ export type You = {
   streak: number
   bestStreak: number
   days: number
+}
+
+export type Buddy = {
+  seed: string
+  soul: Soul
+  retiredAt: string | null
+  counts: Counts
+}
+
+// The `$.store` key `buddy` (Foundation spec section 1).
+export type Saved = {
+  schema: 2
+  mode: Mode
+  rerolls: number
+  active: string
+  buddies: Buddy[]
+  you: You
 }
 
 export type Bubble = { text: string; untilTick: number }
