@@ -16,6 +16,7 @@ declare module 'claude-code' {
   interface PluginState {
     buddy: {
       record: BuddyRecord | null
+      unsaved: boolean
       hatching: boolean
       tick: number
       bubble: Bubble | null

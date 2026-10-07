@@ -193,6 +193,38 @@ test('a failed save after a stored record keeps the new mode', async ($, on) => 
   expect(await run('pet')).toBe('Pip is hidden. Run /buddy to bring it back.')
 })
 
+test("another session's reroll is not overwritten", async ($, on) => {
+  // The store is shared: another session can replace the row under this one.
+  const shared: { row: unknown } = { row: RECORD }
+  on('store.get', async () => ({ value: shared.row }))
+  on('store.set', async (_$, e) => {
+    shared.row = e.value
+    return { value: undefined }
+  })
+  world(on, null)
+  await $.session.start(START)
+  shared.row = { ...RECORD, seed: 'other-seed', soul: { ...RECORD.soul, name: 'Bix' } }
+  const run = runner($)
+  expect(await run('card')).toMatch(/^Bix, /)
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await ui.find({ text: /Bix/ })).toBeDefined()
+  await run('mute')
+  expect(shared.row).toMatchObject({ seed: 'other-seed', mode: 'muted' })
+})
+
+test('a reload after a failed write keeps the session-only buddy', async ($, on) => {
+  on('store.get', async () => ({ value: undefined }))
+  on('store.set', async () => ({ deny: 'disk full' }))
+  const clock = world(on, null)
+  model(on, '{"name": "Pip", "personality": "Counts semicolons."}', 'Hello there.')
+  await $.session.start(START)
+  const run = runner($)
+  expect(await run('')).toBe('Could not save your buddy; it lives for this session only.')
+  await clock.settle()
+  await $.session.start(START)
+  expect(await run('card')).toMatch(/^Pip, /)
+})
+
 const TURN = { answer: 'done', durationMs: 4_000, isAborted: false, turnId: 't1', reason: 'answer' as const }
 
 // Beneath the plugin: Bash fails, turns and prompts pass straight through.

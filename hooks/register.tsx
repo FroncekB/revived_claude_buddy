@@ -29,6 +29,8 @@ import {
 import type { TurnSummary } from './voice'
 
 const record = atom({ plugin: 'buddy', key: 'record' } as const, null)
+// True while the record in state is newer than the store's: the last write failed.
+const unsaved = atom({ plugin: 'buddy', key: 'unsaved' } as const, false)
 const hatching = atom({ plugin: 'buddy', key: 'hatching' } as const, false)
 const tick = atom({ plugin: 'buddy', key: 'tick' } as const, 0)
 const bubble = atom({ plugin: 'buddy', key: 'bubble' } as const, null)
@@ -77,14 +79,21 @@ function later($: EngineInterface, work: () => Promise<unknown>) {
   })
 }
 
-async function save($: EngineInterface, rec: BuddyRecord): Promise<string | null> {
+// Make `rec` the session's buddy: into state, and the timer to match its mode.
+async function adopt($: EngineInterface, rec: BuddyRecord) {
   await update($, record, () => rec)
   if (rec.mode === 'off') stopTimer()
   else if (!timer) startTimer($)
+}
+
+async function save($: EngineInterface, rec: BuddyRecord): Promise<string | null> {
+  await adopt($, rec)
   try {
     await $.store.set(STORE_KEY, rec)
+    await update($, unsaved, () => false)
     return null
   } catch {
+    await update($, unsaved, () => true)
     return 'Could not save your buddy; it lives for this session only.'
   }
 }
@@ -182,9 +191,15 @@ async function runBuddy($: EngineInterface, sub: Sub): Promise<string | undefine
   if (sub === 'usage') return USAGE
   const loaded = classifyRecord(await $.store.get(STORE_KEY))
   if (loaded.kind === 'foreign') return `Saved buddy uses schema ${loaded.schema}; this mod knows 1.`
-  // $.state is never older than the store: session.start loads it from there, and save() writes
-  // it first. So after a failed write the session carries on from state, not the stale store.
-  const rec = (await read($, record)) ?? (loaded.kind === 'ok' ? loaded.record : null)
+  // The store is shared between sessions, so it is the truth, unless a write failed here: then
+  // state holds the only copy of this session's buddy and carries on until a save succeeds.
+  const mine = await read($, record)
+  let rec: BuddyRecord | null = null
+  if (mine && (await read($, unsaved))) rec = mine
+  else if (loaded.kind === 'ok') {
+    rec = loaded.record
+    if (!mine || mine.seed !== rec.seed || mine.mode !== rec.mode) await adopt($, rec)
+  }
   if (!rec) {
     return sub === 'show' ? hatch($, 0) : 'No buddy yet. Run /buddy to hatch one.'
   }
@@ -267,7 +282,9 @@ export const register: Register = on => {
         immediate: true,
       })
       const loaded = classifyRecord(await $.store.get(STORE_KEY))
-      const rec = loaded.kind === 'ok' ? loaded.record : null
+      // A write that failed before a reload left the only copy in state: keep it.
+      const pending = (await read($, unsaved)) ? await read($, record) : null
+      const rec = pending ?? (loaded.kind === 'ok' ? loaded.record : null)
       await update($, record, () => rec)
       if (rec && rec.mode !== 'off') startTimer($)
     } catch {
