@@ -1,6 +1,7 @@
 // The saved record and the /buddy subcommands. Pure: no $.
-import type { Buddy, Counts, Mode, Saved, SavedV1, Soul } from '../types'
+import type { Buddy, Counts, Mode, MoodEvent, Saved, SavedV1, Soul } from '../types'
 import { addCounts, localDay, visit, zeroCounts } from './ledger'
+import { applyMood, sulkFor, withSulk } from './mood'
 
 export const STORE_KEY = 'buddy'
 export const USAGE = 'Usage: /buddy [pet | card | mute | unmute | off | reroll [confirm]]'
@@ -47,8 +48,27 @@ export function activeBuddy(saved: Saved): Buddy {
 export type Change =
   | { kind: 'hatch' | 'reroll'; seed: string; soul: Soul }
   | { kind: 'mode'; mode: Mode }
-  | { kind: 'flush'; pending: Readonly<Record<string, Counts>> }
+  | {
+      kind: 'flush'
+      pending: Readonly<Record<string, Counts>>
+      // Mood events by seed, replayed in order (Alive spec section 2).
+      mood?: Readonly<Record<string, readonly MoodEvent[]>>
+    }
   | { kind: 'visit' }
+
+// Today's visit (Foundation spec section 3). A new day after two or more missed ones leaves the
+// active buddy sulking (Alive spec section 2). Returns `saved` itself when the day is not new.
+function arrive(saved: Saved, now: number): Saved {
+  const today = localDay(now)
+  const you = visit(saved.you, today)
+  if (you === saved.you) return saved
+  const sulk = sulkFor(saved.you.lastDay, today)
+  const buddies =
+    sulk > 0
+      ? saved.buddies.map(b => (b.seed === saved.active ? { ...b, mood: withSulk(b.mood, sulk, now) } : b))
+      : saved.buddies
+  return { ...saved, you, buddies }
+}
 
 // One change, made on the stored object itself so fields a newer build wrote are kept.
 // Null means there is nothing to write.
@@ -81,17 +101,23 @@ export function applyChange(saved: Saved | null, change: Change, now: number): S
       let added = false
       const buddies = saved.buddies.map(b => {
         const more = change.pending[b.seed]
-        if (!more) return b
+        const felt = change.mood?.[b.seed] ?? []
+        if (!more && felt.length === 0) return b
         added = true
-        return { ...b, counts: addCounts(b.counts, more) }
+        return {
+          ...b,
+          ...(more ? { counts: addCounts(b.counts, more) } : {}),
+          ...(felt.length > 0 ? { mood: applyMood(b.mood, felt, now) } : {}),
+        }
       })
-      const you = visit(saved.you, today)
-      return added || you !== saved.you ? { ...saved, buddies, you } : null
+      const moved = { ...saved, buddies }
+      const arrived = arrive(moved, now)
+      return added || arrived !== moved ? arrived : null
     }
     case 'visit': {
       if (!saved) return null
-      const you = visit(saved.you, today)
-      return you !== saved.you ? { ...saved, you } : null
+      const arrived = arrive(saved, now)
+      return arrived !== saved ? arrived : null
     }
   }
 }
