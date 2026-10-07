@@ -37,9 +37,11 @@ const FILL: Record<Rarity, string> = {
   common: '#8b8f98',
   uncommon: '#3fa66b',
   rare: '#4a86e8',
-  epic: '#b45bd1',
-  legendary: '#c99a12',
+  epic: '#c99a12',
+  legendary: '#b45bd1',
 }
+// A still card cannot shimmer, so a shiny portrait is gold.
+const SHINY = '#c99a12'
 
 // The first stat straight up, the rest clockwise.
 const angleOf = (index: number) => -Math.PI / 2 + (index * 2 * Math.PI) / STATS.length
@@ -120,7 +122,7 @@ export function cardSvg(soul: Soul, bones: Bones, rerolls: number): string {
   spriteRows({ species: bones.species, eye: bones.eye, frame: 0, top }).forEach((row, i) =>
     marks.push(
       `<text x="${MID}" y="${101 + i * 18}" text-anchor="middle" xml:space="preserve" ` +
-        `font-family="ui-monospace, Consolas, monospace" font-size="15" fill="${bones.shiny ? FILL.legendary : INK}">${esc(row)}</text>`,
+        `font-family="ui-monospace, Consolas, monospace" font-size="15" fill="${bones.shiny ? SHINY : INK}">${esc(row)}</text>`,
     ),
   )
 
