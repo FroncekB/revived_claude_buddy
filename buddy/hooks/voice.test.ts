@@ -2,8 +2,8 @@ import { expect, test } from 'claude-code/testing'
 
 import { rollBones } from './roll'
 import {
-  FALLBACK_NAMES, MAX_SAY, QUIP_COOLDOWN_MS, RESERVED_NAMES, cannedLine, cleanSay, fallbackSoul, hatchRequest,
-  matchAddress, parseSoul, personaSystem, reactionPrompt, shouldQuip, withArticle,
+  BUBBLE_TICKS, FALLBACK_NAMES, MAX_SAY, QUIP_COOLDOWN_MS, RESERVED_NAMES, SAY_GOAL, bubbleTicks, cannedLine, cleanSay,
+  fallbackSoul, hatchRequest, matchAddress, parseSoul, personaSystem, reactionPrompt, shouldQuip, withArticle,
 } from './voice'
 import type { TurnSummary } from './voice'
 
@@ -43,6 +43,28 @@ test('reply cleanup strips quotes, newlines and emoji, and caps the length', () 
   expect(cleanSay('  \n ')).toBe('')
 })
 
+test('a reply over the goal but within the cap is kept whole', () => {
+  const overshoot = 'You renamed that variable four times. I respect the commitment, if not the final choice, honestly.'
+  expect(overshoot.length).toBeGreaterThan(SAY_GOAL)
+  expect(cleanSay(overshoot)).toBe(overshoot)
+})
+
+test('a reply over the cap ends at its last whole sentence, or else its last whole word', () => {
+  const sentences =
+    'Three retries and a green build. I am choosing to believe that was all part of the plan. ' +
+    'Next time, maybe read the error message before the fourth retry, just a thought.'
+  expect(cleanSay(sentences)).toBe('Three retries and a green build. I am choosing to believe that was all part of the plan.')
+  const cut = cleanSay('word, '.repeat(40))
+  expect(cut.length).toBeLessThanOrEqual(MAX_SAY)
+  expect(cut).toMatch(/word…$/)
+})
+
+test('a bubble stays up long enough to read, and never less than before', () => {
+  expect(bubbleTicks('Purr.')).toBe(BUBBLE_TICKS)
+  expect(bubbleTicks('x'.repeat(MAX_SAY))).toBe(Math.ceil(MAX_SAY / 5))
+  expect(bubbleTicks('x'.repeat(MAX_SAY))).toBeGreaterThan(BUBBLE_TICKS)
+})
+
 test('hatch JSON is validated, with a seeded fallback', () => {
   expect(parseSoul('```json\n{"name": "Pip", "personality": "Counts semicolons."}\n```')).toEqual({
     name: 'Pip',
@@ -77,6 +99,7 @@ test('a or an agrees with the word that follows', () => {
   const epic = { ...rollBones('voice-seed'), rarity: 'epic' as const, shiny: true }
   const soul = { name: 'Pip', personality: 'Counts semicolons.', hatchedAt: '2026-10-07T00:00:00.000Z' }
   expect(personaSystem(soul, epic)).toContain(`You are Pip, an epic shiny ${epic.species} who lives`)
+  expect(personaSystem(soul, epic)).toContain(`at most ${SAY_GOAL} characters`)
 })
 
 test('the reaction prompt carries the event summary and nothing else', () => {

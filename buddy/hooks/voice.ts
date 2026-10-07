@@ -8,8 +8,13 @@ export const QUIP_COOLDOWN_MS = 180_000
 export const REPLY_FLOOR_MS = 5_000
 export const LONG_TURN_MS = 120_000
 export const QUIP_CHANCE = 0.25
-export const MAX_SAY = 90
+// The length the model is asked for, and the most cleanup keeps: models overshoot a
+// length they are asked for, and the bubble pages whatever it cannot fit at once.
+export const SAY_GOAL = 90
+export const MAX_SAY = 160
 export const BUBBLE_TICKS = 24
+// Reading pace for a long bubble: 5 characters a tick, 10 a second.
+export const SAY_CHARS_PER_TICK = 5
 export const HEART_TICKS = 5
 
 export const PET_PROMPT = 'The developer just petted you. React in one line.'
@@ -62,7 +67,17 @@ export function cleanSay(raw: string): string {
     .replace(/^'+|'+$/g, '')
     .replace(/\s+/g, ' ')
     .trim()
-  return text.length > MAX_SAY ? text.slice(0, MAX_SAY - 1) + '…' : text
+  if (text.length <= MAX_SAY) return text
+  // Over the cap: end at the last whole sentence if that keeps at least half, else at the last whole word.
+  const room = text.slice(0, MAX_SAY + 1)
+  const sentence = Math.max(...['. ', '! ', '? '].map(end => room.lastIndexOf(end))) + 1
+  if (sentence > MAX_SAY / 2) return text.slice(0, sentence)
+  const word = text.lastIndexOf(' ', MAX_SAY - 1)
+  return (word > 0 ? text.slice(0, word).replace(/[,;:-]+$/, '') : text.slice(0, MAX_SAY - 1)) + '…'
+}
+
+export function bubbleTicks(text: string): number {
+  return Math.max(BUBBLE_TICKS, Math.ceil(text.length / SAY_CHARS_PER_TICK))
 }
 
 function statLine(b: Bones): string {
@@ -74,7 +89,7 @@ export function personaSystem(soul: Soul, b: Bones): string {
     `You are ${soul.name}, ${withArticle(b.rarity)}${b.shiny ? ' shiny' : ''} ${b.species} who lives in a developer's terminal, above their prompt.`,
     `Personality: ${soul.personality}`,
     `Stats: ${statLine(b)}.`,
-    `Reply with one line of at most ${MAX_SAY} characters, in character. No markdown, no emoji, no quotation marks.`,
+    `Reply with one line of at most ${SAY_GOAL} characters, in character. No markdown, no emoji, no quotation marks.`,
   ].join('\n')
 }
 
