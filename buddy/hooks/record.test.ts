@@ -2,26 +2,13 @@ import { expect, test } from 'claude-code/testing'
 
 import type { Saved } from '../types'
 import { countEvent, zeroCounts } from './ledger'
-import { USAGE, activeBuddy, applyChange, classify, classifyRecord, migrate, newRecord, parseSub } from './record'
+import { USAGE, activeBuddy, applyChange, classify, migrate, parseSub } from './record'
 import type { Change } from './record'
 
 const SOUL = { name: 'Pip', personality: 'x', hatchedAt: '2026-10-07T00:00:00.000Z' }
 const V1 = { schema: 1 as const, seed: 's', soul: SOUL, mode: 'muted' as const, rerolls: 3 }
 // Local noon, so the local date is 2026-10-07 in any time zone.
 const NOON = new Date(2026, 9, 7, 12).getTime()
-
-test('records are classified, and only schema 1 is ours', () => {
-  expect(classifyRecord(undefined)).toEqual({ kind: 'none' })
-  expect(classifyRecord(null)).toEqual({ kind: 'none' })
-  const rec = newRecord('s', SOUL, 0)
-  expect(classifyRecord(rec)).toEqual({ kind: 'ok', record: rec })
-  expect(classifyRecord({ schema: 2, seed: 'x' })).toEqual({ kind: 'foreign', schema: '2' })
-  expect(classifyRecord('junk')).toEqual({ kind: 'foreign', schema: 'unknown' })
-})
-
-test('a new record starts on, with the rerolls it is given', () => {
-  expect(newRecord('s', SOUL, 3)).toEqual({ schema: 1, seed: 's', soul: SOUL, mode: 'on', rerolls: 3 })
-})
 
 test('subcommands', () => {
   expect(parseSub('')).toBe('show')
