@@ -685,3 +685,21 @@ test('a reroll retires the old buddy and keeps it', async ($, on) => {
   expect(saved.buddies[1]?.retiredAt).toBeNull()
   expect(saved).toMatchObject({ active: saved.buddies[1]?.seed, rerolls: 1, mode: 'on' })
 })
+
+test('a record that turns damaged during a hatch is not written over, and nobody says hello', async ($, on) => {
+  const shared = sharedStore(on, undefined)
+  const clock = world(on, null)
+  const asked: string[] = []
+  on('model.complete', async (_$, e) => {
+    asked.push(e.prompt)
+    // Another session writes a bad record while the hatch waits for the model.
+    shared.row = { schema: 2, active: 'gone', buddies: [] }
+    return { value: ok('{"name": "Bix", "personality": "New here."}') }
+  })
+  await $.session.start(START)
+  expect(await runner($)('')).toBe("Saved buddy is damaged; this mod won't overwrite it.")
+  await clock.settle()
+  expect(asked).toHaveLength(1)
+  expect(shared.writes).toBe(0)
+  expect(shared.row).toEqual({ schema: 2, active: 'gone', buddies: [] })
+})

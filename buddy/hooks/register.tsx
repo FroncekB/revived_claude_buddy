@@ -110,11 +110,21 @@ async function current($: EngineInterface): Promise<Stored> {
   return stored
 }
 
+// The line a command answers with when the store holds a record this build must not touch.
+function refusal(stored: Stored): string | null {
+  if (stored.kind === 'foreign') return `Saved buddy uses schema ${stored.schema}; this mod knows 1 and 2.`
+  if (stored.kind === 'damaged') return "Saved buddy is damaged; this mod won't overwrite it."
+  return null
+}
+
 // The only writer of the store: read fresh, make one change, write (Foundation spec section 2).
-// A failed write leaves the result in state, marked unsaved, and returns the note saying so.
+// Returns null when it wrote, or had nothing to write. A record it must not touch comes back
+// as its refusal line, and a failed write, which leaves the result in state marked unsaved, as
+// SAVE_FAILED.
 async function commit($: EngineInterface, change: Change): Promise<string | null> {
   const base = await current($)
-  if (base.kind === 'damaged' || base.kind === 'foreign') return null
+  const refused = refusal(base)
+  if (refused) return refused
   const saved = applyChange(base.kind === 'ok' ? base.saved : null, change, await $.clock.now())
   if (!saved) return null
   await adopt($, saved)
@@ -215,6 +225,8 @@ async function hatch($: EngineInterface, kind: 'hatch' | 'reroll'): Promise<stri
     const hatchedAt = new Date(await $.clock.now()).toISOString()
     const born: Who = { seed, soul: { ...soul, hatchedAt } }
     const note = await commit($, { kind, ...born })
+    // Refused: nothing was written or adopted, so there is no buddy to say hello.
+    if (note !== null && note !== SAVE_FAILED) return note
     await update($, bubble, () => null)
     later($, () => reply($, born, HELLO_PROMPT))
     return note ?? `${soul.name}, ${withArticle(bones.rarity)}${bones.shiny ? ' shiny' : ''} ${bones.species}, hatched.`
@@ -227,9 +239,8 @@ async function hatch($: EngineInterface, kind: 'hatch' | 'reroll'): Promise<stri
 async function runBuddy($: EngineInterface, sub: Sub): Promise<string | undefined> {
   if (sub === 'usage') return USAGE
   const stored = await current($)
-  if (stored.kind === 'foreign') return `Saved buddy uses schema ${stored.schema}; this mod knows 1 and 2.`
-  if (stored.kind === 'damaged') return "Saved buddy is damaged; this mod won't overwrite it."
   if (stored.kind === 'none') return sub === 'show' ? hatch($, 'hatch') : NO_BUDDY
+  if (stored.kind !== 'ok') return refusal(stored) ?? undefined
   const saved = stored.saved
   // Another session may have changed the store since this one last looked.
   await adopt($, saved)
