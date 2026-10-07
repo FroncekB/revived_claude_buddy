@@ -3,6 +3,36 @@ import type { Counts, Soul, You } from '../types'
 import { RARITY, STATS } from './roll'
 import type { Bones } from './roll'
 import { totalCalls } from './ledger'
+import { PAINT } from './sprites'
+import type { Prop } from './sprites'
+
+// A stretch of one row in one color; no color is the text color.
+export type Run = { text: string; color?: string }
+// Columns between the sprite and a prop.
+export const PROP_GAP = 2
+
+// One art row cut into runs by its paint: a paint letter picks a color, and a space or a
+// column past the paint's end keeps the text color.
+export function paintRuns(art: string, paint = ''): Run[] {
+  const runs: Run[] = []
+  for (let i = 0; i < art.length; i++) {
+    const color = PAINT[paint.charAt(i)]
+    const last = runs[runs.length - 1]
+    if (last && last.color === color) last.text += art.charAt(i)
+    else runs.push(color ? { text: art.charAt(i), color } : { text: art.charAt(i) })
+  }
+  return runs
+}
+
+// The band's right-hand column, a row of runs per sprite row: the bubble when it has one, else
+// a holiday prop after a 2-column gap, else a space.
+export function rightRuns(bubble: readonly string[], prop: Prop | null): Run[][] {
+  const quiet = bubble.every(row => !row)
+  return bubble.map((row, i) => {
+    const art = quiet ? prop?.art[i] : undefined
+    return art ? [{ text: ' '.repeat(PROP_GAP) }, ...paintRuns(art, prop?.paint?.[i])] : [{ text: ' ' + row }]
+  })
+}
 
 export const MIN_FULL_ROWS = 6
 export const MIN_FULL_COLS = 44

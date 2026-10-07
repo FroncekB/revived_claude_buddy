@@ -3,7 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { Buddy, Counts, Saved, Soul } from '../types'
 import { cardAlt, cardSvg, meter } from './card'
-import { bandRows, cardLines, compactLine, isCompact, nameLine, spriteTint, streakLine } from './layout'
+import { bandRows, cardLines, compactLine, isCompact, nameLine, rightRuns, spriteTint, streakLine } from './layout'
 import { addCounts, countEvent, mergePending, zeroCounts } from './ledger'
 import type { CountEvent } from './ledger'
 import { STORE_KEY, USAGE, activeBuddy, applyChange, classify, parseSub } from './record'
@@ -526,6 +526,7 @@ export const register: Register = on => {
       }
 
       const rows = bandRows(view.sprite, view.say, e.props.bodyColumns, view.sayAt)
+      const right = rightRuns(rows.bubble, null)
       const nameRow = (
         <Box>
           <Text dimColor wrap="truncate-end">{view.label}</Text>
@@ -536,7 +537,7 @@ export const register: Register = on => {
       // The desktop's Text is proportional, so its art is monospace SVG text instead.
       if (e.surface === 'desktop') {
         const { Svg } = $.ui.resolve(e)
-        const art = bandSvg({ ...rows, color: view.spriteColor, bold: view.spriteBold })
+        const art = bandSvg({ sprite: rows.sprite, right, color: view.spriteColor, bold: view.spriteBold })
         return (
           <Box flexDirection="column">
             <Svg
@@ -557,7 +558,9 @@ export const register: Register = on => {
               <Text {...tint(view.spriteColor)} bold={view.spriteBold}>
                 {row}
               </Text>
-              <Text>{' ' + (rows.bubble[i] ?? '')}</Text>
+              {(right[i] ?? []).map(run => (
+                <Text {...tint(run.color)}>{run.text}</Text>
+              ))}
             </Box>
           ))}
           {nameRow}
