@@ -1,9 +1,11 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Buddy, Saved, Soul } from '../types'
+import type { Buddy, Counts, Saved, Soul } from '../types'
 import { cardAlt, cardSvg, meter } from './card'
-import { bandRows, cardLines, compactLine, isCompact, nameLine, spriteTint } from './layout'
+import { bandRows, cardLines, compactLine, isCompact, nameLine, spriteTint, streakLine } from './layout'
+import { addCounts, countEvent, mergePending, zeroCounts } from './ledger'
+import type { CountEvent } from './ledger'
 import { STORE_KEY, USAGE, activeBuddy, applyChange, classify, parseSub } from './record'
 import type { Change, Stored, Sub } from './record'
 import { RARITY, STATS, rollBones } from './roll'
@@ -26,7 +28,9 @@ import {
   parseSoul,
   personaSystem,
   reactionPrompt,
+  shouldGreet,
   shouldQuip,
+  streakGreeting,
   talkPrompt,
   withArticle,
 } from './voice'
@@ -42,6 +46,7 @@ const heartsUntil = atom({ plugin: 'buddy', key: 'heartsUntilTick' } as const, 0
 const tourStart = atom({ plugin: 'buddy', key: 'tourStartTick' } as const, null)
 const lastQuipAt = atom({ plugin: 'buddy', key: 'lastQuipAt' } as const, 0)
 const lastReplyAt = atom({ plugin: 'buddy', key: 'lastReplyAt' } as const, 0)
+const pending = atom({ plugin: 'buddy', key: 'pending' } as const, {})
 
 const CARD = 'card'
 const NO_BUDDY = 'No buddy yet. Run /buddy to hatch one.'
@@ -138,9 +143,56 @@ async function commit($: EngineInterface, change: Change): Promise<string | null
   }
 }
 
+// Adds one event to this session's unsaved counts for the active buddy. Nothing is counted
+// with no buddy, while the egg is out, or while the buddy is off.
+async function count($: EngineInterface, event: CountEvent) {
+  const saved = await read($, record)
+  if (!saved || saved.mode === 'off' || (await read($, hatching))) return
+  const seed = saved.active
+  await update($, pending, p => ({ ...p, [seed]: countEvent(p[seed] ?? zeroCounts(), event) }))
+}
+
+// Saves the unsaved counts with today's visit. A failed store write has already taken them
+// into this session's copy (commit adopts before it writes), so they go back into `pending`
+// only when the commit failed before that.
+async function flush($: EngineInterface) {
+  const saved = await read($, record)
+  if (!saved || saved.mode === 'off') return
+  const taken = await read($, pending)
+  await update($, pending, () => ({}))
+  try {
+    await commit($, { kind: 'flush', pending: taken })
+  } catch {
+    await update($, pending, p => mergePending(taken, p))
+  }
+}
+
+async function countAndFlush($: EngineInterface, event: CountEvent) {
+  await count($, event)
+  await flush($)
+}
+
+// A buddy's lifetime counts with this session's unsaved ones added, for the card.
+async function countsOf($: EngineInterface, buddy: Buddy): Promise<Counts> {
+  const waiting = (await read($, pending))[buddy.seed]
+  return waiting ? addCounts(buddy.counts, waiting) : buddy.counts
+}
+
 async function showBubble($: EngineInterface, text: string) {
   const now = await read($, tick)
   await update($, bubble, () => ({ text, untilTick: now + BUBBLE_TICKS }))
+}
+
+// The session's visit (spec section 3), greeting the streak on the first session of a new day.
+async function visitToday($: EngineInterface) {
+  const saved = await read($, record)
+  if (!saved || saved.mode === 'off') return
+  const dayBefore = saved.you.lastDay
+  await commit($, { kind: 'visit' })
+  const after = await read($, record)
+  if (after && shouldGreet({ mode: after.mode, dayBefore, you: after.you })) {
+    await showBubble($, streakGreeting(after.you.streak))
+  }
 }
 
 // One model call at a time: a reply cancels a pending reaction; a reaction
@@ -259,13 +311,15 @@ async function runBuddy($: EngineInterface, sub: Sub): Promise<string | undefine
       if (saved.mode === 'off') return hidden
       const now = await read($, tick)
       await update($, heartsUntil, () => now + HEART_TICKS)
+      later($, () => countAndFlush($, { kind: 'pet' }))
       later($, () => reply($, buddy, PET_PROMPT))
       return undefined
     }
     case 'card': {
       const opened = await $.ui.open({ id: CARD, title: 'Buddy', closeOnEscape: true })
       // A surface that places no panes gets the card as text instead.
-      return opened.isPlaced ? undefined : cardLines(buddy.soul, bones, saved.rerolls).join('\n')
+      if (opened.isPlaced) return undefined
+      return [...cardLines(buddy.soul, bones, saved.rerolls), streakLine(saved.you, await countsOf($, buddy))].join('\n')
     }
     case 'mute':
       return (await commit($, { kind: 'mode', mode: 'muted' })) ?? `${name} will stay quiet unless spoken to.`
@@ -355,7 +409,10 @@ export const register: Register = on => {
       const stored = await current($)
       const saved = stored.kind === 'ok' ? stored.saved : null
       await update($, record, () => saved)
-      if (saved && saved.mode !== 'off') startTimer($)
+      if (saved && saved.mode !== 'off') {
+        startTimer($)
+        later($, () => visitToday($))
+      }
     } catch {
       // The buddy never holds up a session.
     }
@@ -373,10 +430,13 @@ export const register: Register = on => {
   on('tool.call', async ($, e, next) => {
     const ran = await next(e)
     try {
-      // Main conversation only: a subagent's calls never reach the buddy's reactions.
+      // Main conversation only: a subagent's calls never reach the buddy's reactions or counts.
       if (e.agentId === undefined) {
         tally[e.tool] = (tally[e.tool] ?? 0) + 1
-        if (ran.deny === undefined && ran.isError === true) failedTools.push(e.tool)
+        const failed = ran.deny === undefined && ran.isError === true
+        if (failed) failedTools.push(e.tool)
+        // A denied call never ran, so it isn't counted.
+        if (ran.deny === undefined) later($, () => count($, { kind: 'call', tool: e.tool, failed }))
       }
     } catch {
       // Counting never changes a tool call.
@@ -391,6 +451,8 @@ export const register: Register = on => {
         const summary: TurnSummary = { reason: e.reason, durationMs: e.durationMs, tools: tally, failed: failedTools }
         tally = {}
         failedTools = []
+        const turn: CountEvent = { kind: 'turn', reason: e.reason, durationMs: e.durationMs }
+        later($, () => countAndFlush($, turn))
         later($, () => react($, summary))
       }
     } catch {
@@ -408,6 +470,7 @@ export const register: Register = on => {
       const bare = !e.attachments || e.attachments.length === 0
       const message = buddy && fromPerson && bare ? matchAddress(buddy.soul.name, e.text) : null
       if (buddy && message !== null) {
+        later($, () => countAndFlush($, { kind: 'talk' }))
         later($, () => reply($, buddy, talkPrompt(message)))
         return { drop: `(to ${buddy.soul.name})` }
       }
@@ -482,9 +545,15 @@ export const register: Register = on => {
 
       const buddy = activeBuddy(saved)
       const bones = rollBones(buddy.seed)
+      const history = { you: saved.you, counts: await countsOf($, buddy) }
       if (e.surface !== 'terminal') {
         const { Svg } = $.ui.resolve(e)
-        return <Svg source={cardSvg(buddy.soul, bones, saved.rerolls)} alt={cardAlt(buddy.soul, bones, saved.rerolls)} />
+        return (
+          <Svg
+            source={cardSvg(buddy.soul, bones, saved.rerolls, history)}
+            alt={cardAlt(buddy.soul, bones, saved.rerolls, history)}
+          />
+        )
       }
 
       const view = await buddyLook($, saved, await read($, tick), false)
@@ -522,6 +591,7 @@ export const register: Register = on => {
           ))}
           <Text> </Text>
           {footer}
+          <Text dimColor>{streakLine(history.you, history.counts)}</Text>
         </Box>
       )
     } catch {

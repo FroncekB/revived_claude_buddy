@@ -64,6 +64,8 @@ declare module 'claude-code' {
       tourStartTick: number | null
       lastQuipAt: number
       lastReplyAt: number
+      // Counts not yet saved, by buddy seed (Foundation spec section 2).
+      pending: Record<string, Counts>
     }
   }
 }
