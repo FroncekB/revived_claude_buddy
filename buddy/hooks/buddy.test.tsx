@@ -30,13 +30,29 @@ const band = (maxRows = 10, bodyColumns = 80) => ({
   },
 })
 
+const pane = (bodyColumns = 60) => ({
+  component: 'Pane' as const,
+  requestId: 'card',
+  props: {
+    title: 'Buddy',
+    isFocused: false,
+    bodyColumns,
+    placement: 'dock' as const,
+    scroll: { offset: 0, bodyRows: 30 },
+    view: {},
+  },
+})
+
 // The world beneath the plugin: a clock, a store, the command registry, session
-// start, and a stand-in for the engine's own band so a pass-through is visible.
+// start, a pane placer, and a stand-in for the engine's own band so a pass-through is visible.
 // A null store leaves $.store to the test, which answers store.get and store.set itself.
-function world(on: On, store: Record<string, unknown> | null = {}) {
+function world(on: On, store: Record<string, unknown> | null = {}, placesPanes = true) {
   const clock = mock.clock(on, { now: 1_000_000 })
   if (store) mock.store(on, store)
   on('command.register', async (_$, e) => ({ value: { command: e.name } }))
+  on('ui.open', async () => ({
+    value: placesPanes ? { isPlaced: true as const } : { isPlaced: false as const, reason: 'no surface places panes' },
+  }))
   on('session.start', async (_$, e) => ({ cwd: e.cwd }))
   on('ui.render', { component: 'AbovePrompt' }, async ($, e) => {
     const { Text } = $.ui.resolve(e)
@@ -60,12 +76,23 @@ function model(on: On, soul: string | null, say: string | null): string[] {
 const runner = ($: Engine) => async (args: string) =>
   (await $.command.run({ command: 'buddy', args, ...RUN })).text
 
+// What the card pane shows on the terminal once /buddy card opened it, which prints nothing.
+async function cardText($: Engine): Promise<string> {
+  expect(await runner($)('card')).toBeUndefined()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...pane() })
+  const text = (await ui.findAll({ type: 'Text' })).map(t => t.text).join('\n')
+  await ui.unmount()
+  return text
+}
+
 test("before hatching, the band is the engine's own", async ($, on) => {
   world(on)
   await $.session.start(START)
   const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
   expect(await ui.find({ text: 'engine band' })).toBeDefined()
   expect(await runner($)('pet')).toBe('No buddy yet. Run /buddy to hatch one.')
+  const card = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...pane() })
+  expect(await card.find({ text: 'No buddy yet. Run /buddy to hatch one.' })).toBeDefined()
 })
 
 test('hatching names the buddy and draws it on terminal and desktop', async ($, on) => {
@@ -129,8 +156,32 @@ test('petting shows hearts then a reply; a second pet inside 5 s gets a canned l
   expect(await ui.find({ text: /♥/ })).toBeUndefined()
 })
 
-test('card shows name, stats and rerolls', async ($, on) => {
+test('card opens a pane with the name, personality and rerolls, and prints nothing', async ($, on) => {
   world(on, { buddy: RECORD })
+  await $.session.start(START)
+  const card = await cardText($)
+  expect(card).toMatch(/^Pip\b/m)
+  expect(card).toMatch(/Counts semicolons\./)
+  expect(card).toMatch(/Rerolls: 0/)
+})
+
+test('the card pane is one drawn card on desktop and meters on the terminal', async ($, on) => {
+  world(on, { buddy: RECORD })
+  await $.session.start(START)
+  expect(await runner($)('card')).toBeUndefined()
+  const desktop = await $.ui.mount({ plugin: 'buddy', surface: 'desktop', ...pane() })
+  const cards = await desktop.findAll({ type: 'Svg' })
+  expect(cards).toHaveLength(1)
+  expect(cards[0]?.props.alt).toMatch(/^Pip, .*"Counts semicolons\." .*Stats: DEBUGGING \d+/)
+  expect(await desktop.findAll({ type: 'Text' })).toHaveLength(0)
+  const terminal = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...pane() })
+  expect(await terminal.find({ type: 'Svg' })).toBeUndefined()
+  expect(await terminal.find({ text: /DEBUGGING/ })).toBeDefined()
+  expect(await terminal.find({ text: /█/ })).toBeDefined()
+})
+
+test('where no pane can be placed, card prints the text card', async ($, on) => {
+  world(on, { buddy: RECORD }, false)
   await $.session.start(START)
   const card = (await runner($)('card')) ?? ''
   expect(card).toMatch(/^Pip, /)
@@ -144,10 +195,10 @@ test('reroll asks first, then replaces the buddy and counts the reroll', async (
   await $.session.start(START)
   const run = runner($)
   expect(await run('reroll')).toMatch(/^This replaces Pip, .* for good\. Run \/buddy reroll confirm\.$/)
-  expect(await run('card')).toMatch(/Rerolls: 0/)
+  expect(await cardText($)).toMatch(/Rerolls: 0/)
   expect(await run('reroll confirm')).toMatch(/^Bix, an? /)
-  const card = (await run('card')) ?? ''
-  expect(card).toMatch(/^Bix, /)
+  const card = await cardText($)
+  expect(card).toMatch(/^Bix\b/m)
   expect(card).toMatch(/Rerolls: 1/)
 })
 
@@ -187,7 +238,7 @@ test('a failed store write keeps the buddy alive for the session', async ($, on)
   const run = runner($)
   expect(await run('')).toBe('Could not save your buddy; it lives for this session only.')
   await clock.settle()
-  expect(await run('card')).toMatch(/^Pip, /)
+  expect(await cardText($)).toMatch(/^Pip\b/m)
   expect(await run('pet')).toBeUndefined()
 })
 
@@ -214,7 +265,7 @@ test("another session's reroll is not overwritten", async ($, on) => {
   await $.session.start(START)
   shared.row = { ...RECORD, seed: 'other-seed', soul: { ...RECORD.soul, name: 'Bix' } }
   const run = runner($)
-  expect(await run('card')).toMatch(/^Bix, /)
+  expect(await cardText($)).toMatch(/^Bix\b/m)
   const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
   expect(await ui.find({ text: /Bix/ })).toBeDefined()
   await run('mute')
@@ -231,7 +282,7 @@ test('a reload after a failed write keeps the session-only buddy', async ($, on)
   expect(await run('')).toBe('Could not save your buddy; it lives for this session only.')
   await clock.settle()
   await $.session.start(START)
-  expect(await run('card')).toMatch(/^Pip, /)
+  expect(await cardText($)).toMatch(/^Pip\b/m)
 })
 
 test('a refused command registration still loads the buddy', async ($, on) => {

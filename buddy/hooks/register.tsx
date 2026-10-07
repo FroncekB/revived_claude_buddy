@@ -2,10 +2,11 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BuddyRecord } from '../types'
+import { cardAlt, cardSvg, meter } from './card'
 import { bandRows, cardLines, compactLine, isCompact, nameLine } from './layout'
 import { STORE_KEY, USAGE, classifyRecord, newRecord, parseSub } from './record'
 import type { Sub } from './record'
-import { RARITY, rollBones } from './roll'
+import { RARITY, STATS, rollBones } from './roll'
 import type { Bones } from './roll'
 import { eggRows, faceFor, frameAt, spriteRows, topRow } from './sprites'
 import type { Frame } from './sprites'
@@ -38,6 +39,9 @@ const bubble = atom({ plugin: 'buddy', key: 'bubble' } as const, null)
 const heartsUntil = atom({ plugin: 'buddy', key: 'heartsUntilTick' } as const, 0)
 const lastQuipAt = atom({ plugin: 'buddy', key: 'lastQuipAt' } as const, 0)
 const lastReplyAt = atom({ plugin: 'buddy', key: 'lastReplyAt' } as const, 0)
+
+const CARD = 'card'
+const NO_BUDDY = 'No buddy yet. Run /buddy to hatch one.'
 
 type Look = {
   sprite: string[]
@@ -206,7 +210,7 @@ async function runBuddy($: EngineInterface, sub: Sub): Promise<string | undefine
     if (!mine || mine.seed !== rec.seed || mine.mode !== rec.mode) await adopt($, rec)
   }
   if (!rec) {
-    return sub === 'show' ? hatch($, 0) : 'No buddy yet. Run /buddy to hatch one.'
+    return sub === 'show' ? hatch($, 0) : NO_BUDDY
   }
   const bones = rollBones(rec.seed)
   const who = `${rec.soul.name}, ${bones.rarity} ${bones.species}`
@@ -225,8 +229,11 @@ async function runBuddy($: EngineInterface, sub: Sub): Promise<string | undefine
       later($, () => reply($, rec, PET_PROMPT))
       return undefined
     }
-    case 'card':
-      return cardLines(rec.soul, bones, rec.rerolls).join('\n')
+    case 'card': {
+      const opened = await $.ui.open({ id: CARD, title: 'Buddy', closeOnEscape: true })
+      // A surface that places no panes gets the card as text instead.
+      return opened.isPlaced ? undefined : cardLines(rec.soul, bones, rec.rerolls).join('\n')
+    }
     case 'mute':
       return (await save($, { ...rec, mode: 'muted' })) ?? `${rec.soul.name} will stay quiet unless spoken to.`
     case 'unmute':
@@ -401,6 +408,60 @@ export const register: Register = on => {
             </Box>
           ))}
           {nameRow}
+        </Box>
+      )
+    } catch {
+      return next(e)
+    }
+  })
+
+  on('ui.render', { component: 'Pane', requestId: CARD }, async ($, e, next) => {
+    try {
+      const { Box, Text } = $.ui.resolve(e)
+      const rec = await read($, record)
+      if (!rec) return <Text dimColor>{NO_BUDDY}</Text>
+
+      const bones = rollBones(rec.seed)
+      if (e.surface !== 'terminal') {
+        const { Svg } = $.ui.resolve(e)
+        return <Svg source={cardSvg(rec.soul, bones, rec.rerolls)} alt={cardAlt(rec.soul, bones, rec.rerolls)} />
+      }
+
+      const view = await buddyLook($, rec, await read($, tick))
+      const header = (
+        <Box flexDirection="column">
+          <Box>
+            <Text bold>{rec.soul.name}</Text>
+            <Text {...tint(view.starColor)}>{'  ' + view.stars}</Text>
+          </Box>
+          <Text dimColor>
+            {`${bones.rarity} ${bones.species}${bones.shiny ? ' (shiny)' : ''}   Hat: ${bones.hat}   Eyes: ${bones.eye}`}
+          </Text>
+          <Text>{rec.soul.personality}</Text>
+        </Box>
+      )
+      const footer = <Text dimColor>{`Hatched ${rec.soul.hatchedAt.slice(0, 10)}   Rerolls: ${rec.rerolls}`}</Text>
+      const cells = Math.max(8, Math.min(30, e.props.bodyColumns - 18))
+      return (
+        <Box flexDirection="column">
+          {view.sprite.map(row => (
+            <Text {...tint(view.spriteColor)} bold={view.spriteColor !== undefined}>
+              {row}
+            </Text>
+          ))}
+          {header}
+          <Text> </Text>
+          {STATS.map(s => (
+            <Box>
+              <Text dimColor={s === bones.low}>{s.padEnd(10) + ' '}</Text>
+              <Text {...tint(view.starColor)}>{meter(bones.stats[s], cells)}</Text>
+              <Text bold={s === bones.peak} dimColor={s === bones.low}>
+                {' ' + String(bones.stats[s]).padStart(3) + (s === bones.peak ? ' ★' : '')}
+              </Text>
+            </Box>
+          ))}
+          <Text> </Text>
+          {footer}
         </Box>
       )
     } catch {

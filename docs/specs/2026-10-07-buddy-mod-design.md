@@ -115,7 +115,7 @@ Module variables (lost on reload, which is acceptable): the current turn's tool 
 |-|-|-|
 | `/buddy` | No record: hatch. Otherwise set mode `on` and say hello in the bubble | One line naming the buddy |
 | `/buddy pet` | Hearts for 5 ticks, then a reply in the bubble | None |
-| `/buddy card` | Nothing changes | Name, species, rarity stars, shiny, hat, personality, five stat bars; at most 12 lines |
+| `/buddy card` | Opens the `card` pane (Escape closes it). Desktop, VS Code and mobile draw one SVG trading card in the rarity color: name and stars, rarity and species, a still portrait, the personality as a quote, chips for hat, eyes and shiny, a pentagon stat chart, hatch date and rerolls. The terminal draws the same facts as text with solid stat meters | None. Where no surface places panes, the text card instead: at most 12 lines |
 | `/buddy mute` / `unmute` | Mode `muted` / `on` | One line |
 | `/buddy off` | Mode `off`; animation timer stops | One line |
 | `/buddy reroll` | Nothing changes | `This replaces <name>, <rarity> <species>, for good. Run /buddy reroll confirm.` |
@@ -228,7 +228,7 @@ The buddy never blocks a prompt, a tool call or a turn.
 | Talk and pet | Person-initiated, at most 1 per 5 s | Same |
 | Hatch and reroll | Once per buddy | Same |
 
-`/buddy card` output may be recorded where Claude reads it, which is why it's capped at 12 lines.
+The `/buddy card` pane never reaches the transcript. Its text fallback may be recorded where Claude reads it, which is why that is capped at 12 lines.
 
 ## 11. Testing
 
@@ -261,6 +261,7 @@ All tests run with `claude plugin test <mod folder>`.
 - `Pip, hi` resolves `{ drop: '(to Pip)' }`, the bubble shows the reply, and no turn starts
 - `tool.call` returns `next`'s result unchanged, even when the tally code throws
 - the first `/buddy reroll` changes nothing; `confirm` changes the seed and adds to `rerolls`
+- `/buddy card` prints nothing and opens a pane: one `Svg` card on desktop, meters on the terminal; where no pane is placed it prints the text card
 - mode `off` passes the band through
 - a `schema: 2` record is never overwritten
 
