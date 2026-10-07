@@ -33,6 +33,8 @@ To install from a local copy of this repo instead, run `claude plugin marketplac
 | `/buddy reroll`, then `/buddy reroll confirm` | Retire it and hatch a new one; the old one is kept |
 | `<name>, how's it going?` | Talk to it. That prompt goes to the buddy, not to Claude |
 
+It has moods. A run of failed tools makes it anxious, long clean turns make it smug, and days away make it sulk until you pet it or talk to it. It flinches when a tool fails, celebrates a long clean turn, and dozes off when left alone, sooner after midnight. On US federal holidays, Easter, April Fools' Day, Halloween week and its own hatch day, it dresses for the occasion. Its stats change how it acts: CHAOS makes it chattier, PATIENCE makes it wait longer between comments, DEBUGGING makes it speak up the moment a tool fails, and SNARK sharpens its canned lines.
+
 ## What it does with your session
 
 A mod runs inside Claude Code with your permissions, so here is exactly what this one touches. To see its hooks and calls for yourself, run `claude plugin validate ./buddy`.
@@ -40,10 +42,12 @@ A mod runs inside Claude Code with your permissions, so here is exactly what thi
 - **Model calls.** It calls Haiku on your account for three things:
   - once when it hatches
   - when you pet it or talk to it
-  - for a comment after a turn, at most one every 3 minutes
+  - for a comment after a turn, at most one every 3 minutes (longer for a patient buddy)
+
+  Moods, reactions, holidays and the line it says when a tool fails need no model call.
 - **What a turn comment sees.** Only the turn's outcome, how long it took, and which tools ran or failed. It never sees your prompt, Claude's answer, file contents or command arguments.
 - **Prompts addressed to it.** A prompt that starts with the buddy's name and a comma or colon (`Pip, hi`) is dropped before it reaches Claude, and the buddy answers it. Prompts that carry an attachment always go to Claude.
-- **What it saves.** One record in the mod's own store. For each buddy you've had: its seed, name, personality, hatch date, the time it was retired, and lifetime counts of turns, failed turns, longest turn, tool calls by kind, failed calls, pets and talks. Then the mode (on, muted or off), the reroll count, and your streak: the last day you visited, your current and best streak, and the days you've visited. Never prompt text, answers, file contents or command arguments.
+- **What it saves.** One record in the mod's own store. For each buddy you've had: its seed, name, personality, hatch date, the time it was retired, lifetime counts of turns, failed turns, longest turn, tool calls by kind, failed calls, pets and talks, and its mood (two small numbers and when they last moved). Then the mode (on, muted or off), the reroll count, and your streak: the last day you visited, your current and best streak, and the days you've visited. Never prompt text, answers, file contents or command arguments.
 - **Upgrading.** The record is now schema 2, and the first save after the update converts an older one. A session still open on 0.1.x doesn't know schema 2 and answers `Saved buddy uses schema 2; this mod knows 1.` until you reload it with `/reload-plugins`.
 
 ## Develop
@@ -56,4 +60,4 @@ claude plugin test ./buddy
 
 ## Design
 
-[`docs/specs/2026-10-07-buddy-mod-design.md`](docs/specs/2026-10-07-buddy-mod-design.md) is the design spec, and [`docs/specs/2026-10-07-buddy-mod-plan.md`](docs/specs/2026-10-07-buddy-mod-plan.md) is the test-driven plan the mod was built from. The saved record, counts and streak come from [`docs/specs/2026-10-07-buddy-foundation-design.md`](docs/specs/2026-10-07-buddy-foundation-design.md) and its plan, [`docs/specs/2026-10-07-buddy-foundation-plan.md`](docs/specs/2026-10-07-buddy-foundation-plan.md). These are point-in-time records: each spec's status line lists what changed during its build.
+[`docs/specs/2026-10-07-buddy-mod-design.md`](docs/specs/2026-10-07-buddy-mod-design.md) is the design spec, and [`docs/specs/2026-10-07-buddy-mod-plan.md`](docs/specs/2026-10-07-buddy-mod-plan.md) is the test-driven plan the mod was built from. The saved record, counts and streak come from [`docs/specs/2026-10-07-buddy-foundation-design.md`](docs/specs/2026-10-07-buddy-foundation-design.md) and its plan, [`docs/specs/2026-10-07-buddy-foundation-plan.md`](docs/specs/2026-10-07-buddy-foundation-plan.md). Moods, stats that change behavior, reactions and the calendar come from [`docs/specs/2026-10-07-buddy-alive-design.md`](docs/specs/2026-10-07-buddy-alive-design.md) and its plan, [`docs/specs/2026-10-07-buddy-alive-plan.md`](docs/specs/2026-10-07-buddy-alive-plan.md). These are point-in-time records: each spec's status line lists what changed during its build.
