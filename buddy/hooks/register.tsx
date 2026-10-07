@@ -1,15 +1,16 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Buddy, Counts, Saved, Soul } from '../types'
+import type { Buddy, Counts, MoodEvent, Saved } from '../types'
 import { dayInfo } from './calendar'
 import { cardAlt, cardSvg, meter } from './card'
 import { bandRows, cardLines, compactLine, isCompact, nameLine, rightRuns, spriteTint, streakLine } from './layout'
 import { addCounts, countEvent, mergePending, zeroCounts } from './ledger'
 import type { CountEvent } from './ledger'
-import { draw, portrait } from './look'
+import { CELEBRATE_TICKS, FLINCH_TICKS, draw, portrait } from './look'
 import type { Scene } from './look'
-import { applyMood, moodOf } from './mood'
+import { applyMood, mergeMood, moodLine, moodOf, queueMood, turnMood } from './mood'
+import type { MoodName } from './mood'
 import { STORE_KEY, USAGE, activeBuddy, applyChange, classify, parseSub } from './record'
 import type { Change, Stored, Sub } from './record'
 import { RARITY, STATS, rollBones } from './roll'
@@ -26,12 +27,14 @@ import {
   bubbleTicks,
   cannedLine,
   cleanSay,
+  failLine,
   fallbackSoul,
   hatchRequest,
   matchAddress,
   parseSoul,
   personaSystem,
   reactionPrompt,
+  shouldFlag,
   shouldGreet,
   shouldQuip,
   streakGreeting,
@@ -75,8 +78,8 @@ type Look = {
   prop: Prop | null
 }
 
-// The part of a buddy that speaks: its seed, for the bones, and its soul.
-type Who = Pick<Buddy, 'seed' | 'soul'>
+// The part of a buddy that speaks: its seed, for the bones, its soul, and its saved mood.
+type Who = Pick<Buddy, 'seed' | 'soul' | 'mood'>
 
 const tint = (color: string | undefined) => (color ? { color } : {})
 
@@ -89,6 +92,10 @@ let cannedCount = 0
 // The current main turn's tool tally; reset when that turn completes.
 let tally: Record<string, number> = {}
 let failedTools: string[] = []
+// Main turns completed in this module's life, and the last one the DEBUGGING line spoke in: a
+// failed call's line can run after its turn has ended, so it carries its turn's number.
+let turnNo = 0
+let flaggedTurn = -1
 // The last commit this session started. The next one waits for it to settle.
 let lastCommit: Promise<unknown> = Promise.resolve()
 
@@ -183,28 +190,89 @@ async function count($: EngineInterface, event: CountEvent) {
   await update($, pending, p => ({ ...p, [seed]: countEvent(p[seed] ?? zeroCounts(), event) }))
 }
 
-// Saves the unsaved counts with today's visit. A failed store write has already taken them
-// into this session's copy (commit adopts before it writes), so they go back into `pending`
-// only when the commit failed before that.
+// Queues mood events for the active buddy and strikes a pose, under the rules for counting
+// (Alive spec sections 2 and 4). A celebration never cuts a flinch short.
+async function feel($: EngineInterface, events: readonly MoodEvent[], kind: 'flinch' | 'celebrate' | null) {
+  const saved = await read($, record)
+  if (!saved || saved.mode === 'off' || (await read($, hatching))) return
+  const seed = saved.active
+  if (events.length > 0) await update($, pendingMood, p => ({ ...p, [seed]: queueMood(p[seed], events) }))
+  if (kind === null) return
+  const now = await read($, tick)
+  const untilTick = now + (kind === 'flinch' ? FLINCH_TICKS : CELEBRATE_TICKS)
+  await update($, posing, p =>
+    kind === 'celebrate' && p?.kind === 'flinch' && now < p.untilTick ? p : { kind, untilTick },
+  )
+}
+
+// Saves the unsaved counts and mood events with today's visit. A failed store write has already
+// taken them into this session's copy (commit adopts before it writes), so they go back only
+// when the commit failed before that.
 async function flush($: EngineInterface) {
   const saved = await read($, record)
   if (!saved || saved.mode === 'off') return
-  // Taken and cleared in one update, so a count landing in between is never erased.
+  // Each taken and cleared in one update, so an event landing in between is never erased.
   let taken: Record<string, Counts> = {}
+  let felt: Record<string, MoodEvent[]> = {}
   await update($, pending, p => {
     taken = p
     return {}
   })
+  await update($, pendingMood, p => {
+    felt = p
+    return {}
+  })
   try {
-    await commit($, { kind: 'flush', pending: taken })
+    await commit($, { kind: 'flush', pending: taken, mood: felt })
   } catch {
     await update($, pending, p => mergePending(taken, p))
+    await update($, pendingMood, p => mergeMood(felt, p))
   }
 }
 
-async function countAndFlush($: EngineInterface, event: CountEvent) {
+async function countAndFlush(
+  $: EngineInterface,
+  event: CountEvent,
+  events: readonly MoodEvent[] = [],
+  kind: 'flinch' | 'celebrate' | null = null,
+) {
   await count($, event)
+  await feel($, events, kind)
   await flush($)
+}
+
+// A failed main-conversation tool call in turn `turn`, said out loud at once when DEBUGGING
+// says so: a canned line, no model call (Alive spec section 3).
+async function speakUp($: EngineInterface, turn: number) {
+  const saved = await read($, record)
+  if (!saved || (await read($, hatching))) return
+  const bones = rollBones(saved.active)
+  const t = await read($, tick)
+  const said = await read($, bubble)
+  const say = shouldFlag({
+    mode: saved.mode,
+    bubbleUp: said !== null && t < said.untilTick,
+    flagged: flaggedTurn === turn,
+    roll: Math.random(),
+    stats: bones.stats,
+  })
+  if (!say) return
+  flaggedTurn = turn
+  await showBubble($, failLine(bones, cannedCount++, Math.random()))
+}
+
+// The mood a buddy shows now: its saved mood with this session's unsaved events, decayed to now.
+async function moodNow($: EngineInterface, who: Who, now: number): Promise<MoodName> {
+  const queued = (await read($, pendingMood))[who.seed] ?? []
+  return moodOf(applyMood(who.mood, queued, now), now)
+}
+
+// The moment, for the persona prompt: the mood with this session's unsaved events, and the day.
+async function momentLines($: EngineInterface, who: Who): Promise<string[]> {
+  const now = await $.clock.now()
+  const mood = moodLine(await moodNow($, who, now))
+  const holiday = dayInfo(now, who.soul.hatchedAt).holiday
+  return [mood, holiday?.line ?? null].filter((line): line is string => line !== null)
 }
 
 // A buddy's lifetime counts with this session's unsaved ones added, for the card.
@@ -240,7 +308,7 @@ async function visitToday($: EngineInterface) {
 // never starts while anything is pending.
 async function ask(
   $: EngineInterface,
-  soul: Soul,
+  who: Who,
   bones: Bones,
   prompt: string,
   kind: 'react' | 'reply',
@@ -250,8 +318,9 @@ async function ask(
   const mine = { controller: new AbortController(), kind }
   inFlight = mine
   try {
+    const system = personaSystem(who.soul, bones, await momentLines($, who))
     const result = await $.model.complete(
-      { model: 'haiku', system: personaSystem(soul, bones), prompt, maxTokens: 80, timeoutMs: 8000 },
+      { model: 'haiku', system, prompt, maxTokens: 80, timeoutMs: 8000 },
       { signal: mine.controller.signal },
     )
     if (mine.controller.signal.aborted || !result.isAnswered) return null
@@ -269,7 +338,7 @@ async function reply($: EngineInterface, who: Who, prompt: string) {
   const now = await $.clock.now()
   const last = await read($, lastReplyAt)
   await update($, lastReplyAt, () => now)
-  const text = now - last < REPLY_FLOOR_MS ? null : await ask($, who.soul, bones, prompt, 'reply')
+  const text = now - last < REPLY_FLOOR_MS ? null : await ask($, who, bones, prompt, 'reply')
   await showBubble($, text ?? cannedLine(bones, cannedCount++, Math.random()))
 }
 
@@ -291,7 +360,7 @@ async function react($: EngineInterface, summary: TurnSummary) {
   })
   if (!speak) return
   await update($, lastQuipAt, () => now)
-  const text = await ask($, buddy.soul, bones, reactionPrompt(summary), 'react')
+  const text = await ask($, buddy, bones, reactionPrompt(summary), 'react')
   if (text) await showBubble($, text)
 }
 
@@ -354,7 +423,7 @@ async function runBuddy($: EngineInterface, sub: Sub): Promise<string | undefine
       if (saved.mode === 'off') return hidden
       const now = await read($, tick)
       await update($, heartsUntil, () => now + HEART_TICKS)
-      later($, () => countAndFlush($, { kind: 'pet' }))
+      later($, () => countAndFlush($, { kind: 'pet' }, ['soothe']))
       later($, () => reply($, buddy, PET_PROMPT))
       return undefined
     }
@@ -414,12 +483,11 @@ async function liveScene(
 ): Promise<Scene> {
   const now = await $.clock.now()
   const day = dayInfo(now, buddy.soul.hatchedAt)
-  const queued = (await read($, pendingMood))[buddy.seed] ?? []
   const posed = await read($, posing)
   return {
     bones,
     tick: t,
-    mood: moodOf(applyMood(buddy.mood, queued, now), now),
+    mood: await moodNow($, buddy, now),
     pose: posed && t < posed.untilTick ? posed.kind : null,
     idleTicks: t - (await read($, lastActive)),
     night: day.night,
@@ -524,6 +592,11 @@ export const register: Register = on => {
         if (failed) failedTools.push(e.tool)
         // A denied call never ran, so it isn't counted.
         if (ran.deny === undefined) later($, () => count($, { kind: 'call', tool: e.tool, failed }))
+        if (failed) {
+          const turn = turnNo
+          later($, () => feel($, ['fail'], 'flinch'))
+          later($, () => speakUp($, turn))
+        }
       }
     } catch {
       // Counting never changes a tool call.
@@ -539,8 +612,11 @@ export const register: Register = on => {
         const summary: TurnSummary = { reason: e.reason, durationMs: e.durationMs, tools: tally, failed: failedTools }
         tally = {}
         failedTools = []
+        turnNo++
         const turn: CountEvent = { kind: 'turn', reason: e.reason, durationMs: e.durationMs }
-        later($, () => countAndFlush($, turn))
+        const felt = turnMood(e.reason, e.durationMs, summary.failed.length)
+        const kind = e.reason === 'error' ? 'flinch' : felt === 'longClean' ? 'celebrate' : null
+        later($, () => countAndFlush($, turn, felt ? [felt] : [], kind))
         later($, () => react($, summary))
       }
     } catch {
@@ -559,7 +635,7 @@ export const register: Register = on => {
       const bare = !e.attachments || e.attachments.length === 0
       const message = buddy && fromPerson && bare ? matchAddress(buddy.soul.name, e.text) : null
       if (buddy && message !== null) {
-        later($, () => countAndFlush($, { kind: 'talk' }))
+        later($, () => countAndFlush($, { kind: 'talk' }, ['soothe']))
         later($, () => reply($, buddy, talkPrompt(message)))
         return { drop: `(to ${buddy.soul.name})` }
       }

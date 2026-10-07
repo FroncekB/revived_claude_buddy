@@ -6,7 +6,7 @@ import type { Saved } from '../types'
 import { SHIMMER } from './layout'
 import { zeroCounts } from './ledger'
 import { TOUR_TICKS } from './tour'
-import { FALLBACK_NAMES } from './voice'
+import { FAIL_PLAIN, FAIL_SNARKY, FALLBACK_NAMES } from './voice'
 
 const ZERO = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
 const ok = (text: string): ModelCompleteResult => ({ isAnswered: true, text, usage: ZERO })
@@ -1037,4 +1037,155 @@ test('the tour dresses the real buddy for each holiday, then shows each mood', a
   await clock.advance(8 * 8 * 500)
   expect(await ui.find({ type: 'Text', text: /tour: anxious/ })).toBeDefined()
   expect((await drawnSprite(ui)).join('\n')).toContain('/ ;  ; \\')
+})
+
+// The bubble's words on a terminal band, '' when there is none.
+const bubbleOf = async (ui: Drawn) =>
+  (await ui.findAll({ type: 'Text' }))
+    .map(t => t.text ?? '')
+    .filter(text => /^ [<|] /.test(text))
+    .map(text => text.slice(3, -2).trim())
+    .filter(Boolean)
+    .join(' ')
+
+test('a failed tool call makes the buddy flinch for 2 seconds', async ($, on) => {
+  const clock = world(on, { buddy: RECORD })
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  await clock.settle()
+  // The ghost's flinch frame, wide-eyed.
+  expect((await drawnSprite(ui)).join('\n')).toContain(' / O  O  \\')
+  await clock.advance(2_000)
+  expect((await drawnSprite(ui)).join('\n')).not.toContain('O  O')
+})
+
+test('two failed turns make the buddy anxious, and the turn-end save keeps the mood', async ($, on) => {
+  const shared = sharedStore(on, RECORD)
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  await $.turn.complete({ ...TURN, reason: 'error' })
+  await clock.settle()
+  // A record from before this build had no mood; the first save with events gives it one.
+  expect(activeOf(shared.row)?.mood).toEqual({ meter: -1, sulk: 0, at: new Date(NOON).toISOString() })
+  await $.turn.complete({ ...TURN, turnId: 't2', reason: 'error' })
+  await clock.settle()
+  expect(activeOf(shared.row)?.mood?.meter).toBe(-2)
+  // Past the flinch, the ghost's eyes are anxious.
+  await clock.advance(2_000)
+  expect((await drawnSprite(ui)).join('\n')).toContain('/ ;  ; \\')
+})
+
+test('a long clean turn makes the buddy celebrate under confetti', async ($, on) => {
+  const clock = world(on, { buddy: RECORD })
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  await $.turn.complete({ ...TURN, durationMs: 130_000 })
+  await clock.settle()
+  const rows = await drawnSprite(ui)
+  expect([' *  .  *  . ', ' .  *  .  * ']).toContain(rows[0])
+  expect(rows.join('\n')).toContain('\\ / ^  ^ \\ /')
+  await clock.advance(3_000)
+  expect((await drawnSprite(ui))[0]?.trim()).toBe('')
+})
+
+test("another session's mood survives this session's save", async ($, on) => {
+  const shared = sharedStore(on, RECORD)
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  // Mid-turn, another session saves a run of failures of its own.
+  const theirs = JSON.parse(JSON.stringify(shared.row)) as Saved
+  theirs.buddies[0]!.mood = { meter: -3, sulk: 0, at: new Date(NOON).toISOString() }
+  shared.row = theirs
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(activeOf(shared.row)?.mood?.meter).toBe(-4)
+})
+
+test('back after days away, the buddy sulks until it is petted', async ($, on) => {
+  // 2026-10-04 to 2026-10-07 misses two days: sulk 1.
+  const shared = sharedStore(on, { ...SAVED, you: { ...SAVED.you, lastDay: '2026-10-04' } })
+  const clock = world(on, null)
+  model(on, null, 'Hmph.')
+  await $.session.start(START)
+  await clock.settle()
+  expect(activeOf(shared.row)?.mood?.sulk).toBe(1)
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect((await drawnSprite(ui)).join('\n')).toContain('/ =  = \\')
+  await runner($)('pet')
+  await clock.settle()
+  expect(activeOf(shared.row)?.mood?.sulk).toBe(0)
+  expect((await drawnSprite(ui)).join('\n')).toContain('/ ✦  ✦ \\')
+})
+
+// 'debug-142' rolls an epic mushroom with DEBUGGING 100.
+const KEEN = { ...RECORD, seed: 'debug-142' }
+
+test('a buddy with DEBUGGING 100 speaks up once a turn when a tool fails, never when muted, and calls no model', async ($, on) => {
+  const clock = world(on, { buddy: KEEN })
+  engineBelow(on)
+  const prompts = model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  const lines = [...FAIL_PLAIN, ...FAIL_SNARKY]
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  await clock.settle()
+  expect(lines).toContain(await bubbleOf(ui))
+  // Once that bubble is gone, a second failure in the same turn stays quiet.
+  await clock.advance(13_000)
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  await clock.settle()
+  expect(await bubbleOf(ui)).toBe('')
+  // A new turn may speak again.
+  await $.turn.complete(TURN)
+  await clock.settle()
+  await clock.advance(13_000)
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  await clock.settle()
+  expect(lines).toContain(await bubbleOf(ui))
+  // Muted, it says nothing.
+  await runner($)('mute')
+  await $.turn.complete({ ...TURN, turnId: 't3' })
+  await clock.settle()
+  await clock.advance(13_000)
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  await clock.settle()
+  expect(await bubbleOf(ui)).toBe('')
+  // The only model calls were turn-end reactions.
+  expect(prompts.filter(p => !p.startsWith('Claude just finished a turn'))).toEqual([])
+})
+
+test("the persona hears the buddy's mood and the day", async ($, on) => {
+  const clock = world(on, { buddy: RECORD }, true, JULY4_NOON)
+  engineBelow(on)
+  const systems: string[] = []
+  on('model.complete', async (_$, e) => {
+    systems.push(e.system ?? '')
+    return { value: ok('Boom.') }
+  })
+  await $.session.start(START)
+  await clock.settle()
+  await $.turn.complete({ ...TURN, reason: 'error' })
+  await $.turn.complete({ ...TURN, turnId: 't2', reason: 'error' })
+  await clock.settle()
+  await runner($)('pet')
+  await clock.settle()
+  const pet = systems.at(-1) ?? ''
+  expect(pet).toContain('Mood: anxious, after a run of failures. Let it color the line.')
+  expect(pet).toContain('Today is Independence Day.')
 })
