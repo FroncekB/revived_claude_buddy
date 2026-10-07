@@ -8,11 +8,13 @@
 - `ledger.ts` (new): counts, tool groups and the visit streak.
 - `record.ts`: the schema 2 record, the migration from 1, and `applyChange`.
 
-`register.tsx` stays wiring only. It gains `current`, `commit`, `count` and `flush`. Counts wait in `$.state` under `pending` and are saved when a main turn ends, after a pet and after a talk. The card gains a streak line, and the first session of a new day greets the streak.
+`register.tsx` stays wiring only. It gains `current`, `commit`, `count` and `flush`. Counts wait in `$.state` under `pending` and are saved when a main turn ends, after a pet and after a talk. All three forms of the card get a streak line: the terminal pane, the SVG card (`card.ts`) and the text fallback. The first session of a new day greets the streak.
 
 **Tech Stack:** Claude Code mods API (function hooks, TypeScript/TSX, the `claude-code` and `claude-code/testing` modules), the desktop app's bundled Claude Code (2.1.289 when this was written) for `claude plugin test` and `claude plugin validate`, and TypeScript 5.6 via `npx` for the type-check.
 
 **Spec:** [`2026-10-07-buddy-foundation-design.md`](2026-10-07-buddy-foundation-design.md), which builds on the base spec [`2026-10-07-buddy-mod-design.md`](2026-10-07-buddy-mod-design.md).
+
+**Starting point:** this branch with `main` merged in at `4025786`: the card pane, the `/buddy debug` tour, rarity-colored sprites and the desktop SVG band. 100 tests pass.
 
 ## Global Constraints
 
@@ -22,14 +24,16 @@
   CC="$(ls "$(cygpath -u "$APPDATA")"/Claude/claude-code/*/*/claude.exe | sort -V | tail -1)"
   ```
   `$CC` is the desktop app's bundled Claude Code. The `claude` on PATH (2.1.263) has no `plugin test` command. Never use it for this mod.
+- **Edits are find-and-replace.** Each "replace" below quotes the exact current text. If a quoted block isn't found, the file has moved on since this plan was written. Stop and re-read the file; don't force the edit.
 - **Line endings:** LF. Write files with the editor tools, not a Python `write_text` on Windows, which writes CRLF.
 - **`$` stays in `register.tsx`.** The validator follows `$` only into functions declared in the same file. Pure files never take `$`.
 - **State refs are literals:** `atom({ plugin: 'buddy', key: '<literal>' } as const, initial)`. The contract file exports a type before its `declare module` block, or the validator doesn't see the declarations.
-- **Tests find elements by text, never by `key`.**
+- **Tests find elements by text or type, never by `key`.**
 - **No Node or DOM.** `crypto.randomUUID`, `Math.random`, `Date`, `AbortController` and `JSON` are available. Clone in tests with `JSON.parse(JSON.stringify(x))`.
 - **`noUncheckedIndexedAccess` is on.** An indexed read is `T | undefined`, so use `!` only where the index is provably in range.
 - **Every hook catches its own errors** and lets the event continue (`next(e)`, or returns `next`'s result unchanged).
 - **Haiku calls:** model `haiku`, `timeoutMs: 8000`, `maxTokens: 80` for speech and 200 for hatch. Foundation adds no model calls.
+- **The debug tour stays as it is.** It writes nothing, and the card pane always shows the real buddy.
 - **Exact text** (from the spec):
 
   | Where | Text |
@@ -38,7 +42,7 @@
   | Damaged record | `Saved buddy is damaged; this mod won't overwrite it.` |
   | Reroll warning | `This retires <name>, <rarity> <species>. Run /buddy reroll confirm.` |
   | Failed write | `Could not save your buddy; it lives for this session only.` |
-  | Card line | `Streak 12 days (best 30) · 340 turns · 2,104 tool calls`, singular at 1 |
+  | Streak line | `Streak 12 days (best 30) · 340 turns · 2,104 tool calls`, singular at 1 |
   | Greeting pool, by `streak % 4` | `Day {n} together.` / `{n} days in a row. Not that I'm counting.` / `Back again. That's {n} days.` / `{n}-day streak. Don't make it weird.` |
 
 - **Tool groups:**
@@ -58,7 +62,7 @@
 
 ### Deliberate deviations from the spec
 
-1. The card's streak line comes from a new `streakLine(you, counts)` that `register.tsx` appends after `cardLines`'s output, instead of being built inside `cardLines`. `cardLines` and its callers stay unchanged.
+1. The text fallback's streak line comes from a new `streakLine(you, counts)` that `register.tsx` appends after `cardLines`'s output, so `cardLines` doesn't change. `cardSvg` and `cardAlt` take the streak as an optional last argument, `history`, so their existing tests stand unchanged.
 2. The `session.start` visit (and its greeting) runs on a `$.clock.after(0)` timer through the existing `later` helper, so a store write never holds up a session start. Counting a tool call also goes through `later`, so a tool result never waits on a state write.
 3. `hatch` and `reroll` share one `Change` variant (`kind: 'hatch' | 'reroll'`), since they carry the same fields.
 
@@ -86,20 +90,12 @@
 
 - [ ] **Step 1: Add the ledger's types to the contract**
 
-Replace `buddy/types/index.d.ts` with:
+In `buddy/types/index.d.ts`, replace
 ```ts
-export type Mode = 'on' | 'muted' | 'off'
-
-export type Soul = { name: string; personality: string; hatchedAt: string }
-
-export type BuddyRecord = {
-  schema: 1
-  seed: string
-  soul: Soul
-  mode: Mode
-  rerolls: number
-}
-
+export type Bubble = { text: string; untilTick: number }
+```
+with:
+```ts
 export type ToolGroup = 'shell' | 'edit' | 'read' | 'web' | 'agent' | 'mcp' | 'other'
 
 // One buddy's lifetime counts. Main-conversation events only.
@@ -122,21 +118,6 @@ export type You = {
 }
 
 export type Bubble = { text: string; untilTick: number }
-
-declare module 'claude-code' {
-  interface PluginState {
-    buddy: {
-      record: BuddyRecord | null
-      unsaved: boolean
-      hatching: boolean
-      tick: number
-      bubble: Bubble | null
-      heartsUntilTick: number
-      lastQuipAt: number
-      lastReplyAt: number
-    }
-  }
-}
 ```
 
 - [ ] **Step 2: Write the failing tests**
@@ -224,7 +205,7 @@ test('the visit rule', () => {
 CC="$(ls "$(cygpath -u "$APPDATA")"/Claude/claude-code/*/*/claude.exe | sort -V | tail -1)"
 "$CC" plugin test ./buddy
 ```
-Expected: `ledger.test.ts` fails to load because `./ledger` doesn't exist. The other 64 tests pass.
+Expected: `ledger.test.ts` fails to load because `./ledger` doesn't exist. The other 100 tests pass.
 
 - [ ] **Step 4: Write the ledger**
 
@@ -354,7 +335,7 @@ export function visit(you: You, today: string): You {
 CC="$(ls "$(cygpath -u "$APPDATA")"/Claude/claude-code/*/*/claude.exe | sort -V | tail -1)"
 "$CC" plugin test ./buddy && "$CC" plugin validate ./buddy
 ```
-Expected: 70 pass, 0 fail. Validation passes.
+Expected: 106 pass, 0 fail. Validation passes.
 
 - [ ] **Step 6: Commit**
 
@@ -390,30 +371,22 @@ EOF
 
 - [ ] **Step 1: Add the record's types to the contract**
 
-In `buddy/types/index.d.ts`, replace the `BuddyRecord` block:
+In `buddy/types/index.d.ts`, replace
 ```ts
-export type BuddyRecord = {
-  schema: 1
-  seed: string
-  soul: Soul
-  mode: Mode
-  rerolls: number
-}
+export type ToolGroup = 'shell' | 'edit' | 'read' | 'web' | 'agent' | 'mcp' | 'other'
 ```
 with:
 ```ts
-export type BuddyRecord = {
-  schema: 1
-  seed: string
-  soul: Soul
-  mode: Mode
-  rerolls: number
-}
-
 // The schema 1 record (base spec section 3), read only to migrate it.
 export type SavedV1 = BuddyRecord
+
+export type ToolGroup = 'shell' | 'edit' | 'read' | 'web' | 'agent' | 'mcp' | 'other'
 ```
-Then, after the `You` type, add:
+and replace
+```ts
+export type Bubble = { text: string; untilTick: number }
+```
+with:
 ```ts
 export type Buddy = {
   seed: string
@@ -431,28 +404,35 @@ export type Saved = {
   buddies: Buddy[]
   you: You
 }
+
+export type Bubble = { text: string; untilTick: number }
 ```
 
 - [ ] **Step 2: Write the failing tests**
 
-In `buddy/hooks/record.test.ts`, replace the import line
+In `buddy/hooks/record.test.ts`, replace
 ```ts
-import { classifyRecord, newRecord, parseSub } from './record'
+import { USAGE, classifyRecord, newRecord, parseSub } from './record'
 ```
 with:
 ```ts
 import type { Saved } from '../types'
 import { countEvent, zeroCounts } from './ledger'
-import { activeBuddy, applyChange, classify, classifyRecord, migrate, newRecord, parseSub } from './record'
+import { USAGE, activeBuddy, applyChange, classify, classifyRecord, migrate, newRecord, parseSub } from './record'
 import type { Change } from './record'
 ```
-After the `SOUL` line, add:
+replace
 ```ts
+const SOUL = { name: 'Pip', personality: 'x', hatchedAt: '2026-10-07T00:00:00.000Z' }
+```
+with:
+```ts
+const SOUL = { name: 'Pip', personality: 'x', hatchedAt: '2026-10-07T00:00:00.000Z' }
 const V1 = { schema: 1 as const, seed: 's', soul: SOUL, mode: 'muted' as const, rerolls: 3 }
 // Local noon, so the local date is 2026-10-07 in any time zone.
 const NOON = new Date(2026, 9, 7, 12).getTime()
 ```
-At the end of the file, add:
+and add at the end of the file:
 ```ts
 test('schemas 1 and 2 are ours; a schema 2 record without its active buddy is damaged', () => {
   expect(classify(undefined)).toEqual({ kind: 'none' })
@@ -554,31 +534,21 @@ Expected: `record.test.ts` fails to load, since `activeBuddy`, `applyChange`, `c
 
 - [ ] **Step 4: Write the schema 2 record**
 
-Replace `buddy/hooks/record.ts` with:
+In `buddy/hooks/record.ts`, replace
 ```ts
-// The saved record and the /buddy subcommands. Pure: no $.
+import type { BuddyRecord, Soul } from '../types'
+```
+with:
+```ts
 import type { Buddy, BuddyRecord, Counts, Mode, Saved, SavedV1, Soul } from '../types'
 import { addCounts, localDay, visit, zeroCounts } from './ledger'
-
-export const STORE_KEY = 'buddy'
-export const USAGE = 'Usage: /buddy [pet | card | mute | unmute | off | reroll [confirm]]'
-
-export type Loaded =
-  | { kind: 'none' }
-  | { kind: 'ok'; record: BuddyRecord }
-  | { kind: 'foreign'; schema: string }
-
-export function classifyRecord(raw: unknown): Loaded {
-  if (raw === undefined || raw === null) return { kind: 'none' }
-  const schema = typeof raw === 'object' ? (raw as { schema?: unknown }).schema : undefined
-  if (schema === 1) return { kind: 'ok', record: raw as BuddyRecord }
-  return { kind: 'foreign', schema: schema === undefined ? 'unknown' : String(schema) }
-}
-
-export function newRecord(seed: string, soul: Soul, rerolls: number): BuddyRecord {
-  return { schema: 1, seed, soul, mode: 'on', rerolls }
-}
-
+```
+Then replace
+```ts
+export type Sub =
+```
+with the new code, followed by the line it replaced:
+```ts
 // What the store holds, as this build reads it (Foundation spec section 1).
 export type Stored =
   | { kind: 'none' }
@@ -670,20 +640,7 @@ export function applyChange(saved: Saved | null, change: Change, now: number): S
   }
 }
 
-export type Sub = 'show' | 'pet' | 'card' | 'mute' | 'unmute' | 'off' | 'reroll' | 'reroll-confirm' | 'usage'
-
-const SIMPLE: readonly string[] = ['pet', 'card', 'mute', 'unmute', 'off']
-
-export function parseSub(args: string): Sub {
-  const words = args.trim().toLowerCase().split(/\s+/).filter(Boolean)
-  const [first, second] = words
-  if (first === undefined) return 'show'
-  if (first === 'reroll') {
-    if (words.length === 1) return 'reroll'
-    return words.length === 2 && second === 'confirm' ? 'reroll-confirm' : 'usage'
-  }
-  return words.length === 1 && SIMPLE.includes(first) ? (first as Sub) : 'usage'
-}
+export type Sub =
 ```
 
 - [ ] **Step 5: Run the tests to see them pass**
@@ -692,7 +649,7 @@ export function parseSub(args: string): Sub {
 CC="$(ls "$(cygpath -u "$APPDATA")"/Claude/claude-code/*/*/claude.exe | sort -V | tail -1)"
 "$CC" plugin test ./buddy && "$CC" plugin validate ./buddy
 ```
-Expected: 78 pass, 0 fail. Validation passes.
+Expected: 114 pass, 0 fail. Validation passes.
 
 - [ ] **Step 6: Commit**
 
@@ -707,34 +664,39 @@ EOF
 
 ---
 
-### Task 3: The card's streak line and the greeting
+### Task 3: The streak on the card, and the greeting
 
 **Files:**
 - Modify: `buddy/hooks/layout.ts`
+- Modify: `buddy/hooks/card.ts`
 - Modify: `buddy/hooks/voice.ts`
 - Test: `buddy/hooks/layout.test.ts`
+- Test: `buddy/hooks/card.test.ts`
 - Test: `buddy/hooks/voice.test.ts`
 
 **Interfaces:**
 - Consumes from Task 1: `totalCalls`, `zeroCounts`, and the types `Counts` and `You`.
 - Produces:
-  - from `layout.ts`: `streakLine(you: You, counts: Counts): string`
+  - from `layout.ts`: `streakText(you: You): string`, `countsText(counts: Counts): string`, `streakLine(you: You, counts: Counts): string`
+  - from `card.ts`: `type CardHistory = { you: You; counts: Counts }`, plus an optional last argument `history?: CardHistory` on `cardSvg` and on `cardAlt`
   - from `voice.ts`: `streakGreeting(streak: number): string`, `shouldGreet(o: { mode: Mode; dayBefore: string | null; you: You }): boolean`
 
 - [ ] **Step 1: Write the failing tests**
 
 In `buddy/hooks/layout.test.ts`, replace
 ```ts
-import { bandRows, bubbleRows, cardLines, compactLine, isCompact, nameLine, wrap } from './layout'
+import { SHIMMER, bandRows, bubbleRows, cardLines, compactLine, isCompact, nameLine, spriteTint, wrap } from './layout'
 ```
 with:
 ```ts
-import { bandRows, bubbleRows, cardLines, compactLine, isCompact, nameLine, streakLine, wrap } from './layout'
+import {
+  SHIMMER, bandRows, bubbleRows, cardLines, compactLine, isCompact, nameLine, spriteTint, streakLine, wrap,
+} from './layout'
 import { zeroCounts } from './ledger'
 ```
 and add at the end of the file:
 ```ts
-test('the streak line counts with commas, agrees in number, and keeps the card short', () => {
+test('the streak line counts with commas, agrees in number, and keeps the text card short', () => {
   const many = { ...zeroCounts(), turns: 340, calls: { ...zeroCounts().calls, shell: 2_000, read: 104 } }
   const twelve = { lastDay: '2026-10-07', streak: 12, bestStreak: 30, days: 40 }
   expect(streakLine(twelve, many)).toBe('Streak 12 days (best 30) · 340 turns · 2,104 tool calls')
@@ -748,7 +710,36 @@ test('the streak line counts with commas, agrees in number, and keeps the card s
 })
 ```
 
-In `buddy/hooks/voice.test.ts`, replace the import line
+In `buddy/hooks/card.test.ts`, replace
+```ts
+import { cardAlt, cardSvg, meter, radarPoint, statAlt } from './card'
+```
+with:
+```ts
+import { cardAlt, cardSvg, meter, radarPoint, statAlt } from './card'
+import { zeroCounts } from './ledger'
+```
+and add at the end of the file:
+```ts
+test('given the history, the card adds a streak row 20 px lower and the alt text ends with it', () => {
+  const history = {
+    you: { lastDay: '2026-10-07', streak: 12, bestStreak: 30, days: 40 },
+    counts: { ...zeroCounts(), turns: 340, calls: { ...zeroCounts().calls, shell: 2_104 } },
+  }
+  const svg = cardSvg(SOUL, BONES, 0, history)
+  expect(svg).toContain('>Streak 12 days (best 30)</text>')
+  expect(svg).toContain('>340 turns · 2,104 tool calls</text>')
+  const plain = cardSvg(SOUL, BONES, 0)
+  expect(plain).not.toContain('Streak')
+  const height = (s: string) => Number(/height="(\d+)"/.exec(s)?.[1])
+  expect(height(svg)).toBe(height(plain) + 20)
+  expect(cardAlt(SOUL, BONES, 0, history)).toBe(
+    `${cardAlt(SOUL, BONES, 0)} Streak 12 days (best 30) · 340 turns · 2,104 tool calls.`,
+  )
+})
+```
+
+In `buddy/hooks/voice.test.ts`, replace
 ```ts
   matchAddress, parseSoul, personaSystem, reactionPrompt, shouldQuip, withArticle,
 ```
@@ -777,7 +768,10 @@ test('the streak greeting comes from a pool of four and greets only a new day of
 CC="$(ls "$(cygpath -u "$APPDATA")"/Claude/claude-code/*/*/claude.exe | sort -V | tail -1)"
 "$CC" plugin test ./buddy
 ```
-Expected: `layout.test.ts` and `voice.test.ts` fail because `streakLine`, `streakGreeting` and `shouldGreet` aren't exported.
+Expected: three tests fail:
+- the streak-line test in `layout.test.ts`: `streakLine` isn't exported yet
+- the history test in `card.test.ts`: there's no streak row yet
+- the greeting test in `voice.test.ts`: `streakGreeting` and `shouldGreet` aren't exported yet
 
 - [ ] **Step 3: Write the streak line**
 
@@ -795,17 +789,92 @@ and add at the end of the file:
 const withCommas = (n: number) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 const howMany = (n: number, noun: string) => `${withCommas(n)} ${noun}${n === 1 ? '' : 's'}`
 
-// The card's last line: the person's streak, then the active buddy's lifetime counts.
+// The person's streak: the first half of the card's streak line.
+export function streakText(you: You): string {
+  return `Streak ${howMany(you.streak, 'day')} (best ${withCommas(you.bestStreak)})`
+}
+
+// The active buddy's lifetime counts: the second half.
+export function countsText(counts: Counts): string {
+  return `${howMany(counts.turns, 'turn')} · ${howMany(totalCalls(counts), 'tool call')}`
+}
+
 export function streakLine(you: You, counts: Counts): string {
-  return [
-    `Streak ${howMany(you.streak, 'day')} (best ${withCommas(you.bestStreak)})`,
-    howMany(counts.turns, 'turn'),
-    howMany(totalCalls(counts), 'tool call'),
-  ].join(' · ')
+  return `${streakText(you)} · ${countsText(counts)}`
 }
 ```
 
-- [ ] **Step 4: Write the greeting**
+- [ ] **Step 4: Put the streak on the SVG card**
+
+In `buddy/hooks/card.ts`, replace
+```ts
+import type { Soul } from '../types'
+import { wrap } from './layout'
+```
+with:
+```ts
+import type { Counts, Soul, You } from '../types'
+import { countsText, streakLine, streakText, wrap } from './layout'
+```
+Replace
+```ts
+// The radar, in its own box.
+```
+with:
+```ts
+// The person's streak and the buddy's counts, for the card's last row.
+export type CardHistory = { you: You; counts: Counts }
+
+// The radar, in its own box.
+```
+Replace
+```ts
+export function cardSvg(soul: Soul, bones: Bones, rerolls: number): string {
+```
+with:
+```ts
+export function cardSvg(soul: Soul, bones: Bones, rerolls: number, history?: CardHistory): string {
+```
+Replace
+```ts
+  const h = foot + 38
+```
+with:
+```ts
+  if (history) {
+    marks.push(
+      `<text x="${PAD}" y="${foot + 42}" font-size="12" fill="${INK}">${esc(streakText(history.you))}</text>`,
+      `<text x="${W - PAD}" y="${foot + 42}" text-anchor="end" font-size="12" fill="${INK}">${esc(countsText(history.counts))}</text>`,
+    )
+  }
+
+  const h = foot + (history ? 58 : 38)
+```
+Replace
+```ts
+export function cardAlt(soul: Soul, bones: Bones, rerolls: number): string {
+  const stars = RARITY[bones.rarity].stars
+  return (
+    `${soul.name}, ${bones.rarity} ${bones.species}, ${stars} star${stars === 1 ? '' : 's'}. ` +
+    `"${soul.personality}" ${chips(bones).join(', ')}. ${statAlt(bones)}. ` +
+    `Hatched ${hatchDay(soul.hatchedAt)}. Rerolls ${rerolls}.`
+  )
+}
+```
+with:
+```ts
+export function cardAlt(soul: Soul, bones: Bones, rerolls: number, history?: CardHistory): string {
+  const stars = RARITY[bones.rarity].stars
+  return (
+    `${soul.name}, ${bones.rarity} ${bones.species}, ${stars} star${stars === 1 ? '' : 's'}. ` +
+    `"${soul.personality}" ${chips(bones).join(', ')}. ${statAlt(bones)}. ` +
+    `Hatched ${hatchDay(soul.hatchedAt)}. Rerolls ${rerolls}.` +
+    (history ? ` ${streakLine(history.you, history.counts)}.` : '')
+  )
+}
+```
+
+- [ ] **Step 5: Write the greeting**
 
 In `buddy/hooks/voice.ts`, replace
 ```ts
@@ -834,20 +903,20 @@ export function shouldGreet(o: { mode: Mode; dayBefore: string | null; you: You 
 }
 ```
 
-- [ ] **Step 5: Run the tests to see them pass**
+- [ ] **Step 6: Run the tests to see them pass**
 
 ```bash
 CC="$(ls "$(cygpath -u "$APPDATA")"/Claude/claude-code/*/*/claude.exe | sort -V | tail -1)"
 "$CC" plugin test ./buddy && "$CC" plugin validate ./buddy
 ```
-Expected: 80 pass, 0 fail. Validation passes.
+Expected: 117 pass, 0 fail. Validation passes.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add buddy/hooks/layout.ts buddy/hooks/layout.test.ts buddy/hooks/voice.ts buddy/hooks/voice.test.ts
+git add buddy/hooks/layout.ts buddy/hooks/layout.test.ts buddy/hooks/card.ts buddy/hooks/card.test.ts buddy/hooks/voice.ts buddy/hooks/voice.test.ts
 git commit -F - <<'EOF'
-feat: the card's streak line and the streak greeting
+feat: the streak line, its row on the SVG card, and the streak greeting
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 EOF
@@ -857,13 +926,13 @@ EOF
 
 ### Task 4: Every save through `commit`
 
-The session runs on the schema 2 record. `commit` replaces `save`. A reroll retires the old buddy instead of replacing it. Nothing is counted yet: that's Task 5.
+The session runs on the schema 2 record, and `commit` replaces `save`. A reroll retires the old buddy instead of replacing it. Nothing is counted yet: that's Task 5.
 
 **Files:**
 - Modify: `buddy/types/index.d.ts`
 - Modify: `buddy/hooks/record.ts` (delete the schema 1 helpers)
 - Modify: `buddy/hooks/record.test.ts`
-- Replace: `buddy/hooks/register.tsx`
+- Modify: `buddy/hooks/register.tsx`
 - Modify: `buddy/hooks/buddy.test.tsx`
 - Modify: `README.md`
 
@@ -876,6 +945,7 @@ The session runs on the schema 2 record. `commit` replaces `save`. A reroll reti
   - `type Who = Pick<Buddy, 'seed' | 'soul'>` and `reply($, who: Who, prompt)`
   - `hatch($, kind: 'hatch' | 'reroll')`
   - `SAVE_FAILED`
+  - in the `card` pane hook, the active buddy as `buddy`
 
   In `buddy.test.tsx` (Task 5 extends it): `sharedStore(on, row): { row: unknown; writes: number; refuse: boolean }`.
 
@@ -883,12 +953,21 @@ The session runs on the schema 2 record. `commit` replaces `save`. A reroll reti
 
 In `buddy/hooks/buddy.test.tsx`:
 
-After the `claude-code/testing` import lines, add:
+Replace
+```ts
+import { SHIMMER } from './layout'
+```
+with:
 ```ts
 import type { Saved } from '../types'
+import { SHIMMER } from './layout'
 ```
 
-After the `runner` definition, add:
+Replace
+```ts
+// What the card pane shows on the terminal once /buddy card opened it, which prints nothing.
+```
+with:
 ```ts
 // A store this test can look into and turn off: one row under `buddy`, as another
 // session sharing it would see it.
@@ -903,6 +982,8 @@ function sharedStore(on: On, row: unknown) {
   })
   return shared
 }
+
+// What the card pane shows on the terminal once /buddy card opened it, which prints nothing.
 ```
 
 In the test `'reroll asks first, then replaces the buddy and counts the reroll'`, replace
@@ -914,7 +995,20 @@ with:
   expect(await run('reroll')).toMatch(/^This retires Pip, \w+ \w+\. Run \/buddy reroll confirm\.$/)
 ```
 
-Replace the whole test `'a record from a newer schema is never touched'` with:
+Replace the whole test
+```ts
+test('a record from a newer schema is never touched', async ($, on) => {
+  world(on, { buddy: { schema: 2, seed: 'future' } })
+  await $.session.start(START)
+  const run = runner($)
+  for (const args of ['', 'pet', 'reroll confirm']) {
+    expect(await run(args)).toBe('Saved buddy uses schema 2; this mod knows 1.')
+  }
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await ui.find({ text: 'engine band' })).toBeDefined()
+})
+```
+with:
 ```ts
 const UNTOUCHABLE = [
   ['a record from a newer schema is never touched', { schema: 3, seed: 'future' }, 'Saved buddy uses schema 3; this mod knows 1 and 2.'],
@@ -929,7 +1023,7 @@ for (const [name, row, line] of UNTOUCHABLE) {
     model(on, null, null)
     await $.session.start(START)
     const run = runner($)
-    for (const args of ['', 'pet', 'card', 'reroll confirm']) {
+    for (const args of ['', 'pet', 'card', 'reroll confirm', 'debug']) {
       expect(await run(args)).toBe(line)
     }
     await $.tool.call({ tool: 'Bash', command: 'false' })
@@ -996,12 +1090,18 @@ Expected: these six fail on the old build:
 
 - [ ] **Step 3: Point the contract at the schema 2 record**
 
-Replace `buddy/types/index.d.ts` with:
+In `buddy/types/index.d.ts`, replace
 ```ts
-export type Mode = 'on' | 'muted' | 'off'
-
-export type Soul = { name: string; personality: string; hatchedAt: string }
-
+export type BuddyRecord = {
+  schema: 1
+  seed: string
+  soul: Soul
+  mode: Mode
+  rerolls: number
+}
+```
+with:
+```ts
 // The schema 1 record (base spec section 3), read only to migrate it.
 export type SavedV1 = {
   schema: 1
@@ -1010,67 +1110,26 @@ export type SavedV1 = {
   mode: Mode
   rerolls: number
 }
+```
+delete the alias Task 2 added:
+```ts
+// The schema 1 record (base spec section 3), read only to migrate it.
+export type SavedV1 = BuddyRecord
 
-export type ToolGroup = 'shell' | 'edit' | 'read' | 'web' | 'agent' | 'mcp' | 'other'
-
-// One buddy's lifetime counts. Main-conversation events only.
-export type Counts = {
-  turns: number
-  failedTurns: number
-  longestTurnMs: number
-  calls: Record<ToolGroup, number>
-  failedCalls: number
-  pets: number
-  talks: number
-}
-
-// The person's own data: it carries across rerolls.
-export type You = {
-  lastDay: string | null
-  streak: number
-  bestStreak: number
-  days: number
-}
-
-export type Buddy = {
-  seed: string
-  soul: Soul
-  retiredAt: string | null
-  counts: Counts
-}
-
-// The `$.store` key `buddy` (Foundation spec section 1).
-export type Saved = {
-  schema: 2
-  mode: Mode
-  rerolls: number
-  active: string
-  buddies: Buddy[]
-  you: You
-}
-
-export type Bubble = { text: string; untilTick: number }
-
-declare module 'claude-code' {
-  interface PluginState {
-    buddy: {
+```
+and replace
+```ts
+      record: BuddyRecord | null
+```
+with:
+```ts
       record: Saved | null
-      unsaved: boolean
-      hatching: boolean
-      tick: number
-      bubble: Bubble | null
-      heartsUntilTick: number
-      lastQuipAt: number
-      lastReplyAt: number
-    }
-  }
-}
 ```
 
 - [ ] **Step 4: Delete the schema 1 helpers**
 
 In `buddy/hooks/record.ts`:
-- Replace the import line
+- Replace
   ```ts
   import type { Buddy, BuddyRecord, Counts, Mode, Saved, SavedV1, Soul } from '../types'
   ```
@@ -1078,7 +1137,7 @@ In `buddy/hooks/record.ts`:
   ```ts
   import type { Buddy, Counts, Mode, Saved, SavedV1, Soul } from '../types'
   ```
-- Delete these three declarations, from `export type Loaded =` through the closing `}` of `newRecord`:
+- Delete this block, from `export type Loaded =` through the closing `}` of `newRecord`, together with the blank line after it:
   ```ts
   export type Loaded =
     | { kind: 'none' }
@@ -1100,105 +1159,81 @@ In `buddy/hooks/record.ts`:
 In `buddy/hooks/record.test.ts`:
 - Replace
   ```ts
-  import { activeBuddy, applyChange, classify, classifyRecord, migrate, newRecord, parseSub } from './record'
+  import { USAGE, activeBuddy, applyChange, classify, classifyRecord, migrate, newRecord, parseSub } from './record'
   ```
   with:
   ```ts
-  import { activeBuddy, applyChange, classify, migrate, parseSub } from './record'
+  import { USAGE, activeBuddy, applyChange, classify, migrate, parseSub } from './record'
   ```
 - Delete the tests `'records are classified, and only schema 1 is ours'` and `'a new record starts on, with the rerolls it is given'`.
 
-- [ ] **Step 5: Rewrite the wiring**
+- [ ] **Step 5: Rewire `register.tsx` onto `commit`**
 
-Replace `buddy/hooks/register.tsx` with:
-```tsx
-import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+Make these replacements in `buddy/hooks/register.tsx`, in order.
 
+**Imports.** Replace
+```ts
+import type { BuddyRecord } from '../types'
+```
+with:
+```ts
 import type { Buddy, Saved, Soul } from '../types'
-import { bandRows, cardLines, compactLine, isCompact, nameLine } from './layout'
+```
+Replace
+```ts
+import { STORE_KEY, USAGE, classifyRecord, newRecord, parseSub } from './record'
+import type { Sub } from './record'
+```
+with:
+```ts
 import { STORE_KEY, USAGE, activeBuddy, applyChange, classify, parseSub } from './record'
 import type { Change, Stored, Sub } from './record'
-import { RARITY, rollBones } from './roll'
-import type { Bones } from './roll'
-import { eggRows, faceFor, frameAt, spriteRows, topRow } from './sprites'
-import type { Frame } from './sprites'
-import {
-  BUBBLE_TICKS,
-  HEART_TICKS,
-  HELLO_PROMPT,
-  PET_PROMPT,
-  REPLY_FLOOR_MS,
-  cannedLine,
-  cleanSay,
-  fallbackSoul,
-  hatchRequest,
-  matchAddress,
-  parseSoul,
-  personaSystem,
-  reactionPrompt,
-  shouldQuip,
-  talkPrompt,
-  withArticle,
-} from './voice'
-import type { TurnSummary } from './voice'
+```
 
-const record = atom({ plugin: 'buddy', key: 'record' } as const, null)
-// True while the record in state is newer than the store's: the last write failed.
-const unsaved = atom({ plugin: 'buddy', key: 'unsaved' } as const, false)
-const hatching = atom({ plugin: 'buddy', key: 'hatching' } as const, false)
-const tick = atom({ plugin: 'buddy', key: 'tick' } as const, 0)
-const bubble = atom({ plugin: 'buddy', key: 'bubble' } as const, null)
-const heartsUntil = atom({ plugin: 'buddy', key: 'heartsUntilTick' } as const, 0)
-const lastQuipAt = atom({ plugin: 'buddy', key: 'lastQuipAt' } as const, 0)
-const lastReplyAt = atom({ plugin: 'buddy', key: 'lastReplyAt' } as const, 0)
-
+**Constants and types.** Replace
+```ts
+const NO_BUDDY = 'No buddy yet. Run /buddy to hatch one.'
+```
+with:
+```ts
+const NO_BUDDY = 'No buddy yet. Run /buddy to hatch one.'
 const SAVE_FAILED = 'Could not save your buddy; it lives for this session only.'
-
-type Look = {
-  sprite: string[]
-  face: string
-  name: string
-  label: string
-  stars: string
-  starColor: string | undefined
-  spriteColor: string | undefined
-  say: string | null
-}
-
+```
+Replace
+```ts
+const tint = (color: string | undefined) => (color ? { color } : {})
+```
+with:
+```ts
 // The part of a buddy that speaks: its seed, for the bones, and its soul.
 type Who = Pick<Buddy, 'seed' | 'soul'>
 
 const tint = (color: string | undefined) => (color ? { color } : {})
+```
 
-// Module variables start over on a hot reload; nothing here needs to survive one.
-let timer: { cancel: () => void } | null = null
-let inFlight: { controller: AbortController; kind: 'react' | 'reply' } | null = null
-let cannedCount = 0
-// The current main turn's tool tally; reset when that turn completes.
-let tally: Record<string, number> = {}
-let failedTools: string[] = []
-
-function startTimer($: EngineInterface) {
-  timer?.cancel()
-  timer = $.clock.every(500, () => {
-    void update($, tick, n => n + 1).catch(() => undefined)
-  })
+**`adopt`, `current` and `commit`.** Replace
+```ts
+// Make `rec` the session's buddy: into state, and the timer to match its mode.
+async function adopt($: EngineInterface, rec: BuddyRecord) {
+  await update($, record, () => rec)
+  if (rec.mode === 'off') stopTimer()
+  else if (!timer) startTimer($)
 }
 
-function stopTimer() {
-  timer?.cancel()
-  timer = null
+async function save($: EngineInterface, rec: BuddyRecord): Promise<string | null> {
+  await adopt($, rec)
+  try {
+    await $.store.set(STORE_KEY, rec)
+    await update($, unsaved, () => false)
+    return null
+  } catch {
+    await update($, unsaved, () => true)
+    return 'Could not save your buddy; it lives for this session only.'
+  }
 }
-
-// Work that must outlive the hook that started it (spec: work meant to outlive
-// a dispatch runs on a $.clock timer).
-function later($: EngineInterface, work: () => Promise<unknown>) {
-  $.clock.after(0, () => {
-    void work().catch(() => undefined)
-  })
-}
-
+```
+with:
+```ts
 // Make `saved` the session's buddy: into state, and the timer to match its mode.
 async function adopt($: EngineInterface, saved: Saved) {
   await update($, record, () => saved)
@@ -1234,109 +1269,103 @@ async function commit($: EngineInterface, change: Change): Promise<string | null
     return SAVE_FAILED
   }
 }
+```
 
-async function showBubble($: EngineInterface, text: string) {
-  const now = await read($, tick)
-  await update($, bubble, () => ({ text, untilTick: now + BUBBLE_TICKS }))
-}
-
-// One model call at a time: a reply cancels a pending reaction; a reaction
-// never starts while anything is pending.
-async function ask(
-  $: EngineInterface,
+**`ask` takes a soul.** Replace
+```ts
+  rec: BuddyRecord,
+  bones: Bones,
+```
+with:
+```ts
   soul: Soul,
   bones: Bones,
-  prompt: string,
-  kind: 'react' | 'reply',
-): Promise<string | null> {
-  if (kind === 'react' && inFlight) return null
-  if (kind === 'reply') inFlight?.controller.abort()
-  const mine = { controller: new AbortController(), kind }
-  inFlight = mine
-  try {
-    const result = await $.model.complete(
+```
+and replace
+```ts
+      { model: 'haiku', system: personaSystem(rec.soul, bones), prompt, maxTokens: 80, timeoutMs: 8000 },
+```
+with:
+```ts
       { model: 'haiku', system: personaSystem(soul, bones), prompt, maxTokens: 80, timeoutMs: 8000 },
-      { signal: mine.controller.signal },
-    )
-    if (mine.controller.signal.aborted || !result.isAnswered) return null
-    return cleanSay(result.text) || null
-  } catch {
-    return null
-  } finally {
-    if (inFlight === mine) inFlight = null
-  }
-}
+```
 
-// Talk, pet and hello: answered even when muted, at most one model call per 5 s.
+**`reply` takes a `Who`.** Replace
+```ts
+async function reply($: EngineInterface, rec: BuddyRecord, prompt: string) {
+  const bones = rollBones(rec.seed)
+  const now = await $.clock.now()
+  const last = await read($, lastReplyAt)
+  await update($, lastReplyAt, () => now)
+  const text = now - last < REPLY_FLOOR_MS ? null : await ask($, rec, bones, prompt, 'reply')
+```
+with:
+```ts
 async function reply($: EngineInterface, who: Who, prompt: string) {
   const bones = rollBones(who.seed)
   const now = await $.clock.now()
   const last = await read($, lastReplyAt)
   await update($, lastReplyAt, () => now)
   const text = now - last < REPLY_FLOOR_MS ? null : await ask($, who.soul, bones, prompt, 'reply')
-  await showBubble($, text ?? cannedLine(bones, cannedCount++))
-}
+```
 
-// A finished main turn: speak only when shouldQuip says so, never muted, never while a call is pending.
-async function react($: EngineInterface, summary: TurnSummary) {
+**`react` reads the active buddy.** Replace
+```ts
+  const rec = await read($, record)
+  if (!rec || (await read($, hatching))) return
+  const now = await $.clock.now()
+  const speak = shouldQuip({
+    mode: rec.mode,
+```
+with:
+```ts
   const saved = await read($, record)
   if (!saved || (await read($, hatching))) return
   const now = await $.clock.now()
   const speak = shouldQuip({
     mode: saved.mode,
-    inFlight: inFlight !== null,
-    now,
-    lastQuipAt: await read($, lastQuipAt),
-    summary,
-    roll: Math.random(),
-  })
-  if (!speak) return
-  await update($, lastQuipAt, () => now)
+```
+and replace
+```ts
+  const text = await ask($, rec, rollBones(rec.seed), reactionPrompt(summary), 'react')
+```
+with:
+```ts
   const buddy = activeBuddy(saved)
   const text = await ask($, buddy.soul, rollBones(buddy.seed), reactionPrompt(summary), 'react')
-  if (text) await showBubble($, text)
-}
+```
 
+**`hatch` commits a hatch or a reroll.** Replace
+```ts
+async function hatch($: EngineInterface, rerolls: number): Promise<string> {
+```
+with:
+```ts
 async function hatch($: EngineInterface, kind: 'hatch' | 'reroll'): Promise<string> {
-  const seed = crypto.randomUUID()
-  const bones = rollBones(seed)
-  await update($, hatching, () => true)
-  try {
-    if (!timer) startTimer($)
-    let soul = fallbackSoul(seed, bones)
-    try {
-      const request = hatchRequest(bones)
-      const result = await $.model.complete({
-        model: 'haiku',
-        system: request.system,
-        prompt: request.prompt,
-        maxTokens: 200,
-        timeoutMs: 8000,
-      })
-      if (result.isAnswered) soul = parseSoul(result.text) ?? soul
-    } catch {
-      // Keep the fallback soul: hatching never fails.
-    }
-    const hatchedAt = new Date(await $.clock.now()).toISOString()
+```
+and replace
+```ts
+    const rec = newRecord(seed, { ...soul, hatchedAt }, rerolls)
+    const note = await save($, rec)
+    await update($, bubble, () => null)
+    later($, () => reply($, rec, HELLO_PROMPT))
+```
+with:
+```ts
     const born: Who = { seed, soul: { ...soul, hatchedAt } }
     const note = await commit($, { kind, ...born })
     await update($, bubble, () => null)
     later($, () => reply($, born, HELLO_PROMPT))
-    return note ?? `${soul.name}, ${withArticle(bones.rarity)}${bones.shiny ? ' shiny' : ''} ${bones.species}, hatched.`
-  } finally {
-    // The egg never stays out, whatever went wrong above.
-    await update($, hatching, () => false)
-  }
-}
+```
 
+**`runBuddy`.** Replace the whole function, from `async function runBuddy(` through its closing `}` just before `function eggLook`, with:
+```ts
 async function runBuddy($: EngineInterface, sub: Sub): Promise<string | undefined> {
   if (sub === 'usage') return USAGE
   const stored = await current($)
   if (stored.kind === 'foreign') return `Saved buddy uses schema ${stored.schema}; this mod knows 1 and 2.`
   if (stored.kind === 'damaged') return "Saved buddy is damaged; this mod won't overwrite it."
-  if (stored.kind === 'none') {
-    return sub === 'show' ? hatch($, 'hatch') : 'No buddy yet. Run /buddy to hatch one.'
-  }
+  if (stored.kind === 'none') return sub === 'show' ? hatch($, 'hatch') : NO_BUDDY
   const saved = stored.saved
   // Another session may have changed the store since this one last looked.
   await adopt($, saved)
@@ -1358,8 +1387,11 @@ async function runBuddy($: EngineInterface, sub: Sub): Promise<string | undefine
       later($, () => reply($, buddy, PET_PROMPT))
       return undefined
     }
-    case 'card':
-      return cardLines(buddy.soul, bones, saved.rerolls).join('\n')
+    case 'card': {
+      const opened = await $.ui.open({ id: CARD, title: 'Buddy', closeOnEscape: true })
+      // A surface that places no panes gets the card as text instead.
+      return opened.isPlaced ? undefined : cardLines(buddy.soul, bones, saved.rerolls).join('\n')
+    }
     case 'mute':
       return (await commit($, { kind: 'mode', mode: 'muted' })) ?? `${name} will stay quiet unless spoken to.`
     case 'unmute':
@@ -1370,112 +1402,71 @@ async function runBuddy($: EngineInterface, sub: Sub): Promise<string | undefine
       return `This retires ${who}. Run /buddy reroll confirm.`
     case 'reroll-confirm':
       return hatch($, 'reroll')
-  }
-}
-
-function eggLook(frame: Frame): Look {
-  return {
-    sprite: eggRows(frame),
-    face: '(egg)',
-    name: 'hatching...',
-    label: '  hatching...',
-    stars: '',
-    starColor: undefined,
-    spriteColor: undefined,
-    say: null,
-  }
-}
-
-async function buddyLook($: EngineInterface, saved: Saved, t: number): Promise<Look> {
-  const buddy = activeBuddy(saved)
-  const bones = rollBones(buddy.seed)
-  const { frame, blink } = frameAt(t)
-  const eye = blink ? '-' : bones.eye
-  const heartsUntilTick = await read($, heartsUntil)
-  const top = topRow({
-    hat: bones.hat,
-    heartsFrame: t < heartsUntilTick ? t : null,
-    sparkle: bones.shiny ? t : null,
-  })
-  const said = await read($, bubble)
-  const { label, stars } = nameLine(buddy.soul.name, bones)
-  return {
-    sprite: spriteRows({ species: bones.species, eye, frame, top }),
-    face: faceFor(bones.species, eye),
-    name: buddy.soul.name,
-    label,
-    stars,
-    starColor: RARITY[bones.rarity].color,
-    spriteColor: bones.shiny ? 'yellow' : undefined,
-    say: said && t < said.untilTick ? said.text : null,
-  }
-}
-
-export const register: Register = on => {
-  on('session.start', async ($, e, next) => {
-    try {
-      await $.command.register({
-        name: 'buddy',
-        description: 'Hatch, pet, or manage your terminal buddy',
-        argumentHint: '[pet | card | mute | unmute | off | reroll [confirm]]',
-        immediate: true,
-      })
-    } catch {
-      // A refused registration costs the slash command, not the buddy on screen.
+    case 'debug': {
+      if (saved.mode === 'off') return hidden
+      const now = await read($, tick)
+      await update($, tourStart, () => now)
+      return `Touring all ${TOUR_STEPS} species, plain then shiny. Run /buddy debug off to stop.`
     }
-    try {
-      // A reload in the middle of a hatch leaves the egg flag set with nobody to clear it.
-      await update($, hatching, () => false)
+    case 'debug-off':
+      await update($, tourStart, () => null)
+      return saved.mode === 'off' ? hidden : `Back to ${name}.`
+  }
+}
+```
+
+**`buddyLook` takes the saved record.** Replace
+```ts
+async function buddyLook($: EngineInterface, rec: BuddyRecord, t: number, withTour = true): Promise<Look> {
+  // A running /buddy debug tour dresses the real buddy up; nothing saved changes.
+  const started = withTour ? await read($, tourStart) : null
+  const tour = started === null ? null : tourAt(t - started)
+  const bones = tour ? { ...rollBones(rec.seed), ...tour.look } : rollBones(rec.seed)
+  const name = tour ? `tour ${tour.step + 1}/${TOUR_STEPS}` : rec.soul.name
+```
+with:
+```ts
+async function buddyLook($: EngineInterface, saved: Saved, t: number, withTour = true): Promise<Look> {
+  const buddy = activeBuddy(saved)
+  // A running /buddy debug tour dresses the real buddy up; nothing saved changes.
+  const started = withTour ? await read($, tourStart) : null
+  const tour = started === null ? null : tourAt(t - started)
+  const bones = tour ? { ...rollBones(buddy.seed), ...tour.look } : rollBones(buddy.seed)
+  const name = tour ? `tour ${tour.step + 1}/${TOUR_STEPS}` : buddy.soul.name
+```
+
+**`session.start` loads through `current`.** Replace
+```ts
+      const loaded = classifyRecord(await $.store.get(STORE_KEY))
+      // A write that failed before a reload left the only copy in state: keep it.
+      const pending = (await read($, unsaved)) ? await read($, record) : null
+      const rec = pending ?? (loaded.kind === 'ok' ? loaded.record : null)
+      await update($, record, () => rec)
+      if (rec && rec.mode !== 'off') startTimer($)
+```
+with:
+```ts
       // A write that failed before a reload left the only copy in state: current() keeps it.
       const stored = await current($)
       const saved = stored.kind === 'ok' ? stored.saved : null
       await update($, record, () => saved)
       if (saved && saved.mode !== 'off') startTimer($)
-    } catch {
-      // The buddy never holds up a session.
-    }
-    return next(e)
-  })
+```
 
-  on('command.run', { command: 'buddy' }, async ($, e) => {
-    try {
-      return { text: await runBuddy($, parseSub(e.args)) }
-    } catch {
-      return { text: 'Your buddy hit a snag. Try again.' }
-    }
-  })
-
-  on('tool.call', async ($, e, next) => {
-    const ran = await next(e)
-    try {
-      // Main conversation only: a subagent's calls never reach the buddy's reactions.
-      if (e.agentId === undefined) {
-        tally[e.tool] = (tally[e.tool] ?? 0) + 1
-        if (ran.deny === undefined && ran.isError === true) failedTools.push(e.tool)
+**`prompt.submit` matches the active buddy's name.** Replace
+```ts
+      const rec = await read($, record)
+      const fromPerson = e.origin.kind === 'composer' || e.origin.kind === 'bridge'
+      // A prompt carrying images or files is a request for Claude, whatever it starts with.
+      const bare = !e.attachments || e.attachments.length === 0
+      const message = rec && rec.mode !== 'off' && fromPerson && bare ? matchAddress(rec.soul.name, e.text) : null
+      if (rec && message !== null) {
+        later($, () => reply($, rec, talkPrompt(message)))
+        return { drop: `(to ${rec.soul.name})` }
       }
-    } catch {
-      // Counting never changes a tool call.
-    }
-    return ran
-  })
-
-  on('turn.complete', async ($, e, next) => {
-    const result = await next(e)
-    try {
-      if (e.agentId === undefined) {
-        const summary: TurnSummary = { reason: e.reason, durationMs: e.durationMs, tools: tally, failed: failedTools }
-        tally = {}
-        failedTools = []
-        later($, () => react($, summary))
-      }
-    } catch {
-      // A reaction is never worth breaking a turn over.
-    }
-    return result
-  })
-
-  on('prompt.submit', async ($, e, next) => {
-    try {
+```
+with:
+```ts
       const saved = await read($, record)
       const buddy = saved && saved.mode !== 'off' ? activeBuddy(saved) : null
       const fromPerson = e.origin.kind === 'composer' || e.origin.kind === 'bridge'
@@ -1486,63 +1477,69 @@ export const register: Register = on => {
         later($, () => reply($, buddy, talkPrompt(message)))
         return { drop: `(to ${buddy.soul.name})` }
       }
-    } catch {
-      // Fall through: the prompt goes to Claude.
-    }
-    return next(e)
-  })
-
-  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    try {
-      const saved = await read($, record)
-      const isHatching = await read($, hatching)
-      if (e.props.hasSurvey || (!isHatching && (!saved || saved.mode === 'off'))) return next(e)
-
-      const { Box, Code, Text } = $.ui.resolve(e)
-      const t = await read($, tick)
-      const view = isHatching || !saved ? eggLook(frameAt(t).frame) : await buddyLook($, saved, t)
-
-      if (isCompact(e.props.maxRows, e.props.bodyColumns)) {
-        return <Text wrap="truncate-end">{compactLine(view.face, view.name, view.say)}</Text>
-      }
-
-      const rows = bandRows(view.sprite, view.say, e.props.bodyColumns)
-      const nameRow = (
-        <Box>
-          <Text dimColor wrap="truncate-end">{view.label}</Text>
-          <Text {...tint(view.starColor)}>{view.stars}</Text>
-        </Box>
-      )
-
-      if (e.surface === 'desktop') {
-        const source = rows.sprite.map((row, i) => (row + ' ' + (rows.bubble[i] ?? '')).trimEnd()).join('\n')
-        return (
-          <Box flexDirection="column">
-            <Code source={source} />
-            {nameRow}
-          </Box>
-        )
-      }
-
-      return (
-        <Box flexDirection="column">
-          {rows.sprite.map((row, i) => (
-            <Box>
-              <Text {...tint(view.spriteColor)} bold={view.spriteColor !== undefined}>
-                {row}
-              </Text>
-              <Text>{' ' + (rows.bubble[i] ?? '')}</Text>
-            </Box>
-          ))}
-          {nameRow}
-        </Box>
-      )
-    } catch {
-      return next(e)
-    }
-  })
-}
 ```
+
+**The `AbovePrompt` hook** needs no change: its `rec` is now a `Saved`, which is what `buddyLook` takes.
+
+**The `card` pane draws the active buddy.** Replace
+```ts
+      const rec = await read($, record)
+      if (!rec) return <Text dimColor>{NO_BUDDY}</Text>
+
+      const bones = rollBones(rec.seed)
+      if (e.surface !== 'terminal') {
+        const { Svg } = $.ui.resolve(e)
+        return <Svg source={cardSvg(rec.soul, bones, rec.rerolls)} alt={cardAlt(rec.soul, bones, rec.rerolls)} />
+      }
+
+      const view = await buddyLook($, rec, await read($, tick), false)
+      const header = (
+        <Box flexDirection="column">
+          <Box>
+            <Text bold>{rec.soul.name}</Text>
+            <Text {...tint(view.starColor)}>{'  ' + view.stars}</Text>
+          </Box>
+          <Text dimColor>
+            {`${bones.rarity} ${bones.species}${bones.shiny ? ' (shiny)' : ''}   Hat: ${bones.hat}   Eyes: ${bones.eye}`}
+          </Text>
+          <Text>{rec.soul.personality}</Text>
+        </Box>
+      )
+      const footer = <Text dimColor>{`Hatched ${rec.soul.hatchedAt.slice(0, 10)}   Rerolls: ${rec.rerolls}`}</Text>
+```
+with:
+```ts
+      const saved = await read($, record)
+      if (!saved) return <Text dimColor>{NO_BUDDY}</Text>
+
+      const buddy = activeBuddy(saved)
+      const bones = rollBones(buddy.seed)
+      if (e.surface !== 'terminal') {
+        const { Svg } = $.ui.resolve(e)
+        return <Svg source={cardSvg(buddy.soul, bones, saved.rerolls)} alt={cardAlt(buddy.soul, bones, saved.rerolls)} />
+      }
+
+      const view = await buddyLook($, saved, await read($, tick), false)
+      const header = (
+        <Box flexDirection="column">
+          <Box>
+            <Text bold>{buddy.soul.name}</Text>
+            <Text {...tint(view.starColor)}>{'  ' + view.stars}</Text>
+          </Box>
+          <Text dimColor>
+            {`${bones.rarity} ${bones.species}${bones.shiny ? ' (shiny)' : ''}   Hat: ${bones.hat}   Eyes: ${bones.eye}`}
+          </Text>
+          <Text>{buddy.soul.personality}</Text>
+        </Box>
+      )
+      const footer = <Text dimColor>{`Hatched ${buddy.soul.hatchedAt.slice(0, 10)}   Rerolls: ${saved.rerolls}`}</Text>
+```
+
+Then check that nothing still names the old record:
+```bash
+grep -n "BuddyRecord\|classifyRecord\|newRecord\|save(\$" buddy/hooks/register.tsx buddy/hooks/record.ts buddy/types/index.d.ts
+```
+Expected: no output.
 
 - [ ] **Step 6: Say what reroll does now in the README**
 
@@ -1561,7 +1558,7 @@ with:
 CC="$(ls "$(cygpath -u "$APPDATA")"/Claude/claude-code/*/*/claude.exe | sort -V | tail -1)"
 "$CC" plugin test ./buddy && "$CC" plugin validate ./buddy
 ```
-Expected: 81 pass, 0 fail. Validation passes, and its `calls:` line still lists `$.store.get` and `$.store.set`, now through `commit` and `current`.
+Expected: 118 pass, 0 fail. Validation passes, and its `calls:` line lists `$.store.get` (via `current`) and `$.store.set` (via `commit`).
 
 - [ ] **Step 8: Commit**
 
@@ -1580,7 +1577,7 @@ EOF
 
 ---
 
-### Task 5: Counting, saving the counts, and the streak greeting
+### Task 5: Counting, saving the counts, the card's streak, and the greeting
 
 **Files:**
 - Modify: `buddy/types/index.d.ts`
@@ -1591,53 +1588,135 @@ EOF
 **Interfaces:**
 - Consumes:
   - from Task 1: `addCounts`, `countEvent`, `mergePending`, `zeroCounts`, `type CountEvent`
-  - from Task 3: `streakLine`, `shouldGreet`, `streakGreeting`
-  - from Task 4: `commit`, `later`, `reply`, `showBubble`, `sharedStore`
+  - from Task 3: `streakLine`, `cardSvg`/`cardAlt` with `history`, `shouldGreet`, `streakGreeting`
+  - from Task 4: `commit`, `later`, `reply`, `showBubble`, the pane's `buddy`, `sharedStore`
 - Produces, in `register.tsx`:
   - the `pending` state value
-  - `count($, event)`, `flush($)`, `countAndFlush($, event)` and `visitToday($)`
+  - `count($, event)`, `flush($)`, `countAndFlush($, event)`, `countsOf($, buddy)` and `visitToday($)`
 
 - [ ] **Step 1: Write the failing mod-level tests**
 
 In `buddy/hooks/buddy.test.tsx`:
 
-After the `import { FALLBACK_NAMES } from './voice'` line, add:
+Replace
+```ts
+import { FALLBACK_NAMES } from './voice'
+```
+with:
 ```ts
 import { zeroCounts } from './ledger'
+import { FALLBACK_NAMES } from './voice'
 ```
 
-Replace the `world` function's first two lines
+Replace
 ```ts
-function world(on: On, store: Record<string, unknown> | null = {}) {
+function world(on: On, store: Record<string, unknown> | null = {}, placesPanes = true) {
   const clock = mock.clock(on, { now: 1_000_000 })
 ```
 with:
 ```ts
-function world(on: On, store: Record<string, unknown> | null = {}, now = 1_000_000) {
+function world(on: On, store: Record<string, unknown> | null = {}, placesPanes = true, now = 1_000_000) {
   const clock = mock.clock(on, { now })
 ```
 
-After the `sharedStore` function, add:
+Replace
+```ts
+// What the card pane shows on the terminal once /buddy card opened it, which prints nothing.
+```
+with:
 ```ts
 // The active buddy's entry in a stored row.
 function activeOf(row: unknown) {
   const saved = row as Saved
   return saved.buddies.find(b => b.seed === saved.active)
 }
+
+// What the card pane shows on the terminal once /buddy card opened it, which prints nothing.
 ```
 
-Replace the whole test `'card shows name, stats and rerolls'` with:
+Replace the test
 ```ts
-test('card shows name, stats, rerolls and the streak', async ($, on) => {
+test('card opens a pane with the name, personality and rerolls, and prints nothing', async ($, on) => {
+  world(on, { buddy: RECORD })
+  await $.session.start(START)
+  const card = await cardText($)
+  expect(card).toMatch(/^Pip\b/m)
+  expect(card).toMatch(/Counts semicolons\./)
+  expect(card).toMatch(/Rerolls: 0/)
+})
+```
+with:
+```ts
+test('card opens a pane with the name, personality, rerolls and streak, and prints nothing', async ($, on) => {
   const clock = world(on, { buddy: RECORD })
+  await $.session.start(START)
+  await clock.settle()
+  const card = await cardText($)
+  expect(card).toMatch(/^Pip\b/m)
+  expect(card).toMatch(/Counts semicolons\./)
+  expect(card).toMatch(/Rerolls: 0/)
+  expect(card).toMatch(/Streak 1 day \(best 1\) · 0 turns · 0 tool calls$/)
+})
+```
+
+In the test `'the card pane is one drawn card on desktop and meters on the terminal'`, replace
+```ts
+  expect(cards[0]?.props.alt).toMatch(/^Pip, .*"Counts semicolons\." .*Stats: DEBUGGING \d+/)
+```
+with:
+```ts
+  expect(cards[0]?.props.alt).toMatch(/^Pip, .*"Counts semicolons\." .*Stats: DEBUGGING \d+/)
+  expect(cards[0]?.props.alt).toMatch(/Rerolls 0\. Streak \d+ days? \(best \d+\) · 0 turns · 0 tool calls\.$/)
+  expect(String(cards[0]?.props.source)).toContain('>0 turns · 0 tool calls</text>')
+```
+
+Replace the test
+```ts
+test('where no pane can be placed, card prints the text card', async ($, on) => {
+  world(on, { buddy: RECORD }, false)
+  await $.session.start(START)
+  const card = (await runner($)('card')) ?? ''
+  expect(card).toMatch(/^Pip, /)
+  expect(card).toMatch(/DEBUGGING/)
+  expect(card).toMatch(/Rerolls: 0/)
+})
+```
+with:
+```ts
+test('where no pane can be placed, card prints the text card with the streak', async ($, on) => {
+  const clock = world(on, { buddy: RECORD }, false)
   await $.session.start(START)
   await clock.settle()
   const card = (await runner($)('card')) ?? ''
   expect(card).toMatch(/^Pip, /)
   expect(card).toMatch(/DEBUGGING/)
   expect(card).toMatch(/Rerolls: 0/)
-  expect(card).toMatch(/Streak 1 day \(best 1\) · 0 turns · 0 tool calls$/)
+  expect(card).toMatch(/\nStreak 1 day \(best 1\) · 0 turns · 0 tool calls$/)
 })
+```
+
+In the test `'the debug tour shows each species plain, then shiny, and never writes the store'`, replace
+```ts
+  const clock = world(on, null)
+  await $.session.start(START)
+  expect(await runner($)('debug')).toBe('Touring all 18 species, plain then shiny. Run /buddy debug off to stop.')
+```
+with:
+```ts
+  const clock = world(on, null)
+  await $.session.start(START)
+  // The session's visit is its own write; the tour adds none.
+  await clock.settle()
+  const visits = writes.length
+  expect(await runner($)('debug')).toBe('Touring all 18 species, plain then shiny. Run /buddy debug off to stop.')
+```
+and, at the end of the same test, replace
+```ts
+  expect(writes).toEqual([])
+```
+with:
+```ts
+  expect(writes).toHaveLength(visits)
 ```
 
 At the end of the file, add:
@@ -1727,7 +1806,7 @@ test('pets and talks are counted and saved', async ($, on) => {
 
 test('the first session of a new day greets the streak; the next one that day does not', async ($, on) => {
   const shared = sharedStore(on, SAVED)
-  const clock = world(on, null, NOON)
+  const clock = world(on, null, true, NOON)
   await $.session.start(START)
   await clock.settle()
   const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
@@ -1760,7 +1839,11 @@ test('a buddy that is off counts nothing and records no visit', async ($, on) =>
 CC="$(ls "$(cygpath -u "$APPDATA")"/Claude/claude-code/*/*/claude.exe | sort -V | tail -1)"
 "$CC" plugin test ./buddy
 ```
-Expected: the card test and five of the six new tests fail. The sixth, the "off" test, already passes, since nothing writes on that path yet.
+Expected: eight fail:
+- the three card tests, since no streak line is drawn yet
+- the counts, merge, failed-write, pets-and-talks and greeting tests
+
+The "off" test and the edited tour test already pass, since nothing writes on those paths yet.
 
 - [ ] **Step 3: Add `pending` to the contract**
 
@@ -1777,21 +1860,28 @@ with:
     }
 ```
 
-- [ ] **Step 4: Count, save and greet**
+- [ ] **Step 4: Count, save, show and greet**
 
-In `buddy/hooks/register.tsx`:
+Make these replacements in `buddy/hooks/register.tsx`, in order.
 
-Replace the layout import
+**Imports.** Replace
 ```ts
-import { bandRows, cardLines, compactLine, isCompact, nameLine } from './layout'
+import type { Buddy, Saved, Soul } from '../types'
 ```
 with:
 ```ts
-import { bandRows, cardLines, compactLine, isCompact, nameLine, streakLine } from './layout'
+import type { Buddy, Counts, Saved, Soul } from '../types'
+```
+Replace
+```ts
+import { bandRows, cardLines, compactLine, isCompact, nameLine, spriteTint } from './layout'
+```
+with:
+```ts
+import { bandRows, cardLines, compactLine, isCompact, nameLine, spriteTint, streakLine } from './layout'
 import { addCounts, countEvent, mergePending, zeroCounts } from './ledger'
 import type { CountEvent } from './ledger'
 ```
-
 In the `./voice` import list, replace
 ```ts
   reactionPrompt,
@@ -1805,12 +1895,21 @@ with:
   streakGreeting,
 ```
 
-After the `lastReplyAt` atom, add:
+**The `pending` atom.** Replace
 ```ts
+const lastReplyAt = atom({ plugin: 'buddy', key: 'lastReplyAt' } as const, 0)
+```
+with:
+```ts
+const lastReplyAt = atom({ plugin: 'buddy', key: 'lastReplyAt' } as const, 0)
 const pending = atom({ plugin: 'buddy', key: 'pending' } as const, {})
 ```
 
-After the `commit` function, add:
+**Counting and flushing.** Replace
+```ts
+async function showBubble($: EngineInterface, text: string) {
+```
+with the new code, followed by the line it replaced:
 ```ts
 // Adds one event to this session's unsaved counts for the active buddy. Nothing is counted
 // with no buddy, while the egg is out, or while the buddy is off.
@@ -1821,9 +1920,9 @@ async function count($: EngineInterface, event: CountEvent) {
   await update($, pending, p => ({ ...p, [seed]: countEvent(p[seed] ?? zeroCounts(), event) }))
 }
 
-// Saves the unsaved counts with today's visit. A failed store write already took them into
-// this session's copy (commit adopts before it writes), so they go back into `pending` only
-// when the commit failed before that.
+// Saves the unsaved counts with today's visit. A failed store write has already taken them
+// into this session's copy (commit adopts before it writes), so they go back into `pending`
+// only when the commit failed before that.
 async function flush($: EngineInterface) {
   const saved = await read($, record)
   if (!saved || saved.mode === 'off') return
@@ -1841,6 +1940,21 @@ async function countAndFlush($: EngineInterface, event: CountEvent) {
   await flush($)
 }
 
+// A buddy's lifetime counts with this session's unsaved ones added, for the card.
+async function countsOf($: EngineInterface, buddy: Buddy): Promise<Counts> {
+  const waiting = (await read($, pending))[buddy.seed]
+  return waiting ? addCounts(buddy.counts, waiting) : buddy.counts
+}
+
+async function showBubble($: EngineInterface, text: string) {
+```
+
+**The visit and the greeting.** Replace
+```ts
+// One model call at a time: a reply cancels a pending reaction; a reaction
+```
+with the new code, followed by the line it replaced:
+```ts
 // The session's visit (spec section 3), greeting the streak on the first session of a new day.
 async function visitToday($: EngineInterface) {
   const saved = await read($, record)
@@ -1852,38 +1966,33 @@ async function visitToday($: EngineInterface) {
     await showBubble($, streakGreeting(after.you.streak))
   }
 }
+
+// One model call at a time: a reply cancels a pending reaction; a reaction
 ```
 
-In `runBuddy`, replace the `pet` and `card` cases
+**Pets are counted.** In `runBuddy`, replace
 ```ts
-    case 'pet': {
-      if (saved.mode === 'off') return hidden
-      const now = await read($, tick)
       await update($, heartsUntil, () => now + HEART_TICKS)
       later($, () => reply($, buddy, PET_PROMPT))
-      return undefined
-    }
-    case 'card':
-      return cardLines(buddy.soul, bones, saved.rerolls).join('\n')
 ```
 with:
 ```ts
-    case 'pet': {
-      if (saved.mode === 'off') return hidden
-      const now = await read($, tick)
       await update($, heartsUntil, () => now + HEART_TICKS)
       later($, () => countAndFlush($, { kind: 'pet' }))
       later($, () => reply($, buddy, PET_PROMPT))
-      return undefined
-    }
-    case 'card': {
-      const waiting = (await read($, pending))[buddy.seed]
-      const counts = waiting ? addCounts(buddy.counts, waiting) : buddy.counts
-      return [...cardLines(buddy.soul, bones, saved.rerolls), streakLine(saved.you, counts)].join('\n')
-    }
 ```
 
-In the `session.start` hook, replace
+**The text card gets the streak line.** In `runBuddy`, replace
+```ts
+      return opened.isPlaced ? undefined : cardLines(buddy.soul, bones, saved.rerolls).join('\n')
+```
+with:
+```ts
+      if (opened.isPlaced) return undefined
+      return [...cardLines(buddy.soul, bones, saved.rerolls), streakLine(saved.you, await countsOf($, buddy))].join('\n')
+```
+
+**The session's visit.** In the `session.start` hook, replace
 ```ts
       if (saved && saved.mode !== 'off') startTimer($)
 ```
@@ -1895,7 +2004,7 @@ with:
       }
 ```
 
-In the `tool.call` hook, replace
+**Tool calls are counted.** In the `tool.call` hook, replace
 ```ts
       // Main conversation only: a subagent's calls never reach the buddy's reactions.
       if (e.agentId === undefined) {
@@ -1915,7 +2024,7 @@ with:
       }
 ```
 
-In the `turn.complete` hook, replace
+**Turns are counted and saved.** In the `turn.complete` hook, replace
 ```ts
         tally = {}
         failedTools = []
@@ -1930,7 +2039,7 @@ with:
         later($, () => react($, summary))
 ```
 
-In the `prompt.submit` hook, replace
+**Talks are counted.** In the `prompt.submit` hook, replace
 ```ts
         later($, () => reply($, buddy, talkPrompt(message)))
 ```
@@ -1940,7 +2049,39 @@ with:
         later($, () => reply($, buddy, talkPrompt(message)))
 ```
 
-- [ ] **Step 5: Say what it saves in the README**
+**The card pane shows the streak.** In the `card` pane hook, replace
+```ts
+      if (e.surface !== 'terminal') {
+        const { Svg } = $.ui.resolve(e)
+        return <Svg source={cardSvg(buddy.soul, bones, saved.rerolls)} alt={cardAlt(buddy.soul, bones, saved.rerolls)} />
+      }
+```
+with:
+```ts
+      const history = { you: saved.you, counts: await countsOf($, buddy) }
+      if (e.surface !== 'terminal') {
+        const { Svg } = $.ui.resolve(e)
+        return (
+          <Svg
+            source={cardSvg(buddy.soul, bones, saved.rerolls, history)}
+            alt={cardAlt(buddy.soul, bones, saved.rerolls, history)}
+          />
+        )
+      }
+```
+and replace
+```ts
+          {footer}
+        </Box>
+```
+with:
+```ts
+          {footer}
+          <Text dimColor>{streakLine(history.you, history.counts)}</Text>
+        </Box>
+```
+
+- [ ] **Step 5: Say what the card shows and what it saves in the README**
 
 In `README.md`, replace
 ```
@@ -1948,7 +2089,7 @@ In `README.md`, replace
 ```
 with:
 ```
-| `/buddy card` | Name, species, rarity, stats, your streak and its lifetime counts |
+| `/buddy card` | Its card: name, species, rarity, stats, your streak and its lifetime counts |
 ```
 and replace
 ```
@@ -1965,7 +2106,7 @@ with:
 CC="$(ls "$(cygpath -u "$APPDATA")"/Claude/claude-code/*/*/claude.exe | sort -V | tail -1)"
 "$CC" plugin test ./buddy && "$CC" plugin validate ./buddy
 ```
-Expected: 87 pass, 0 fail. Validation passes, and its `state writes:` and `state reads:` lines now include `buddy.pending`.
+Expected: 124 pass, 0 fail. Validation passes, and its `state writes:` and `state reads:` lines now include `buddy.pending`.
 
 - [ ] **Step 7: Commit**
 
@@ -1975,8 +2116,9 @@ git commit -F - <<'EOF'
 feat: count every main turn, tool call, pet and talk, and greet the streak
 
 Counts wait in state and are saved at the end of a main turn and after a
-pet or a talk, merged with whatever another session saved. The first session
-of a new day records the visit and, on a streak of 2 or more, says so.
+pet or a talk, merged with whatever another session saved. The card shows
+the streak and the active buddy's counts in all three forms. The first
+session of a new day records the visit and, on a streak of 2 or more, says so.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 EOF
@@ -2005,7 +2147,7 @@ TMP="$(mktemp -d)"
 printf '{ "extends": "%s/tsconfig.json", "include": ["%s", "%s/hooks", "%s/types"] }\n' "$MOD" "$TYPES" "$MOD" "$MOD" > "$TMP/tsconfig.json"
 npx -y -p typescript@5.6 tsc -p "$(cygpath -m "$TMP/tsconfig.json")"
 ```
-Expected: no output (exit 0). Fix every error, re-run the tests, and commit the fixes as `fix: type errors`.
+Expected: no output (exit 0). The installed copy may be older than `main`. If `tsc` reports a missing engine type that `main`'s code uses (such as `Svg` or `ui.open`), update the installed plugin first. Otherwise, fix every error, re-run the tests, and commit the fixes as `fix: type errors`.
 
 - [ ] **Step 2: Bump the version and record what shipped**
 
@@ -2029,7 +2171,7 @@ In `README.md`, replace the paragraph under `## Design` with:
 CC="$(ls "$(cygpath -u "$APPDATA")"/Claude/claude-code/*/*/claude.exe | sort -V | tail -1)"
 "$CC" plugin test ./buddy && "$CC" plugin validate ./buddy
 ```
-Expected: 87 pass, 0 fail. Validation passes.
+Expected: 124 pass, 0 fail. Validation passes.
 
 - [ ] **Step 4: Commit**
 
@@ -2050,8 +2192,8 @@ claude plugin update buddy@buddy-mods
 ```
 Then, in a session:
 1. Run `/reload-plugins`.
-2. `/buddy card` should end with `Streak 1 day (best 1) · …`. Your existing buddy has been migrated, with counts starting at zero.
+2. Run `/buddy card`. The card should end with `Streak 1 day (best 1) · …`, as a footer row on the SVG card and as a line on the terminal pane. The existing buddy has been migrated, with counts starting at zero.
 3. Run a turn, then `/buddy card` again: the turn and tool-call counts have gone up.
 4. The next day's first session should show a streak greeting once the streak reaches 2.
 
-Report what was seen. Once it checks out, change the spec's status line from `live check pending` to `live-checked YYYY-MM-DD` and commit that.
+Report what was seen. Once it checks out, change the spec's status line from `live check pending` to `live-checked` with the date, and commit that.
