@@ -68,6 +68,14 @@ export function bandRows(
   }
 }
 
+// A shiny sprite cycles through these, one per tick.
+export const SHIMMER = ['red', 'yellow', 'green', 'cyan', 'blue', 'magenta'] as const
+
+export function spriteTint(bones: Pick<Bones, 'rarity' | 'shiny'>, tick: number): { color: string | undefined; bold: boolean } {
+  if (bones.shiny) return { color: SHIMMER[((tick % SHIMMER.length) + SHIMMER.length) % SHIMMER.length], bold: true }
+  return { color: RARITY[bones.rarity].color, bold: false }
+}
+
 export function nameLine(name: string, bones: Bones): { label: string; stars: string } {
   return {
     label: `  ${name}  ${bones.rarity} ${bones.species}${bones.shiny ? ' (shiny)' : ''}  `,

@@ -2,6 +2,7 @@ import type { ModelCompleteResult, On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
+import { SHIMMER } from './layout'
 import { FALLBACK_NAMES } from './voice'
 
 const ZERO = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
@@ -101,11 +102,12 @@ test('hatching names the buddy and draws it on terminal and desktop', async ($, 
   await $.session.start(START)
   expect(await runner($)('')).toMatch(/^Pip, (a (common|rare|legendary)|an (uncommon|epic)) .* hatched\.$/)
   await clock.settle()
-  for (const surface of ['terminal', 'desktop'] as const) {
-    const ui = await $.ui.mount({ plugin: 'buddy', surface, ...band() })
-    expect(await ui.find({ text: /Pip/ })).toBeDefined()
-    expect(await ui.find({ text: /Hello there\./ })).toBeDefined()
-  }
+  const terminal = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await terminal.find({ text: /Pip/ })).toBeDefined()
+  expect(await terminal.find({ text: /Hello there\./ })).toBeDefined()
+  const desktop = await $.ui.mount({ plugin: 'buddy', surface: 'desktop', ...band() })
+  expect(await desktop.find({ text: /Pip/ })).toBeDefined()
+  expect(String((await desktop.find({ type: 'Svg' }))?.props.source)).toContain('Hello there.')
 })
 
 test('a failing model still hatches, with a fallback name', async ($, on) => {
@@ -128,6 +130,46 @@ test('the full band is six rows on the terminal; a short band is one line', asyn
     expect(texts).toHaveLength(1)
     expect(texts[0]?.text).toMatch(/Pip/)
   }
+})
+
+// The sprite rows a terminal band drew: the Text elements carrying a `bold` prop.
+const spriteTexts = async (ui: { findAll: (q: { type: string }) => Promise<{ props: Record<string, unknown> }[]> }) =>
+  (await ui.findAll({ type: 'Text' })).filter(t => 'bold' in t.props)
+
+test('a sprite is drawn in its rarity color on the terminal', async ($, on) => {
+  // 'tint-11' rolls a plain rare penguin.
+  world(on, { buddy: { ...RECORD, seed: 'tint-11' } })
+  await $.session.start(START)
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band(10, 80) })
+  const rows = await spriteTexts(ui)
+  expect(rows).toHaveLength(5)
+  expect(rows.every(t => t.props.color === 'blue' && t.props.bold === false)).toBe(true)
+})
+
+test('a shiny sprite shimmers on the terminal: five bold rows that change color each tick', async ($, on) => {
+  // 'shiny-10' rolls a shiny common dragon.
+  const clock = world(on, { buddy: { ...RECORD, seed: 'shiny-10' } })
+  await $.session.start(START)
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band(10, 80) })
+  const colors = async () => new Set((await spriteTexts(ui)).filter(t => t.props.bold === true).map(t => t.props.color))
+  const before = await colors()
+  expect(before.size).toBe(1)
+  expect(SHIMMER as readonly unknown[]).toContain([...before][0])
+  await clock.advance(500)
+  const after = await colors()
+  expect(after.size).toBe(1)
+  expect([...after][0]).not.toBe([...before][0])
+})
+
+test('the desktop draws the art as one Svg and keeps only the name row as Text', async ($, on) => {
+  world(on, { buddy: { ...RECORD, seed: 'shiny-10' } })
+  await $.session.start(START)
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'desktop', ...band(10, 80) })
+  expect(await ui.find({ type: 'Code' })).toBeUndefined()
+  const svg = await ui.find({ type: 'Svg' })
+  expect(svg?.props.alt).toMatch(/^Pip/)
+  expect(String(svg?.props.source)).toContain('font-weight:bold')
+  expect(await ui.findAll({ type: 'Text' })).toHaveLength(2)
 })
 
 test("a survey takes the band even with a buddy on screen", async ($, on) => {
@@ -497,4 +539,73 @@ test("a subagent's failed tool doesn't leak into the main turn's reaction", asyn
   const reactions = prompts.filter(p => p.includes('Failed tools'))
   expect(reactions).toHaveLength(1)
   expect(reactions[0]).toContain('Failed tools: none.')
+})
+
+// One tour step is a 16-tick animation cycle at 500 ms a tick: 4 s plain, then 4 s shiny.
+const HALF_STEP_MS = 4_000
+
+test('the debug tour shows each species plain, then shiny, and never writes the store', async ($, on) => {
+  const writes: unknown[] = []
+  on('store.get', async () => ({ value: RECORD }))
+  on('store.set', async (_$, e) => {
+    writes.push(e.value)
+    return { value: undefined }
+  })
+  const clock = world(on, null)
+  await $.session.start(START)
+  expect(await runner($)('debug')).toBe('Touring all 18 species, plain then shiny. Run /buddy debug off to stop.')
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  const shimmering = async () => (await spriteTexts(ui)).every(t => t.props.bold === true)
+  expect(await ui.find({ type: 'Text', text: /tour 1\/18  common duck  $/ })).toBeDefined()
+  expect(await shimmering()).toBe(false)
+  await clock.advance(HALF_STEP_MS)
+  expect(await ui.find({ type: 'Text', text: /tour 1\/18  common duck \(shiny\)  $/ })).toBeDefined()
+  expect(await shimmering()).toBe(true)
+  await clock.advance(HALF_STEP_MS)
+  expect(await ui.find({ type: 'Text', text: /tour 2\/18  uncommon goose  $/ })).toBeDefined()
+  const desktop = await $.ui.mount({ plugin: 'buddy', surface: 'desktop', ...band() })
+  expect(await desktop.find({ type: 'Text', text: /tour 2\/18/ })).toBeDefined()
+  expect(writes).toEqual([])
+})
+
+test('debug off ends the tour', async ($, on) => {
+  world(on, { buddy: RECORD })
+  await $.session.start(START)
+  const run = runner($)
+  await run('debug')
+  expect(await run('debug off')).toBe('Back to Pip.')
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await ui.find({ type: 'Text', text: /tour/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /Pip/ })).toBeDefined()
+})
+
+test('the tour ends by itself after the last species', async ($, on) => {
+  const clock = world(on, { buddy: RECORD })
+  await $.session.start(START)
+  await runner($)('debug')
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  await clock.advance(18 * 2 * HALF_STEP_MS - 500)
+  expect(await ui.find({ type: 'Text', text: /tour 18\/18/ })).toBeDefined()
+  await clock.advance(500)
+  expect(await ui.find({ type: 'Text', text: /tour/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /Pip/ })).toBeDefined()
+})
+
+test('a reroll ends the tour', async ($, on) => {
+  const clock = world(on, { buddy: RECORD })
+  model(on, '{"name": "Bix", "personality": "New here."}', 'Hi.')
+  await $.session.start(START)
+  const run = runner($)
+  await run('debug')
+  await run('reroll confirm')
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await ui.find({ type: 'Text', text: /tour/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /Bix/ })).toBeDefined()
+})
+
+test('the tour needs a buddy on screen', async ($, on) => {
+  world(on, { buddy: { ...RECORD, mode: 'off' } })
+  await $.session.start(START)
+  expect(await runner($)('debug')).toBe('Pip is hidden. Run /buddy to bring it back.')
 })

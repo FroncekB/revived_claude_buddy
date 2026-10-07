@@ -21,6 +21,8 @@ declare module 'claude-code' {
       tick: number
       bubble: Bubble | null
       heartsUntilTick: number
+      // The tick /buddy debug started its tour on; null when no tour has run.
+      tourStartTick: number | null
       lastQuipAt: number
       lastReplyAt: number
     }

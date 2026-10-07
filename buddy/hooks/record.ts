@@ -20,7 +20,8 @@ export function newRecord(seed: string, soul: Soul, rerolls: number): BuddyRecor
   return { schema: 1, seed, soul, mode: 'on', rerolls }
 }
 
-export type Sub = 'show' | 'pet' | 'card' | 'mute' | 'unmute' | 'off' | 'reroll' | 'reroll-confirm' | 'usage'
+export type Sub =
+  | 'show' | 'pet' | 'card' | 'mute' | 'unmute' | 'off' | 'reroll' | 'reroll-confirm' | 'debug' | 'debug-off' | 'usage'
 
 const SIMPLE: readonly string[] = ['pet', 'card', 'mute', 'unmute', 'off']
 
@@ -31,6 +32,11 @@ export function parseSub(args: string): Sub {
   if (first === 'reroll') {
     if (words.length === 1) return 'reroll'
     return words.length === 2 && second === 'confirm' ? 'reroll-confirm' : 'usage'
+  }
+  // Hidden: left out of USAGE, the argument hint and the README on purpose.
+  if (first === 'debug') {
+    if (words.length === 1) return 'debug'
+    return words.length === 2 && second === 'off' ? 'debug-off' : 'usage'
   }
   return words.length === 1 && SIMPLE.includes(first) ? (first as Sub) : 'usage'
 }
