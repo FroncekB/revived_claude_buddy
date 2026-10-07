@@ -1,7 +1,9 @@
 import { expect, test } from 'claude-code/testing'
 
 import { EYES, HATS, SPECIES } from './roll'
-import { BLANK, HAT_ART, HEARTS, SPRITE_W, bodyRows, eggRows, faceFor, fillEyes, frameAt, spriteRows, topRow } from './sprites'
+import {
+  BLANK, HAT_ART, HEARTS, POSES, POSE_EYE, SPRITE_W, bodyRows, eggRows, faceFor, fillEyes, frameAt, spriteRows, topRow,
+} from './sprites'
 
 test('every species frame is 4 body rows of at most 12 columns for every eye', () => {
   const over: string[] = []
@@ -58,4 +60,37 @@ test('the 16-tick cycle rests, fidgets twice and blinks once', () => {
   expect(cycle.filter(f => f.frame === 2)).toHaveLength(1)
   expect(cycle.filter(f => f.blink)).toHaveLength(1)
   expect(frameAt(16)).toEqual(frameAt(0))
+})
+
+test('every species has a flinch, celebrate and sleep frame of 4 rows within 12 columns, each with an eye', () => {
+  const bad: string[] = []
+  for (const species of SPECIES) {
+    for (const pose of POSES) {
+      const rows = bodyRows(species, pose)
+      if (rows.length !== 4) bad.push(`${species} ${pose}: ${rows.length} rows`)
+      if (!rows.some(row => row.includes('{E}'))) bad.push(`${species} ${pose}: no eye`)
+      for (const row of rows) {
+        const drawn = fillEyes(row, POSE_EYE[pose])
+        if (drawn.length > SPRITE_W) bad.push(`${species} ${pose}: "${drawn}"`)
+      }
+    }
+  }
+  expect(bad).toEqual([])
+})
+
+test('a posed sprite is 5 rows of 12 with the hat row on top, and differs from the rest frame', () => {
+  for (const species of SPECIES) {
+    const rest = spriteRows({ species, eye: '·', frame: 0, top: BLANK })
+    for (const pose of POSES) {
+      const rows = spriteRows({ species, eye: POSE_EYE[pose], frame: pose, top: BLANK })
+      expect(rows).toHaveLength(5)
+      expect(rows.every(r => r.length === SPRITE_W)).toBe(true)
+      expect(rows[0]).toBe(BLANK)
+      expect(rows).not.toEqual(rest)
+    }
+  }
+})
+
+test('the pose eyes are none of the rolled eyes', () => {
+  for (const pose of POSES) expect(EYES as readonly string[]).not.toContain(POSE_EYE[pose])
 })

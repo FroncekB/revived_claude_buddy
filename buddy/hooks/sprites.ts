@@ -5,10 +5,15 @@ import type { Hat, Species } from './roll'
 export const SPRITE_W = 12
 export const BLANK = ' '.repeat(SPRITE_W)
 export type Frame = 0 | 1 | 2
+// The reaction poses (Alive spec section 4), drawn for every species.
+export type Pose = 'flinch' | 'celebrate' | 'sleep'
+export const POSES: readonly Pose[] = ['flinch', 'celebrate', 'sleep']
+// Each pose fills {E} with its own eye. None is a rolled eye.
+export const POSE_EYE: Record<Pose, string> = { flinch: 'O', celebrate: '^', sleep: '-' }
 
-// Each entry: the rest frame's four body rows, a line holding only "~", then
-// the fidget-B frame's four body rows. Lines start at column 0. Rest rows stay
-// within 11 columns so fidget A (rest nudged one column right) still fits.
+// Each entry: five sections of four body rows, split by lines holding only "~": rest,
+// fidget B, flinch, celebrate, sleep. Lines start at column 0. Rest rows stay within 11
+// columns so fidget A (rest nudged one column right) still fits; the others may use all 12.
 const ART: Record<Species, string> = {
   duck: String.raw`
     __
@@ -20,6 +25,21 @@ const ART: Record<Species, string> = {
   <({E} )___
    ( ._> \/
     '---'
+~
+    __  !
+  <({E} )___
+  \( ._> /\
+    '---'
+~
+  \ __
+  <({E} )___/
+   ( ._> /
+    '---'
+~
+
+    __
+  <({E} )____
+   (_.__>_/
 `,
   goose: String.raw`
     ({E}>
@@ -31,6 +51,21 @@ const ART: Record<Species, string> = {
      )|
    _(  )_
     ^^ ^^
+~
+  ! ({E}>
+    ( |
+   _(  )_
+   ^^  ^^
+~
+    ({E}>
+  \  )|  /
+   _(  )_
+   ^^  ^^
+~
+
+    _____
+   _( {E}<)_
+   ^^  ^^
 `,
   blob: String.raw`
   .------.
@@ -41,6 +76,21 @@ const ART: Record<Species, string> = {
 
  .--------.
 ( {E}    {E}  )
+ '--------'
+~
+ .-------. !
+( {E}    {E}  )
+ (   oo   )
+  '------'
+~
+  .------.
+\( {E}    {E} )/
+ (   \/   )
+  '------'
+~
+
+  .------.
+ ( {E}    {E} )
  '--------'
 `,
   cat: String.raw`
@@ -53,6 +103,21 @@ const ART: Record<Species, string> = {
  ( {E} {E} )
  =\ w /=
   (")(")_
+~
+  /\_/\  !
+ ( {E} {E} )
+ =\ o /=
+ /(")(")\
+~
+  /\_/\
+ ( {E} {E} )
+\=\ w /=/
+  (")(")~
+~
+
+  /\_/\___
+ ( {E} {E}    )~
+  (")(")___)
 `,
   dragon: String.raw`
   /)    (\
@@ -64,6 +129,21 @@ const ART: Record<Species, string> = {
  (  {E}  {E}  )
   \  ~~  /
    \____/~
+~
+  /)    (\ !
+ (  {E}  {E}  )
+  \  ^^  /
+   \____/~
+~
+  /)    (\
+ (  {E}  {E}  )
+  \  vv  /~*
+   \____/
+~
+
+  /)____(\
+ (  {E}  {E}  )
+  \______/
 `,
   octopus: String.raw`
    ,----,
@@ -75,6 +155,21 @@ const ART: Record<Species, string> = {
   ( {E}  {E} )
   (  __  )
   \\||||//
+~
+   ,----, !
+  ( {E}  {E} )
+  (  oo  )
+ /// || \\\
+~
+\\ ,----, //
+ \( {E}  {E} )/
+  (  \/  )
+   /||||\
+~
+
+   ,----,
+  ( {E}  {E} )
+ ~~||||||~~
 `,
   owl: String.raw`
   /\____/\
@@ -86,6 +181,21 @@ const ART: Record<Species, string> = {
  ( ({E})(-) )
  (   \/   )
   '------'
+~
+  /\____/\ !
+ ( ({E})({E}) )
+ (   <>   )
+ /'------'\
+~
+  /\____/\
+\( ({E})({E}) )/
+ (   \/   )
+  '------'
+~
+
+  /\____/\
+ ( ({E})({E}) )
+ (___\/___)
 `,
   penguin: String.raw`
    .--.
@@ -97,6 +207,21 @@ const ART: Record<Species, string> = {
   ({E} v {E})
  \(    )/
    ^  ^
+~
+   .--.  !
+  ({E} o {E})
+ -(    )-
+   ^  ^
+~
+ \ .--. /
+  ({E} v {E})
+   (    )
+  ^    ^
+~
+
+   .--.
+  ({E} v {E})
+ _(____)_
 `,
   turtle: String.raw`
    .-==-.
@@ -108,6 +233,21 @@ const ART: Record<Species, string> = {
   ( {E}  {E} )
  /[_/\/\_]\
  ''      ''
+~
+   .-==-. !
+  ( {E}  {E} )
+  [_/\/\_]
+   ''  ''
+~
+   .-==-.
+ \( {E}  {E} )/
+ /[_/\/\_]\
+  ''    ''
+~
+
+   .-==-.
+  [_/{E}{E}\_]
+  ''    ''
 `,
   snail: String.raw`
  {E} {E}  .--.
@@ -119,6 +259,21 @@ const ART: Record<Species, string> = {
  | / ( @ )
   \_\_)__/
    ~~~~~~
+~
+  !   .--.
+ {E}{E}  ( @ )
+  \_\_)__/
+   ~~~~~~
+~
+ {E}   {E} .--.
+  \ / ( @ )
+  \_\_)__/
+   ~~~~~~
+~
+
+      .--.
+  {E}{E} ( @ )
+  \__)__/
 `,
   ghost: String.raw`
    .-''-.
@@ -130,6 +285,21 @@ const ART: Record<Species, string> = {
   / {E}  {E} \
   |   O  |
   |\/\/\/|
+~
+  .-''-.  !
+ / {E}  {E}  \
+ |   O   |
+ |\/\/\/\|
+~
+   .-''-.
+\ / {E}  {E} \ /
+  |   v  |
+  |/\/\/\|
+~
+
+   .-''-.
+  / {E}  {E} \
+  '~~~~~~'
 `,
   axolotl: String.raw`
 } ,----, {
@@ -141,6 +311,21 @@ const ART: Record<Species, string> = {
 {( {E} . {E} )}
   ( '--' )~
    ^    ^
+~
+}},----,{{ !
+}( {E} . {E} ){
+  ( 'oo' )~
+   ^    ^
+~
+{ ,----, }
+{( {E} . {E} )}
+ \( '--' )/
+   ^    ^
+~
+
+} ,----, {
+}( {E} . {E} ){
+ ~( ____ )~
 `,
   capybara: String.raw`
   o______o
@@ -152,6 +337,21 @@ const ART: Record<Species, string> = {
  ( {E}    {E} )
  (  (..)  )
   '------'
+~
+  o______o !
+ ( {E}    {E} )
+ (  (OO)  )
+ /'------'\
+~
+  o______o
+\( {E}    {E} )/
+ (  (oo)  )
+  '------'
+~
+
+  o______o
+ ( {E}    {E} )
+ (__(..)__)
 `,
   cactus: String.raw`
  n  .--.  n
@@ -163,6 +363,21 @@ const ART: Record<Species, string> = {
  | | {E}{E} | |
  '-|    |-'
    |____|
+~
+ n *.--.* n
+ | | {E}{E} | |
+ '-|  o |-'
+   |____|
+~
+\n  .*-.  n/
+ | | {E}{E} | |
+ '-|    |-'
+   |____|
+~
+    .--.
+   | {E}{E} |
+ .-|    |-.
+ U |____| U
 `,
   robot: String.raw`
     _||_
@@ -174,6 +389,21 @@ const ART: Record<Species, string> = {
   |[{E}][{E}]|
   | -==- |
   d[____]b
+~
+  * _||_ *
+  |[{E}][{E}]|
+  | -!!- |
+  d[____]b
+~
+    _||_
+\ |[{E}][{E}]| /
+  | \__/ |
+  d[____]b
+~
+    _||_
+  |[{E}][{E}]|
+  | .... |
+ _d[____]b_
 `,
   rabbit: String.raw`
    (\  /)
@@ -185,6 +415,21 @@ const ART: Record<Species, string> = {
   ( {E}  {E} )
  =(  w  )=
   (")-(")
+~
+   ||  || !
+  ( {E}  {E} )
+ =(  o  )=
+  (")-(")
+~
+   (\  /)
+ \( {E}  {E} )/
+ =(  w  )=
+  ('')('')
+~
+
+  __    __
+  ( {E}  {E} )
+ =(__w__)=
 `,
   mushroom: String.raw`
   .-o--o-.
@@ -196,6 +441,21 @@ const ART: Record<Species, string> = {
  (________)
    | {E}{E} |
    (____)
+~
+ .-o--o-. .
+(________) !
+   | {E}{E} |
+   (____)
+~
+  .-o--o-.
+ (________)
+ \ | {E}{E} | /
+   (____)
+~
+
+  .-o--o-.
+ (________)
+   (_{E}{E}_)
 `,
   chonk: String.raw`
   /\____/\
@@ -207,6 +467,21 @@ const ART: Record<Species, string> = {
  (  {E}  {E}  )
  (   ww   )~
   (______)
+~
+  /\____/\ !
+ (  {E}  {E}  )
+ (   oo   )
+ /(______)\
+~
+  /\____/\
+\(  {E}  {E}  )/
+ (   ww   )
+  (______)
+~
+
+  /\____/\
+ (  {E}  {E}  )
+ (________)~
 `,
 }
 
@@ -255,10 +530,14 @@ export const HAT_ART: Record<Hat, string> = {
 
 export const HEARTS: readonly string[] = ['   ♥    ♥', '  ♥   ♥  ♥', ' ♥  ♥   ♥']
 
-function parseArt(art: string): [string[], string[]] {
-  const lines = art.replace(/\r/g, '').split('\n').slice(1, -1)
-  const cut = lines.indexOf('~')
-  return [lines.slice(0, cut), lines.slice(cut + 1)]
+// An art string's sections, split at its "~" lines.
+function parseArt(art: string): string[][] {
+  const sections: string[][] = [[]]
+  for (const line of art.replace(/\r/g, '').split('\n').slice(1, -1)) {
+    if (line === '~') sections.push([])
+    else sections[sections.length - 1]!.push(line)
+  }
+  return sections
 }
 
 // Pads only. A row that overflows stays long so the tests catch it.
@@ -270,13 +549,18 @@ export function fillEyes(row: string, eye: string): string {
   return row.split('{E}').join(eye)
 }
 
-export function bodyRows(species: Species, frame: Frame): string[] {
-  const [rest, alt] = parseArt(ART[species])
+// Where each frame after the rest frame sits in a species' art.
+const SECTION: Record<2 | Pose, number> = { 2: 1, flinch: 2, celebrate: 3, sleep: 4 }
+
+export function bodyRows(species: Species, frame: Frame | Pose): string[] {
+  const sections = parseArt(ART[species])
+  const rest = sections[0]!
+  if (frame === 0) return rest
   if (frame === 1) return rest.map(row => ' ' + row)
-  return frame === 0 ? rest : alt
+  return sections[SECTION[frame]]!
 }
 
-export function spriteRows(o: { species: Species; eye: string; frame: Frame; top: string }): string[] {
+export function spriteRows(o: { species: Species; eye: string; frame: Frame | Pose; top: string }): string[] {
   return [o.top, ...bodyRows(o.species, o.frame).map(row => fillEyes(row, o.eye))].map(fit)
 }
 
@@ -288,7 +572,7 @@ export function topRow(o: { hat: Hat | 'none'; heartsFrame: number | null; spark
 }
 
 export function eggRows(frame: Frame): string[] {
-  const [whole, cracked] = parseArt(EGG)
+  const [whole, cracked] = parseArt(EGG) as [string[], string[]]
   const body = frame === 0 ? whole : frame === 1 ? whole.map(row => ' ' + row) : cracked
   return [BLANK, ...body].map(fit)
 }
