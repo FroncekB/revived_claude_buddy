@@ -52,7 +52,7 @@ const from = (month: number, first: number, last: number) => (_y: number, m: num
 // In match order: the first that matches wins, so Easter beats April Fools when they share a day.
 export const HOLIDAYS: readonly Rule[] = [
   {
-    id: 'newyear', name: "New Year's", line: "Today is New Year's.",
+    id: 'newyear', name: "New Year's", line: "It is New Year's.",
     on: (_y, m, d) => (m === 12 && d === 31) || (m === 1 && d === 1),
   },
   {

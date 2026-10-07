@@ -74,6 +74,10 @@ test('events replay in order', () => {
   expect(applyMood(mood(0), ['clean', 'fail'], T0).meter).toBe(-1)
 })
 
+test("an event this build doesn't know changes nothing", () => {
+  expect(applyMood(mood(-2), ['party' as MoodEvent], T0)).toEqual(mood(-2))
+})
+
 test('days away leave a sulk on the first visit of a new day', () => {
   expect(sulkFor(null, '2026-10-07')).toBe(0)
   expect(sulkFor('2026-10-06', '2026-10-07')).toBe(0)

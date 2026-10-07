@@ -98,8 +98,11 @@ export function applyChange(saved: Saved | null, change: Change, now: number): S
       return saved && { ...saved, mode: change.mode }
     case 'flush': {
       if (!saved) return null
+      // The visit comes first: it may set a sulk, and a pet in this same flush must ease that
+      // sulk, not be undone by it.
+      const arrived = arrive(saved, now)
       let added = false
-      const buddies = saved.buddies.map(b => {
+      const buddies = arrived.buddies.map(b => {
         const more = change.pending[b.seed]
         const felt = change.mood?.[b.seed] ?? []
         if (!more && felt.length === 0) return b
@@ -110,9 +113,7 @@ export function applyChange(saved: Saved | null, change: Change, now: number): S
           ...(felt.length > 0 ? { mood: applyMood(b.mood, felt, now) } : {}),
         }
       })
-      const moved = { ...saved, buddies }
-      const arrived = arrive(moved, now)
-      return added || arrived !== moved ? arrived : null
+      return added || arrived !== saved ? { ...arrived, buddies } : null
     }
     case 'visit': {
       if (!saved) return null

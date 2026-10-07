@@ -638,7 +638,7 @@ test("a subagent's failed tool doesn't leak into the main turn's reaction", asyn
 const HALF_STEP_MS = 4_000
 const STEP_MS = 14_000
 
-test('the debug tour shows each species plain, then shiny, and never writes the store', async ($, on) => {
+test('the debug tour shows each species plain, shiny, then flinching, and never writes the store', async ($, on) => {
   const writes: unknown[] = []
   on('store.get', async () => ({ value: RECORD }))
   on('store.set', async (_$, e) => {

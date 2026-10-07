@@ -53,6 +53,9 @@ function step(m: Mood, e: MoodEvent): Mood {
       return { ...m, meter: clampMeter(m.meter + 1) }
     case 'soothe':
       return { ...m, sulk: Math.max(0, m.sulk - 1) }
+    default:
+      // An event this build doesn't know (a newer build's) changes nothing.
+      return m
   }
 }
 

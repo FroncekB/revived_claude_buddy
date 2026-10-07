@@ -90,3 +90,7 @@ test('every holiday has a name and a persona line', () => {
     expect(h.line).toMatch(/^(Today is|It is) .+\.$/)
   }
 })
+
+test("New Year's reads as a range, since the persona hears it on Dec 31 too", () => {
+  expect(holidayOn('2026-12-31', HATCHED)?.line).toBe("It is New Year's.")
+})

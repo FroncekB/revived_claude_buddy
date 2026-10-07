@@ -149,3 +149,9 @@ test('a new day after two or more missed ones leaves the active buddy sulking', 
   expect(activeBuddy(applyChange(yesterday, { kind: 'visit' }, NOON)!).mood).toBeUndefined()
   expect(applyChange(visited, { kind: 'visit' }, NOON)).toBeNull()
 })
+
+test('a pet in the flush that sets the sulk still eases it by one step', () => {
+  const away: Saved = { ...migrate(V1), you: { lastDay: '2026-10-02', streak: 4, bestStreak: 4, days: 9 } }
+  const saved = applyChange(away, { kind: 'flush', pending: {}, mood: { s: ['soothe'] } }, NOON)!
+  expect(activeBuddy(saved).mood).toMatchObject({ sulk: 2 })
+})

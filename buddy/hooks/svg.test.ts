@@ -20,7 +20,7 @@ test('each row is one text line with its spaces kept and markup characters escap
 
 test("the model's bubble text cannot inject markup", () => {
   const bubble = ['', '< <script>&"hi" |', '', '', '']
-  const { source } = bandSvg({ sprite: SPRITE, right: rightRuns(bubble, null),color: undefined, bold: false })
+  const { source } = bandSvg({ sprite: SPRITE, right: rightRuns(bubble, null), color: undefined, bold: false })
   expect(source).not.toContain('<script>')
   expect(source).toContain('&lt;script&gt;&amp;&quot;hi&quot;')
 })
@@ -42,7 +42,7 @@ test('every color the band can ask for has a light and a dark fill', () => {
 
 test('the box fits the longest row and all five lines', () => {
   const bubble = ['', '< a longer line from the buddy |', '', '', '']
-  const { width, height } = bandSvg({ sprite: SPRITE, right: rightRuns(bubble, null),color: undefined, bold: false })
+  const { width, height } = bandSvg({ sprite: SPRITE, right: rightRuns(bubble, null), color: undefined, bold: false })
   expect(width).toBeGreaterThanOrEqual((12 + 1 + bubble[1]!.length) * CHAR_PX)
   expect(height).toBeGreaterThanOrEqual(5 * LINE_PX)
 })

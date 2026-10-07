@@ -319,6 +319,8 @@ async function ask(
   inFlight = mine
   try {
     const system = personaSystem(who.soul, bones, await momentLines($, who))
+    // A reply may have aborted this call while the moment lines were read.
+    if (mine.controller.signal.aborted) return null
     const result = await $.model.complete(
       { model: 'haiku', system, prompt, maxTokens: 80, timeoutMs: 8000 },
       { signal: mine.controller.signal },
