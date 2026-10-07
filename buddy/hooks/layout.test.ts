@@ -1,6 +1,9 @@
 import { expect, test } from 'claude-code/testing'
 
-import { SHIMMER, bandRows, bubbleRows, cardLines, compactLine, isCompact, nameLine, spriteTint, wrap } from './layout'
+import {
+  SHIMMER, bandRows, bubbleRows, cardLines, compactLine, isCompact, nameLine, spriteTint, streakLine, wrap,
+} from './layout'
+import { zeroCounts } from './ledger'
 import { rollBones } from './roll'
 
 const SPRITE = ['a', 'b', 'c', 'd', 'e'].map(s => s.padEnd(12))
@@ -97,4 +100,17 @@ test('a shiny sprite is bold and shimmers through every color, one per tick', ()
   expect(tints.map(t => t.color)).toEqual([...SHIMMER])
   expect(tints.every(t => t.bold)).toBe(true)
   expect(spriteTint({ rarity: 'common', shiny: true }, SHIMMER.length)).toEqual(tints[0])
+})
+
+test('the streak line counts with commas, agrees in number, and keeps the text card short', () => {
+  const many = { ...zeroCounts(), turns: 340, calls: { ...zeroCounts().calls, shell: 2_000, read: 104 } }
+  const twelve = { lastDay: '2026-10-07', streak: 12, bestStreak: 30, days: 40 }
+  expect(streakLine(twelve, many)).toBe('Streak 12 days (best 30) · 340 turns · 2,104 tool calls')
+  const one = { ...zeroCounts(), turns: 1, calls: { ...zeroCounts().calls, edit: 1 } }
+  expect(streakLine({ lastDay: '2026-10-07', streak: 1, bestStreak: 1, days: 1 }, one)).toBe(
+    'Streak 1 day (best 1) · 1 turn · 1 tool call',
+  )
+  expect(streakLine(twelve, { ...zeroCounts(), turns: 1_234_567 })).toContain('1,234,567 turns')
+  const card = [...cardLines(SOUL, rollBones('layout-seed'), 2), streakLine(twelve, many)]
+  expect(card.length).toBeLessThanOrEqual(12)
 })

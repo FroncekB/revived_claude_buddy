@@ -1,6 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { cardAlt, cardSvg, meter, radarPoint, statAlt } from './card'
+import { zeroCounts } from './ledger'
 import type { Bones } from './roll'
 
 const BONES: Bones = {
@@ -117,4 +118,21 @@ test("a shiny buddy's portrait stays gold whatever its rarity", () => {
   for (const rarity of ['common', 'legendary'] as const) {
     expect(cardSvg(SOUL, { ...BONES, rarity, shiny: true }, 0)).toContain('font-size="15" fill="#c99a12"')
   }
+})
+
+test('given the history, the card adds a streak row 20 px lower and the alt text ends with it', () => {
+  const history = {
+    you: { lastDay: '2026-10-07', streak: 12, bestStreak: 30, days: 40 },
+    counts: { ...zeroCounts(), turns: 340, calls: { ...zeroCounts().calls, shell: 2_104 } },
+  }
+  const svg = cardSvg(SOUL, BONES, 0, history)
+  expect(svg).toContain('>Streak 12 days (best 30)</text>')
+  expect(svg).toContain('>340 turns · 2,104 tool calls</text>')
+  const plain = cardSvg(SOUL, BONES, 0)
+  expect(plain).not.toContain('Streak')
+  const height = (s: string) => Number(/height="(\d+)"/.exec(s)?.[1])
+  expect(height(svg)).toBe(height(plain) + 20)
+  expect(cardAlt(SOUL, BONES, 0, history)).toBe(
+    `${cardAlt(SOUL, BONES, 0)} Streak 12 days (best 30) · 340 turns · 2,104 tool calls.`,
+  )
 })

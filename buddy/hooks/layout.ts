@@ -1,7 +1,8 @@
 // The band's text layout: bubble wrapping, full and compact rows, and the card.
-import type { Soul } from '../types'
+import type { Counts, Soul, You } from '../types'
 import { RARITY, STATS } from './roll'
 import type { Bones } from './roll'
+import { totalCalls } from './ledger'
 
 export const MIN_FULL_ROWS = 6
 export const MIN_FULL_COLS = 44
@@ -98,4 +99,21 @@ export function cardLines(soul: Soul, bones: Bones, rerolls: number): string[] {
     ...STATS.map(s => `${s.padEnd(10)} ${bar(bones.stats[s])} ${String(bones.stats[s]).padStart(3)}`),
     `Hatched ${soul.hatchedAt.slice(0, 10)}   Rerolls: ${rerolls}`,
   ]
+}
+
+const withCommas = (n: number) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+const howMany = (n: number, noun: string) => `${withCommas(n)} ${noun}${n === 1 ? '' : 's'}`
+
+// The person's streak: the first half of the card's streak line.
+export function streakText(you: You): string {
+  return `Streak ${howMany(you.streak, 'day')} (best ${withCommas(you.bestStreak)})`
+}
+
+// The active buddy's lifetime counts: the second half.
+export function countsText(counts: Counts): string {
+  return `${howMany(counts.turns, 'turn')} · ${howMany(totalCalls(counts), 'tool call')}`
+}
+
+export function streakLine(you: You, counts: Counts): string {
+  return `${streakText(you)} · ${countsText(counts)}`
 }
