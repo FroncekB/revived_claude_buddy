@@ -76,6 +76,8 @@ let cannedCount = 0
 // The current main turn's tool tally; reset when that turn completes.
 let tally: Record<string, number> = {}
 let failedTools: string[] = []
+// The last commit this session started. The next one waits for it to settle.
+let lastCommit: Promise<unknown> = Promise.resolve()
 
 function startTimer($: EngineInterface) {
   timer?.cancel()
@@ -126,7 +128,19 @@ function refusal(stored: Stored): string | null {
 // Returns null when it wrote, or had nothing to write. A record it must not touch comes back
 // as its refusal line, and a failed write, which leaves the result in state marked unsaved, as
 // SAVE_FAILED.
-async function commit($: EngineInterface, change: Change): Promise<string | null> {
+//
+// Commits in one session run one at a time. Two that overlapped would both build on the same
+// stored record, and the later write would undo the earlier one: a mute lost to a turn's save,
+// or one batch of counts lost to another. A commit that throws still hands over to the next,
+// and its caller still sees the throw. Nothing inside `commitNow` may call `commit`, which
+// would wait on itself.
+function commit($: EngineInterface, change: Change): Promise<string | null> {
+  const run = lastCommit.then(() => commitNow($, change))
+  lastCommit = run.catch(() => undefined)
+  return run
+}
+
+async function commitNow($: EngineInterface, change: Change): Promise<string | null> {
   const base = await current($)
   const refused = refusal(base)
   if (refused) return refused
@@ -158,8 +172,12 @@ async function count($: EngineInterface, event: CountEvent) {
 async function flush($: EngineInterface) {
   const saved = await read($, record)
   if (!saved || saved.mode === 'off') return
-  const taken = await read($, pending)
-  await update($, pending, () => ({}))
+  // Taken and cleared in one update, so a count landing in between is never erased.
+  let taken: Record<string, Counts> = {}
+  await update($, pending, p => {
+    taken = p
+    return {}
+  })
   try {
     await commit($, { kind: 'flush', pending: taken })
   } catch {
