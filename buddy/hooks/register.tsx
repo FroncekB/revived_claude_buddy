@@ -2,16 +2,20 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Buddy, Counts, Saved, Soul } from '../types'
+import { dayInfo } from './calendar'
 import { cardAlt, cardSvg, meter } from './card'
 import { bandRows, cardLines, compactLine, isCompact, nameLine, rightRuns, spriteTint, streakLine } from './layout'
 import { addCounts, countEvent, mergePending, zeroCounts } from './ledger'
 import type { CountEvent } from './ledger'
+import { draw, portrait } from './look'
+import type { Scene } from './look'
+import { applyMood, moodOf } from './mood'
 import { STORE_KEY, USAGE, activeBuddy, applyChange, classify, parseSub } from './record'
 import type { Change, Stored, Sub } from './record'
 import { RARITY, STATS, rollBones } from './roll'
 import type { Bones } from './roll'
-import { eggRows, faceFor, frameAt, spriteRows, topRow } from './sprites'
-import type { Frame } from './sprites'
+import { eggRows, frameAt } from './sprites'
+import type { Frame, Prop } from './sprites'
 import { bandSvg } from './svg'
 import { TOUR_STEPS, tourAt } from './tour'
 import {
@@ -47,6 +51,9 @@ const tourStart = atom({ plugin: 'buddy', key: 'tourStartTick' } as const, null)
 const lastQuipAt = atom({ plugin: 'buddy', key: 'lastQuipAt' } as const, 0)
 const lastReplyAt = atom({ plugin: 'buddy', key: 'lastReplyAt' } as const, 0)
 const pending = atom({ plugin: 'buddy', key: 'pending' } as const, {})
+const posing = atom({ plugin: 'buddy', key: 'pose' } as const, null)
+const lastActive = atom({ plugin: 'buddy', key: 'lastActiveTick' } as const, 0)
+const pendingMood = atom({ plugin: 'buddy', key: 'pendingMood' } as const, {})
 
 const CARD = 'card'
 const NO_BUDDY = 'No buddy yet. Run /buddy to hatch one.'
@@ -64,6 +71,8 @@ type Look = {
   say: string | null
   // How far through its life the bubble is, 0 to 1: which page a long one is on.
   sayAt: number
+  // A holiday prop beside the sprite, while nothing is said.
+  prop: Prop | null
 }
 
 // The part of a buddy that speaks: its seed, for the bones, and its soul.
@@ -202,6 +211,12 @@ async function countAndFlush($: EngineInterface, event: CountEvent) {
 async function countsOf($: EngineInterface, buddy: Buddy): Promise<Counts> {
   const waiting = (await read($, pending))[buddy.seed]
   return waiting ? addCounts(buddy.counts, waiting) : buddy.counts
+}
+
+// Activity: the buddy wakes, and idle sleep counts from now (Alive spec section 4).
+async function stir($: EngineInterface) {
+  const now = await read($, tick)
+  await update($, lastActive, () => now)
 }
 
 async function showBubble($: EngineInterface, text: string) {
@@ -383,33 +398,58 @@ function eggLook(frame: Frame): Look {
     spriteBold: false,
     say: null,
     sayAt: 0,
+    prop: null,
   }
 }
 
-// `withTour` false draws the real buddy whatever the band is touring (the card pane).
-async function buddyLook($: EngineInterface, saved: Saved, t: number, withTour = true): Promise<Look> {
+// The moment as it really is: the mood with this session's unsaved events, a pose still running,
+// idle time, and what the clock says about night and holidays.
+async function liveScene(
+  $: EngineInterface,
+  buddy: Buddy,
+  bones: Bones,
+  t: number,
+  heartsFrame: number | null,
+  saying: boolean,
+): Promise<Scene> {
+  const now = await $.clock.now()
+  const day = dayInfo(now, buddy.soul.hatchedAt)
+  const queued = (await read($, pendingMood))[buddy.seed] ?? []
+  const posed = await read($, posing)
+  return {
+    bones,
+    tick: t,
+    mood: moodOf(applyMood(buddy.mood, queued, now), now),
+    pose: posed && t < posed.untilTick ? posed.kind : null,
+    idleTicks: t - (await read($, lastActive)),
+    night: day.night,
+    holiday: day.holiday,
+    heartsFrame,
+    saying,
+  }
+}
+
+async function buddyLook($: EngineInterface, saved: Saved, t: number): Promise<Look> {
   const buddy = activeBuddy(saved)
   // A running /buddy debug tour dresses the real buddy up; nothing saved changes.
-  const started = withTour ? await read($, tourStart) : null
+  const started = await read($, tourStart)
   const tour = started === null ? null : tourAt(t - started)
   const bones = tour ? { ...rollBones(buddy.seed), ...tour.look } : rollBones(buddy.seed)
   const name = tour ? `tour ${tour.step + 1}/${TOUR_STEPS}` : buddy.soul.name
   const animTick = tour ? tour.tick : t
-  const { frame, blink } = frameAt(animTick)
-  const eye = blink ? '-' : bones.eye
   const heartsUntilTick = await read($, heartsUntil)
-  const top = topRow({
-    hat: bones.hat,
-    heartsFrame: t < heartsUntilTick ? t : null,
-    sparkle: bones.shiny ? animTick : null,
-  })
+  const heartsFrame = t < heartsUntilTick ? t : null
   const said = await read($, bubble)
   const saying = said !== null && t < said.untilTick
+  const scene: Scene = tour
+    ? { bones, tick: animTick, mood: 'neutral', pose: null, idleTicks: 0, night: false, holiday: null, heartsFrame, saying }
+    : await liveScene($, buddy, bones, t, heartsFrame, saying)
+  const drawn = draw(scene)
   const { label, stars } = nameLine(name, bones)
   const sprite = spriteTint(bones, animTick)
   return {
-    sprite: spriteRows({ species: bones.species, eye, frame, top }),
-    face: faceFor(bones.species, eye),
+    sprite: drawn.sprite,
+    face: drawn.face,
     name,
     label,
     stars,
@@ -418,6 +458,7 @@ async function buddyLook($: EngineInterface, saved: Saved, t: number, withTour =
     spriteBold: sprite.bold,
     say: saying ? said.text : null,
     sayAt: saying ? (t - said.fromTick) / (said.untilTick - said.fromTick) : 0,
+    prop: drawn.prop,
   }
 }
 
@@ -436,6 +477,8 @@ export const register: Register = on => {
     try {
       // A reload in the middle of a hatch leaves the egg flag set with nobody to clear it.
       await update($, hatching, () => false)
+      // A session start is activity: a session never opens on a sleeping buddy.
+      await stir($)
       // A write that failed before a reload left the only copy in state: current() keeps it.
       const stored = await current($)
       const saved = stored.kind === 'ok' ? stored.saved : null
@@ -452,6 +495,7 @@ export const register: Register = on => {
 
   on('command.run', { command: 'buddy' }, async ($, e) => {
     try {
+      await stir($)
       return { text: await runBuddy($, parseSub(e.args)) }
     } catch {
       return { text: 'Your buddy hit a snag. Try again.' }
@@ -461,6 +505,8 @@ export const register: Register = on => {
   on('tool.call', async ($, e, next) => {
     const ran = await next(e)
     try {
+      // Any tool call is activity, a subagent's included: the session is busy either way.
+      later($, () => stir($))
       // Main conversation only: a subagent's calls never reach the buddy's reactions or counts.
       if (e.agentId === undefined) {
         tally[e.tool] = (tally[e.tool] ?? 0) + 1
@@ -478,6 +524,7 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
     try {
+      later($, () => stir($))
       if (e.agentId === undefined) {
         const summary: TurnSummary = { reason: e.reason, durationMs: e.durationMs, tools: tally, failed: failedTools }
         tally = {}
@@ -494,6 +541,7 @@ export const register: Register = on => {
 
   on('prompt.submit', async ($, e, next) => {
     try {
+      later($, () => stir($))
       const saved = await read($, record)
       const buddy = saved && saved.mode !== 'off' ? activeBuddy(saved) : null
       const fromPerson = e.origin.kind === 'composer' || e.origin.kind === 'bridge'
@@ -526,7 +574,7 @@ export const register: Register = on => {
       }
 
       const rows = bandRows(view.sprite, view.say, e.props.bodyColumns, view.sayAt)
-      const right = rightRuns(rows.bubble, null)
+      const right = rightRuns(rows.bubble, view.prop)
       const nameRow = (
         <Box>
           <Text dimColor wrap="truncate-end">{view.label}</Text>
@@ -590,12 +638,16 @@ export const register: Register = on => {
         )
       }
 
-      const view = await buddyLook($, saved, await read($, tick), false)
+      // The card is the buddy as it rolled: no pose, sleep, mood, hearts or holiday.
+      const t = await read($, tick)
+      const sprite = spriteTint(bones, t)
+      const starColor = RARITY[bones.rarity].color
+      const { stars } = nameLine(buddy.soul.name, bones)
       const header = (
         <Box flexDirection="column">
           <Box>
             <Text bold>{buddy.soul.name}</Text>
-            <Text {...tint(view.starColor)}>{'  ' + view.stars}</Text>
+            <Text {...tint(starColor)}>{'  ' + stars}</Text>
           </Box>
           <Text dimColor>
             {`${bones.rarity} ${bones.species}${bones.shiny ? ' (shiny)' : ''}   Hat: ${bones.hat}   Eyes: ${bones.eye}`}
@@ -607,8 +659,8 @@ export const register: Register = on => {
       const cells = Math.max(8, Math.min(30, e.props.bodyColumns - 18))
       return (
         <Box flexDirection="column">
-          {view.sprite.map(row => (
-            <Text {...tint(view.spriteColor)} bold={view.spriteBold}>
+          {portrait(bones, t).map(row => (
+            <Text {...tint(sprite.color)} bold={sprite.bold}>
               {row}
             </Text>
           ))}
@@ -617,7 +669,7 @@ export const register: Register = on => {
           {STATS.map(s => (
             <Box>
               <Text dimColor={s === bones.low}>{s.padEnd(10) + ' '}</Text>
-              <Text {...tint(view.starColor)}>{meter(bones.stats[s], cells)}</Text>
+              <Text {...tint(starColor)}>{meter(bones.stats[s], cells)}</Text>
               <Text bold={s === bones.peak} dimColor={s === bones.low}>
                 {' ' + String(bones.stats[s]).padStart(3) + (s === bones.peak ? ' ★' : '')}
               </Text>

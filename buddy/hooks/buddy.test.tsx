@@ -46,10 +46,14 @@ const pane = (bodyColumns = 60) => ({
   },
 })
 
+// Local noon on Wednesday 2026-10-07 in any time zone: not a holiday and not night, so the
+// band's calendar stays out of every test that doesn't ask for it.
+const NOON = new Date(2026, 9, 7, 12).getTime()
+
 // The world beneath the plugin: a clock, a store, the command registry, session
 // start, a pane placer, and a stand-in for the engine's own band so a pass-through is visible.
 // A null store leaves $.store to the test, which answers store.get and store.set itself.
-function world(on: On, store: Record<string, unknown> | null = {}, placesPanes = true, now = 1_000_000) {
+function world(on: On, store: Record<string, unknown> | null = {}, placesPanes = true, now = NOON) {
   const clock = mock.clock(on, { now })
   if (store) mock.store(on, store)
   on('command.register', async (_$, e) => ({ value: { command: e.name } }))
@@ -766,9 +770,6 @@ test('a record that turns damaged during a hatch is not written over, and nobody
   expect(shared.row).toEqual({ schema: 2, active: 'gone', buddies: [] })
 })
 
-// Local noon, so the local date is 2026-10-07 in any time zone.
-const NOON = new Date(2026, 9, 7, 12).getTime()
-
 const SAVED: Saved = {
   schema: 2,
   mode: 'on',
@@ -946,4 +947,73 @@ test('saves in one session run one at a time: two turns in a row both keep their
   await clock.settle()
   await idle()
   expect(activeOf(store.shared.row)?.counts.turns).toBe(2)
+})
+
+// A terminal band's elements, as much of them as these tests read.
+type Drawn = { findAll: (q: { type: string }) => Promise<{ text?: string; props: Record<string, unknown> }[]> }
+
+// The five sprite rows a terminal band drew, as text: the Text elements carrying a `bold` prop.
+const drawnSprite = async (ui: Drawn) =>
+  (await ui.findAll({ type: 'Text' })).filter(t => 'bold' in t.props).map(t => t.text ?? '')
+
+// Local noon on Independence Day 2026.
+const JULY4_NOON = new Date(2026, 6, 4, 12).getTime()
+
+test('on the Fourth of July a quiet buddy wears the hat and holds the flag; a bubble takes its place', async ($, on) => {
+  const clock = world(on, { buddy: RECORD }, true, JULY4_NOON)
+  model(on, null, 'Fireworks later?')
+  await $.session.start(START)
+  await clock.settle()
+  const terminal = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect((await drawnSprite(terminal))[0]).toContain('_|**|_')
+  expect((await terminal.find({ type: 'Text', text: /^\*:\*:$/ }))?.props.color).toBe('blue')
+  expect((await terminal.find({ type: 'Text', text: /^=====$/ }))?.props.color).toBe('red')
+  const desktop = await $.ui.mount({ plugin: 'buddy', surface: 'desktop', ...band() })
+  expect(String((await desktop.find({ type: 'Svg' }))?.props.source)).toContain('<tspan class="paint-blue">*:*:</tspan>')
+  const short = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band(3, 80) })
+  expect((await short.findAll({ type: 'Text' })).map(t => t.text).join('')).not.toContain('*:*:')
+  await runner($)('pet')
+  await clock.settle()
+  expect(await terminal.find({ type: 'Text', text: /Fireworks later\?/ })).toBeDefined()
+  expect(await terminal.find({ type: 'Text', text: /^\*:\*:$/ })).toBeUndefined()
+})
+
+test('the card keeps the rolled hat on a holiday', async ($, on) => {
+  // 'tint-11' rolls a rare penguin in a wizard hat.
+  const clock = world(on, { buddy: { ...RECORD, seed: 'tint-11' } }, true, JULY4_NOON)
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect((await drawnSprite(ui))[0]).toContain('_|**|_')
+  const card = await cardText($)
+  expect(card).toContain('/*\\')
+  expect(card).not.toContain('_|**|_')
+})
+
+test('a buddy left alone for 10 minutes falls asleep, and a prompt wakes it', async ($, on) => {
+  const clock = world(on, { buddy: RECORD })
+  engineBelow(on)
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  await clock.advance(599_000)
+  expect((await drawnSprite(ui))[0]).not.toMatch(/z$/)
+  await clock.advance(1_000)
+  expect((await drawnSprite(ui))[0]).toMatch(/z$/)
+  // The ghost's sleep frame, eyes shut.
+  expect((await drawnSprite(ui)).join('\n')).toContain('/ -  - \\')
+  await $.prompt.submit({ text: 'run the tests', wait: false, origin: { kind: 'composer' } })
+  await clock.settle()
+  expect((await drawnSprite(ui))[0]).not.toMatch(/z$/)
+})
+
+test('at night the buddy dozes off after a minute', async ($, on) => {
+  const clock = world(on, { buddy: RECORD }, true, new Date(2026, 9, 7, 0, 30).getTime())
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  await clock.advance(59_500)
+  expect((await drawnSprite(ui))[0]).not.toMatch(/z$/)
+  await clock.advance(500)
+  expect((await drawnSprite(ui))[0]).toMatch(/z$/)
 })

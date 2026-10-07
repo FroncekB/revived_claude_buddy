@@ -78,6 +78,12 @@ declare module 'claude-code' {
       lastReplyAt: number
       // Counts not yet saved, by buddy seed (Foundation spec section 2).
       pending: Record<string, Counts>
+      // A flinch or celebrate and the tick it ends on (Alive spec section 4).
+      pose: { kind: 'flinch' | 'celebrate'; untilTick: number } | null
+      // The tick of the last activity, for idle sleep.
+      lastActiveTick: number
+      // Mood events not yet saved, by buddy seed (Alive spec section 2).
+      pendingMood: Record<string, MoodEvent[]>
     }
   }
 }
