@@ -10,6 +10,27 @@ export type BuddyRecord = {
   rerolls: number
 }
 
+export type ToolGroup = 'shell' | 'edit' | 'read' | 'web' | 'agent' | 'mcp' | 'other'
+
+// One buddy's lifetime counts. Main-conversation events only.
+export type Counts = {
+  turns: number
+  failedTurns: number
+  longestTurnMs: number
+  calls: Record<ToolGroup, number>
+  failedCalls: number
+  pets: number
+  talks: number
+}
+
+// The person's own data: it carries across rerolls.
+export type You = {
+  lastDay: string | null
+  streak: number
+  bestStreak: number
+  days: number
+}
+
 export type Bubble = { text: string; untilTick: number }
 
 declare module 'claude-code' {
