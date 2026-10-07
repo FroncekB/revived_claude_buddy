@@ -1,12 +1,13 @@
 // The band's text layout: bubble wrapping, full and compact rows, and the card.
-import type { Soul } from '../types'
+import type { Counts, Soul, You } from '../types'
 import { RARITY, STATS } from './roll'
 import type { Bones } from './roll'
+import { totalCalls } from './ledger'
 
 export const MIN_FULL_ROWS = 6
 export const MIN_FULL_COLS = 44
 export const MAX_BUBBLE_LINES = 3
-export const MAX_BUBBLE_W = 64
+export const MAX_BUBBLE_W = 80
 
 export function isCompact(maxRows: number, bodyColumns: number): boolean {
   return maxRows < MIN_FULL_ROWS || bodyColumns < MIN_FULL_COLS
@@ -51,17 +52,20 @@ export function wrap(text: string, width: number, maxLines = Infinity): string[]
   return kept
 }
 
-// A box exactly `width` wide: " .---." / "< text |" / "| text |" / " '---'". Text past
-// MAX_BUBBLE_LINES turns pages, `at` (0 to 1) of the way through the bubble's life; a
-// paged box keeps its height and numbers the page in its bottom edge.
-export function bubbleRows(text: string, width: number, at: number): string[] {
-  const inner = width - 4
-  const lines = wrap(text, inner)
+// A box at most `maxWidth` wide, shrunk to its longest line over every page, so it keeps its
+// width as the pages turn: " .---." / "< text |" / "| text |" / " '---'". Text past
+// MAX_BUBBLE_LINES turns pages, `at` (0 to 1) of the way through the bubble's life; a paged
+// box keeps its height and numbers the page in its bottom edge, which it is never too narrow for.
+export function bubbleRows(text: string, maxWidth: number, at: number): string[] {
+  const lines = wrap(text, maxWidth - 4)
   const count = Math.max(1, Math.ceil(lines.length / MAX_BUBBLE_LINES))
   const page = pageAt(count, at)
   const shown = lines.slice(page * MAX_BUBBLE_LINES, (page + 1) * MAX_BUBBLE_LINES)
   const mark = count > 1 ? ` ${page + 1}/${count} ` : ''
   if (mark) while (shown.length < MAX_BUBBLE_LINES) shown.push('')
+  const longestMark = count > 1 ? ` ${count}/${count} `.length : 0
+  const inner = Math.max(longestMark ? longestMark + 1 : 0, ...lines.map(line => line.length))
+  const width = inner + 4
   const edge = mark ? '-'.repeat(width - 4 - mark.length) + mark + '-' : '-'.repeat(width - 3)
   return [
     ' .' + '-'.repeat(width - 3) + '.',
@@ -118,4 +122,21 @@ export function cardLines(soul: Soul, bones: Bones, rerolls: number): string[] {
     ...STATS.map(s => `${s.padEnd(10)} ${bar(bones.stats[s])} ${String(bones.stats[s]).padStart(3)}`),
     `Hatched ${soul.hatchedAt.slice(0, 10)}   Rerolls: ${rerolls}`,
   ]
+}
+
+const withCommas = (n: number) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+const howMany = (n: number, noun: string) => `${withCommas(n)} ${noun}${n === 1 ? '' : 's'}`
+
+// The person's streak: the first half of the card's streak line.
+export function streakText(you: You): string {
+  return `Streak ${howMany(you.streak, 'day')} (best ${withCommas(you.bestStreak)})`
+}
+
+// The active buddy's lifetime counts: the second half.
+export function countsText(counts: Counts): string {
+  return `${howMany(counts.turns, 'turn')} · ${howMany(totalCalls(counts), 'tool call')}`
+}
+
+export function streakLine(you: You, counts: Counts): string {
+  return `${streakText(you)} · ${countsText(counts)}`
 }

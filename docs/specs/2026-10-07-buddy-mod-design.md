@@ -1,6 +1,6 @@
 # `buddy` mod — Design Spec
 
-**Status:** built 2026-10-07; live check pending. The mod, this spec and its plan moved to this repo after the build. Plan: [`2026-10-07-buddy-mod-plan.md`](2026-10-07-buddy-mod-plan.md); its "Deliberate deviations" section lists six small departures from this spec. Changes made during the build: `$`-taking helpers live at module top level of `register.tsx` (the engine loader requires it); `wrap` returns nothing for a width or line count under 1; a failed save keeps the buddy alive in `$.state` (an `unsaved` flag) while another session's newer record still wins (section 9); the tool-call tally skips subagent calls (section 6); names that read as prompt openers are rejected at hatch (section 7). Added after the build: the hidden `/buddy debug` tour, rarity-colored sprites with a shiny shimmer (epic and legendary colors swapped), and SVG art on the desktop; a bubble too long for its band turns pages (numbered in its bottom edge, each page an equal share of a life that grows with the text) instead of being cut, the bubble widened to 64 columns, and replies asked for 90 characters but kept up to 160, trimmed at a sentence or word.
+**Status:** built 2026-10-07; live check pending. The mod, this spec and its plan moved to this repo after the build. Plan: [`2026-10-07-buddy-mod-plan.md`](2026-10-07-buddy-mod-plan.md); its "Deliberate deviations" section lists six small departures from this spec. Changes made during the build: `$`-taking helpers live at module top level of `register.tsx` (the engine loader requires it); `wrap` returns nothing for a width or line count under 1; a failed save keeps the buddy alive in `$.state` (an `unsaved` flag) while another session's newer record still wins (section 9); the tool-call tally skips subagent calls (section 6); names that read as prompt openers are rejected at hatch (section 7). Added after the build: the hidden `/buddy debug` tour, rarity-colored sprites with a shiny shimmer (epic and legendary colors swapped), SVG art on the desktop, and a bubble up to 80 columns wide that shrinks to its text and turns pages (numbered in its bottom edge, each page an equal share of a life that grows with the text) instead of being cut, with replies asked for 90 characters but kept up to 160, trimmed at a sentence or word (sections 6, 8, 9, 10).
 **Author:** Brandon Froncek + Claude
 **Date:** 2026-10-07
 **Scope:** personal Claude Code mod, distributed from this repo as the `buddy-mods` marketplace (see the README).
@@ -153,7 +153,7 @@ notable = failures > 0 || reason in {error, aborted} || durationMs > 120_000
 
 **Event summary sent to Haiku:** outcome (`reason`), duration in seconds, tool call counts by name, and the names of failed tools. Never prompt text, answer text, file contents, or command arguments.
 
-**Haiku call:** `$.model.complete` with model `haiku`, `maxTokens` 60, `timeoutMs` 8000. The system text carries the soul, species, rarity and stats, and asks for one line of at most 90 characters, in character, with no markdown and no emoji. The reply is shown for 24 ticks (12 s) and `lastQuipAt` is set.
+**Haiku call:** `$.model.complete` with model `haiku`, `maxTokens` 80, `timeoutMs` 8000. The system text carries the soul, species, rarity and stats, and asks for one line of at most 160 characters, in character, with no markdown and no emoji. The reply is shown for 24 ticks (12 s) and `lastQuipAt` is set.
 
 ## 7. Talking and petting
 
@@ -186,7 +186,7 @@ Elements come from `$.ui.resolve(e)`. The desktop's `Text` is proportional and a
 ```
 
 - Left column: the 12×5 sprite, then a dim name line with the stars in the rarity color.
-- Right column: the bubble, wrapped to `min(bodyColumns - 14, 50)` and at most 3 text lines (longer text is cut with `…`), with its `<` on sprite row 2.
+- Right column: the bubble, at most `min(bodyColumns - 14, 80)` wide and shrunk to its longest line, with at most 3 text lines (longer text is cut with `…`) and its `<` on sprite row 2.
 
 **Compact layout** otherwise: one row with the species face, the name, and the bubble text truncated with `wrap: 'truncate-end'`.
 
@@ -217,7 +217,7 @@ The buddy never blocks a prompt, a tool call or a turn.
   | `isAnswered: false` | No bubble | Canned line from a pool keyed to the peak stat | Section 5 fallback |
   | Empty after cleanup | No bubble | Canned line | Section 5 fallback |
 
-  Cleanup trims, strips quotes, newlines and non-BMP characters, then cuts to 90 characters.
+  Cleanup trims, strips quotes, newlines and non-BMP characters, then cuts to 160 characters after the last whole word (a single overlong word is cut where it stands).
 - **Store:** a write failure is reported in the command text and the session continues from `$.state`. Store size is not a concern: the record is under 1 KB.
 - **Hot reload:** `register` and `session.start` run again. State survives; the timer is recreated; an in-flight call is dropped.
 
@@ -225,7 +225,7 @@ The buddy never blocks a prompt, a tool call or a turn.
 
 | Source | Rate | Each call |
 |-|-|-|
-| Reactions | At most 20 per hour (3-minute cooldown) | About 400 tokens in, 60 or fewer out, Haiku |
+| Reactions | At most 20 per hour (3-minute cooldown) | About 400 tokens in, 80 or fewer out, Haiku |
 | Talk and pet | Person-initiated, at most 1 per 5 s | Same |
 | Hatch and reroll | Once per buddy | Same |
 

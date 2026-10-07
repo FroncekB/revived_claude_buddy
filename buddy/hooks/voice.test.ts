@@ -3,7 +3,8 @@ import { expect, test } from 'claude-code/testing'
 import { rollBones } from './roll'
 import {
   BUBBLE_TICKS, FALLBACK_NAMES, MAX_SAY, QUIP_COOLDOWN_MS, RESERVED_NAMES, SAY_GOAL, bubbleTicks, cannedLine, cleanSay,
-  fallbackSoul, hatchRequest, matchAddress, parseSoul, personaSystem, reactionPrompt, shouldQuip, withArticle,
+  fallbackSoul, hatchRequest, matchAddress, parseSoul, personaSystem, reactionPrompt, shouldGreet, shouldQuip,
+  streakGreeting, withArticle,
 } from './voice'
 import type { TurnSummary } from './voice'
 
@@ -65,6 +66,15 @@ test('a bubble stays up long enough to read, and never less than before', () => 
   expect(bubbleTicks('x'.repeat(MAX_SAY))).toBeGreaterThan(BUBBLE_TICKS)
 })
 
+test('a reply over the limit is cut after its last whole word', () => {
+  const words = 'semicolon '.repeat(30).trim()
+  const cut = cleanSay(words)
+  expect(MAX_SAY).toBe(160)
+  expect(cut.length).toBeLessThanOrEqual(MAX_SAY)
+  expect(cut.endsWith('semicolon…')).toBe(true)
+  expect(words.startsWith(cut.slice(0, -1) + ' ')).toBe(true)
+})
+
 test('hatch JSON is validated, with a seeded fallback', () => {
   expect(parseSoul('```json\n{"name": "Pip", "personality": "Counts semicolons."}\n```')).toEqual({
     name: 'Pip',
@@ -113,4 +123,16 @@ test('canned lines come from the peak stat pool', () => {
   const bones = rollBones('voice-seed')
   expect(cannedLine(bones, 0).length).toBeGreaterThan(0)
   expect(cannedLine(bones, 3)).toBe(cannedLine(bones, 0))
+})
+
+test('the streak greeting comes from a pool of four and greets only a new day of a streak', () => {
+  expect(streakGreeting(4)).toBe('Day 4 together.')
+  expect(streakGreeting(5)).toBe("5 days in a row. Not that I'm counting.")
+  expect(streakGreeting(6)).toBe("Back again. That's 6 days.")
+  expect(streakGreeting(7)).toBe("7-day streak. Don't make it weird.")
+  const you = { lastDay: '2026-10-07', streak: 2, bestStreak: 2, days: 2 }
+  expect(shouldGreet({ mode: 'on', dayBefore: '2026-10-06', you })).toBe(true)
+  expect(shouldGreet({ mode: 'muted', dayBefore: '2026-10-06', you })).toBe(false)
+  expect(shouldGreet({ mode: 'on', dayBefore: '2026-10-07', you })).toBe(false)
+  expect(shouldGreet({ mode: 'on', dayBefore: null, you: { ...you, streak: 1 } })).toBe(false)
 })

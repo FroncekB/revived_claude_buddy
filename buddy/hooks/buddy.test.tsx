@@ -2,7 +2,9 @@ import type { ModelCompleteResult, On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
+import type { Saved } from '../types'
 import { SHIMMER } from './layout'
+import { zeroCounts } from './ledger'
 import { FALLBACK_NAMES } from './voice'
 
 const ZERO = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
@@ -47,8 +49,8 @@ const pane = (bodyColumns = 60) => ({
 // The world beneath the plugin: a clock, a store, the command registry, session
 // start, a pane placer, and a stand-in for the engine's own band so a pass-through is visible.
 // A null store leaves $.store to the test, which answers store.get and store.set itself.
-function world(on: On, store: Record<string, unknown> | null = {}, placesPanes = true) {
-  const clock = mock.clock(on, { now: 1_000_000 })
+function world(on: On, store: Record<string, unknown> | null = {}, placesPanes = true, now = 1_000_000) {
+  const clock = mock.clock(on, { now })
   if (store) mock.store(on, store)
   on('command.register', async (_$, e) => ({ value: { command: e.name } }))
   on('ui.open', async () => ({
@@ -76,6 +78,26 @@ function model(on: On, soul: string | null, say: string | null): string[] {
 
 const runner = ($: Engine) => async (args: string) =>
   (await $.command.run({ command: 'buddy', args, ...RUN })).text
+
+// A store this test can look into and turn off: one row under `buddy`, as another
+// session sharing it would see it.
+function sharedStore(on: On, row: unknown) {
+  const shared = { row, writes: 0, refuse: false }
+  on('store.get', async () => ({ value: shared.row }))
+  on('store.set', async (_$, e) => {
+    if (shared.refuse) return { deny: 'disk full' }
+    shared.row = e.value
+    shared.writes++
+    return { value: undefined }
+  })
+  return shared
+}
+
+// The active buddy's entry in a stored row.
+function activeOf(row: unknown) {
+  const saved = row as Saved
+  return saved.buddies.find(b => b.seed === saved.active)
+}
 
 // What the card pane shows on the terminal once /buddy card opened it, which prints nothing.
 async function cardText($: Engine): Promise<string> {
@@ -221,13 +243,15 @@ test('a long reply in a narrow band turns pages until every word has shown, then
   expect(pages.filter(Boolean).join(' ')).toBe(reply)
 })
 
-test('card opens a pane with the name, personality and rerolls, and prints nothing', async ($, on) => {
-  world(on, { buddy: RECORD })
+test('card opens a pane with the name, personality, rerolls and streak, and prints nothing', async ($, on) => {
+  const clock = world(on, { buddy: RECORD })
   await $.session.start(START)
+  await clock.settle()
   const card = await cardText($)
   expect(card).toMatch(/^Pip\b/m)
   expect(card).toMatch(/Counts semicolons\./)
   expect(card).toMatch(/Rerolls: 0/)
+  expect(card).toMatch(/Streak 1 day \(best 1\) · 0 turns · 0 tool calls$/)
 })
 
 test('the card pane is one drawn card on desktop and meters on the terminal', async ($, on) => {
@@ -238,6 +262,8 @@ test('the card pane is one drawn card on desktop and meters on the terminal', as
   const cards = await desktop.findAll({ type: 'Svg' })
   expect(cards).toHaveLength(1)
   expect(cards[0]?.props.alt).toMatch(/^Pip, .*"Counts semicolons\." .*Stats: DEBUGGING \d+/)
+  expect(cards[0]?.props.alt).toMatch(/Rerolls 0\. Streak \d+ days? \(best \d+\) · 0 turns · 0 tool calls\.$/)
+  expect(String(cards[0]?.props.source)).toContain('>0 turns · 0 tool calls</text>')
   expect(await desktop.findAll({ type: 'Text' })).toHaveLength(0)
   const terminal = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...pane() })
   expect(await terminal.find({ type: 'Svg' })).toBeUndefined()
@@ -245,13 +271,15 @@ test('the card pane is one drawn card on desktop and meters on the terminal', as
   expect(await terminal.find({ text: /█/ })).toBeDefined()
 })
 
-test('where no pane can be placed, card prints the text card', async ($, on) => {
-  world(on, { buddy: RECORD }, false)
+test('where no pane can be placed, card prints the text card with the streak', async ($, on) => {
+  const clock = world(on, { buddy: RECORD }, false)
   await $.session.start(START)
+  await clock.settle()
   const card = (await runner($)('card')) ?? ''
   expect(card).toMatch(/^Pip, /)
   expect(card).toMatch(/DEBUGGING/)
   expect(card).toMatch(/Rerolls: 0/)
+  expect(card).toMatch(/\nStreak 1 day \(best 1\) · 0 turns · 0 tool calls$/)
 })
 
 test('reroll asks first, then replaces the buddy and counts the reroll', async ($, on) => {
@@ -259,7 +287,7 @@ test('reroll asks first, then replaces the buddy and counts the reroll', async (
   model(on, '{"name": "Bix", "personality": "New here."}', 'Hi.')
   await $.session.start(START)
   const run = runner($)
-  expect(await run('reroll')).toMatch(/^This replaces Pip, .* for good\. Run \/buddy reroll confirm\.$/)
+  expect(await run('reroll')).toMatch(/^This retires Pip, \w+ \w+\. Run \/buddy reroll confirm\.$/)
   expect(await cardText($)).toMatch(/Rerolls: 0/)
   expect(await run('reroll confirm')).toMatch(/^Bix, an? /)
   const card = await cardText($)
@@ -282,16 +310,30 @@ test('off hides the buddy and /buddy brings it back', async ($, on) => {
   expect(await shown.find({ text: /Back again\./ })).toBeDefined()
 })
 
-test('a record from a newer schema is never touched', async ($, on) => {
-  world(on, { buddy: { schema: 2, seed: 'future' } })
-  await $.session.start(START)
-  const run = runner($)
-  for (const args of ['', 'pet', 'reroll confirm']) {
-    expect(await run(args)).toBe('Saved buddy uses schema 2; this mod knows 1.')
-  }
-  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
-  expect(await ui.find({ text: 'engine band' })).toBeDefined()
-})
+const UNTOUCHABLE = [
+  ['a record from a newer schema is never touched', { schema: 3, seed: 'future' }, 'Saved buddy uses schema 3; this mod knows 1 and 2.'],
+  ['a damaged record is never touched', { schema: 2, active: 'gone', buddies: [] }, "Saved buddy is damaged; this mod won't overwrite it."],
+] as const
+
+for (const [name, row, line] of UNTOUCHABLE) {
+  test(name, async ($, on) => {
+    const shared = sharedStore(on, row)
+    const clock = world(on, null)
+    engineBelow(on)
+    model(on, null, null)
+    await $.session.start(START)
+    const run = runner($)
+    for (const args of ['', 'pet', 'card', 'reroll confirm', 'debug']) {
+      expect(await run(args)).toBe(line)
+    }
+    await $.tool.call({ tool: 'Bash', command: 'false' })
+    await $.turn.complete(TURN)
+    await clock.settle()
+    expect(shared.writes).toBe(0)
+    const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+    expect(await ui.find({ text: 'engine band' })).toBeDefined()
+  })
+}
 
 test('a failed store write keeps the buddy alive for the session', async ($, on) => {
   // A store that reads empty and refuses every write.
@@ -334,7 +376,7 @@ test("another session's reroll is not overwritten", async ($, on) => {
   const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
   expect(await ui.find({ text: /Bix/ })).toBeDefined()
   await run('mute')
-  expect(shared.row).toMatchObject({ seed: 'other-seed', mode: 'muted' })
+  expect(shared.row).toMatchObject({ schema: 2, active: 'other-seed', mode: 'muted' })
 })
 
 test('a reload after a failed write keeps the session-only buddy', async ($, on) => {
@@ -348,6 +390,29 @@ test('a reload after a failed write keeps the session-only buddy', async ($, on)
   await clock.settle()
   await $.session.start(START)
   expect(await cardText($)).toMatch(/^Pip\b/m)
+})
+
+test("a schema 1 copy left in state by a 0.1.x session's failed write is migrated, not trusted", async ($, on) => {
+  // A 0.1.x session whose last write failed holds its v1 record in state, marked unsaved, and a
+  // reload runs session.start again over it. The first session here stands in for that one: its
+  // writes of the record into state are rewritten to the v1 shape.
+  const shared = sharedStore(on, RECORD)
+  shared.refuse = true
+  let legacy = true
+  on('state.set', { plugin: 'buddy', key: 'record' }, async (_$, e, next) =>
+    next(legacy ? { ...e, value: RECORD as unknown as Saved } : e),
+  )
+  const clock = world(on, null)
+  await $.session.start(START)
+  const run = runner($)
+  expect(await run('off')).toBe('Could not save your buddy; it lives for this session only.')
+  legacy = false
+  shared.refuse = false
+  await $.session.start(START)
+  await clock.settle()
+  expect(await run('mute')).toBe('Pip will stay quiet unless spoken to.')
+  expect(shared.row).toMatchObject({ schema: 2, mode: 'muted' })
+  expect(activeOf(shared.row)?.soul.name).toBe('Pip')
 })
 
 test('a refused command registration still loads the buddy', async ($, on) => {
@@ -576,6 +641,9 @@ test('the debug tour shows each species plain, then shiny, and never writes the 
   })
   const clock = world(on, null)
   await $.session.start(START)
+  // The session's visit is its own write; the tour adds none.
+  await clock.settle()
+  const visits = writes.length
   expect(await runner($)('debug')).toBe('Touring all 18 species, plain then shiny. Run /buddy debug off to stop.')
   const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
   const shimmering = async () => (await spriteTexts(ui)).every(t => t.props.bold === true)
@@ -588,7 +656,7 @@ test('the debug tour shows each species plain, then shiny, and never writes the 
   expect(await ui.find({ type: 'Text', text: /tour 2\/18  uncommon goose  $/ })).toBeDefined()
   const desktop = await $.ui.mount({ plugin: 'buddy', surface: 'desktop', ...band() })
   expect(await desktop.find({ type: 'Text', text: /tour 2\/18/ })).toBeDefined()
-  expect(writes).toEqual([])
+  expect(writes).toHaveLength(visits)
 })
 
 test('debug off ends the tour', async ($, on) => {
@@ -650,4 +718,232 @@ test("the card pane's terminal sprite takes its rarity color without bold", asyn
   const blue = (await card.findAll({ type: 'Text' })).filter(t => t.props.color === 'blue' && 'bold' in t.props)
   expect(blue).toHaveLength(5)
   expect(blue.every(t => t.props.bold === false)).toBe(true)
+})
+
+test('a schema 1 record is upgraded by the first save', async ($, on) => {
+  const shared = sharedStore(on, RECORD)
+  world(on, null)
+  await $.session.start(START)
+  expect(shared.writes).toBe(0)
+  await runner($)('mute')
+  expect(shared.row).toMatchObject({
+    schema: 2,
+    mode: 'muted',
+    rerolls: 0,
+    active: 'test-seed',
+    buddies: [{ seed: 'test-seed', soul: { name: 'Pip' }, retiredAt: null }],
+  })
+})
+
+test('a reroll retires the old buddy and keeps it', async ($, on) => {
+  const shared = sharedStore(on, RECORD)
+  world(on, null)
+  model(on, '{"name": "Bix", "personality": "New here."}', 'Hi.')
+  await $.session.start(START)
+  expect(await runner($)('reroll confirm')).toMatch(/^Bix, an? /)
+  const saved = shared.row as Saved
+  expect(saved.buddies.map(b => b.soul.name)).toEqual(['Pip', 'Bix'])
+  expect(typeof saved.buddies[0]?.retiredAt).toBe('string')
+  expect(saved.buddies[1]?.retiredAt).toBeNull()
+  expect(saved).toMatchObject({ active: saved.buddies[1]?.seed, rerolls: 1, mode: 'on' })
+})
+
+test('a record that turns damaged during a hatch is not written over, and nobody says hello', async ($, on) => {
+  const shared = sharedStore(on, undefined)
+  const clock = world(on, null)
+  const asked: string[] = []
+  on('model.complete', async (_$, e) => {
+    asked.push(e.prompt)
+    // Another session writes a bad record while the hatch waits for the model.
+    shared.row = { schema: 2, active: 'gone', buddies: [] }
+    return { value: ok('{"name": "Bix", "personality": "New here."}') }
+  })
+  await $.session.start(START)
+  expect(await runner($)('')).toBe("Saved buddy is damaged; this mod won't overwrite it.")
+  await clock.settle()
+  expect(asked).toHaveLength(1)
+  expect(shared.writes).toBe(0)
+  expect(shared.row).toEqual({ schema: 2, active: 'gone', buddies: [] })
+})
+
+// Local noon, so the local date is 2026-10-07 in any time zone.
+const NOON = new Date(2026, 9, 7, 12).getTime()
+
+const SAVED: Saved = {
+  schema: 2,
+  mode: 'on',
+  rerolls: 0,
+  active: 'test-seed',
+  buddies: [{ seed: 'test-seed', soul: RECORD.soul, retiredAt: null, counts: zeroCounts() }],
+  you: { lastDay: '2026-10-06', streak: 3, bestStreak: 3, days: 3 },
+}
+
+test('a main turn saves its counts when it completes; a denied call is not counted', async ($, on) => {
+  const shared = sharedStore(on, RECORD)
+  const clock = world(on, null)
+  on('tool.call', async (_$, e) =>
+    e.tool === 'Bash' && e.command === 'deny' ? { deny: 'not here' } : { isError: true as const, result: 'boom' },
+  )
+  on('turn.complete', async (_$, e) => ({ text: e.answer }))
+  model(on, null, null)
+  await $.session.start(START)
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  await $.tool.call({ tool: 'Read', file_path: '/x' })
+  await $.tool.call({ tool: 'Bash', command: 'deny' })
+  await $.turn.complete({ ...TURN, durationMs: 7_000 })
+  await clock.settle()
+  expect(activeOf(shared.row)?.counts).toMatchObject({
+    turns: 1,
+    longestTurnMs: 7_000,
+    failedCalls: 2,
+    calls: { shell: 1, read: 1 },
+  })
+})
+
+test("another session's changes survive this session's save", async ($, on) => {
+  const shared = sharedStore(on, RECORD)
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  // Mid-turn, another session mutes the buddy and saves five turns of its own.
+  const theirs = JSON.parse(JSON.stringify(shared.row)) as Saved
+  theirs.mode = 'muted'
+  theirs.buddies[0]!.counts.turns = 5
+  shared.row = theirs
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(shared.row).toMatchObject({ mode: 'muted' })
+  expect(activeOf(shared.row)?.counts).toMatchObject({ turns: 6, failedCalls: 1 })
+})
+
+test('a failed write keeps the counts for the next save', async ($, on) => {
+  const shared = sharedStore(on, RECORD)
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  shared.refuse = true
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(activeOf(shared.row)?.counts.turns).toBe(0)
+  shared.refuse = false
+  await $.turn.complete({ ...TURN, turnId: 't2' })
+  await clock.settle()
+  expect(activeOf(shared.row)?.counts).toMatchObject({ turns: 2, failedCalls: 1 })
+})
+
+test('pets and talks are counted and saved', async ($, on) => {
+  const shared = sharedStore(on, RECORD)
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, null, 'Hi.')
+  await $.session.start(START)
+  expect(await runner($)('pet')).toBeUndefined()
+  await $.prompt.submit({ text: 'Pip, hi', wait: false, origin: { kind: 'composer' } })
+  await clock.settle()
+  expect(activeOf(shared.row)?.counts).toMatchObject({ pets: 1, talks: 1 })
+})
+
+test('the first session of a new day greets the streak; the next one that day does not', async ($, on) => {
+  const shared = sharedStore(on, SAVED)
+  const clock = world(on, null, true, NOON)
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await ui.find({ text: /Day 4 together\./ })).toBeDefined()
+  expect((shared.row as Saved).you).toEqual({ lastDay: '2026-10-07', streak: 4, bestStreak: 4, days: 4 })
+  await clock.advance(13_000)
+  expect(await ui.find({ text: /together/ })).toBeUndefined()
+  await $.session.start(START)
+  await clock.settle()
+  expect(await ui.find({ text: /together/ })).toBeUndefined()
+})
+
+test('a buddy that is off counts nothing and records no visit', async ($, on) => {
+  const shared = sharedStore(on, { ...RECORD, mode: 'off' })
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(shared.writes).toBe(0)
+})
+
+// A shared store whose reads can be held back after they have read, so a save that is slow to
+// finish writes from what it saw before another save wrote: the overlap two sessions would have.
+function heldStore(on: On, row: unknown) {
+  const shared = { row, held: false }
+  const parked: (() => void)[] = []
+  on('store.get', async () => {
+    const value = shared.row
+    if (shared.held) await new Promise<void>(resolve => parked.push(resolve))
+    return { value }
+  })
+  on('store.set', async (_$, e) => {
+    shared.row = e.value
+    return { value: undefined }
+  })
+  return {
+    shared,
+    release: () => {
+      shared.held = false
+      for (const resolve of parked.splice(0)) resolve()
+    },
+  }
+}
+
+// Long enough for every save that can start to have reached the store.
+async function idle() {
+  for (let i = 0; i < 100; i++) await Promise.resolve()
+}
+
+test('saves in one session run one at a time: a mute is not lost to a turn-end save', async ($, on) => {
+  const store = heldStore(on, RECORD)
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  // The turn's save reads the store and is held there; the mute starts meanwhile.
+  store.shared.held = true
+  await $.turn.complete(TURN)
+  await clock.settle()
+  await idle()
+  store.shared.held = false
+  const muted = runner($)('mute')
+  await idle()
+  store.release()
+  await Promise.all([muted, clock.settle()])
+  expect(store.shared.row).toMatchObject({ mode: 'muted' })
+  expect(activeOf(store.shared.row)?.counts).toMatchObject({ turns: 1, failedCalls: 1 })
+})
+
+test('saves in one session run one at a time: two turns in a row both keep their counts', async ($, on) => {
+  const store = heldStore(on, RECORD)
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  store.shared.held = true
+  await $.turn.complete(TURN)
+  await clock.settle()
+  await idle()
+  store.shared.held = false
+  await $.turn.complete({ ...TURN, turnId: 't2' })
+  await clock.settle()
+  await idle()
+  store.release()
+  await clock.settle()
+  await idle()
+  expect(activeOf(store.shared.row)?.counts.turns).toBe(2)
 })

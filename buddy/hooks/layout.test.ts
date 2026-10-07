@@ -2,8 +2,9 @@ import { expect, test } from 'claude-code/testing'
 
 import {
   MAX_BUBBLE_W, MIN_FULL_COLS, SHIMMER, bandRows, bubbleRows, bubbleWidth, cardLines, compactLine, isCompact, nameLine,
-  pageAt, spriteTint, wrap,
+  pageAt, spriteTint, streakLine, wrap,
 } from './layout'
+import { zeroCounts } from './ledger'
 import { rollBones } from './roll'
 import { MAX_SAY, cleanSay } from './voice'
 
@@ -30,12 +31,12 @@ test('wrap hard-splits a word longer than a line and never exceeds the width', (
   expect(lines[2]?.endsWith('…')).toBe(true)
 })
 
-test('every bubble row is exactly the bubble width, with the tail on the first text line', () => {
+test('every bubble row is exactly the box width, with the tail on the first text line', () => {
   const rows = bubbleRows('hi there', 20, 0)
   expect(rows).toHaveLength(3)
-  expect(rows.every(r => r.length === 20)).toBe(true)
+  expect(rows.every(r => r.length === 'hi there'.length + 4)).toBe(true)
   expect(rows[1]?.startsWith('< ')).toBe(true)
-  expect(rows[2]).toBe(" '" + '-'.repeat(17) + "'")
+  expect(rows[2]).toBe(" '" + '-'.repeat(9) + "'")
   expect(bubbleRows('word '.repeat(40), 30, 0)).toHaveLength(5)
 })
 
@@ -62,10 +63,10 @@ test('a bubble shows each page for an equal share of its life', () => {
   expect(pageAt(1, 0.9)).toBe(0)
 })
 
-test('the bubble widens to 64 columns where the band has room', () => {
-  expect(MAX_BUBBLE_W).toBe(64)
-  expect(bubbleWidth(80)).toBe(64)
-  expect(bubbleWidth(200)).toBe(64)
+test('the bubble widens to 80 columns where the band has room', () => {
+  expect(MAX_BUBBLE_W).toBe(80)
+  expect(bubbleWidth(94)).toBe(80)
+  expect(bubbleWidth(200)).toBe(80)
   expect(bubbleWidth(MIN_FULL_COLS)).toBe(MIN_FULL_COLS - 14)
 })
 
@@ -96,6 +97,33 @@ test('the one-line band pages the longest reply too, and never outgrows its colu
     for (let i = 0; i < 200; i++) expect(line(i / 200).length).toBeLessThanOrEqual(cols)
     expect(shown(at => line(at).replace(/^<\(·\)  Pip: /, '').replace(/ …$/, ''))).toBe(LONGEST)
   }
+})
+
+test('every bubble row is the same width, with the tail on the first text line', () => {
+  const rows = bubbleRows('word '.repeat(40), 30, 0)
+  expect(rows).toHaveLength(5)
+  expect(rows.every(r => r.length === rows[0]!.length && r.length <= 30)).toBe(true)
+  expect(rows[1]?.startsWith('< ')).toBe(true)
+})
+
+test('a short line gets a box that fits it, not the widest box', () => {
+  const rows = bubbleRows('hi there', 40, 0)
+  expect(rows).toHaveLength(3)
+  expect(rows.every(r => r.length === 'hi there'.length + 4)).toBe(true)
+})
+
+test('the bubble grows with the pane up to 80 columns', () => {
+  const long = 'x'.repeat(300)
+  expect(bandRows(SPRITE, long, 60, 0).bubble[0]).toHaveLength(46)
+  expect(bandRows(SPRITE, long, 200, 0).bubble[0]).toHaveLength(80)
+})
+
+test('a full-length reply fits the widest bubble without being cut', () => {
+  const say = 'Three retries, two stack traces and a semicolon that was never the problem. Bold strategy, friend. I would have read the error message first, but who am I?'
+  expect(say.length).toBeLessThanOrEqual(160)
+  const rows = bubbleRows(say, 80, 0)
+  expect(rows.join('\n')).not.toContain('…')
+  expect(rows.slice(1, -1).map(r => r.slice(2, -2).trim()).join(' ')).toBe(say)
 })
 
 test('compact below 6 rows or 44 columns', () => {
@@ -147,4 +175,17 @@ test('a shiny sprite is bold and shimmers through every color, one per tick', ()
   expect(tints.map(t => t.color)).toEqual([...SHIMMER])
   expect(tints.every(t => t.bold)).toBe(true)
   expect(spriteTint({ rarity: 'common', shiny: true }, SHIMMER.length)).toEqual(tints[0])
+})
+
+test('the streak line counts with commas, agrees in number, and keeps the text card short', () => {
+  const many = { ...zeroCounts(), turns: 340, calls: { ...zeroCounts().calls, shell: 2_000, read: 104 } }
+  const twelve = { lastDay: '2026-10-07', streak: 12, bestStreak: 30, days: 40 }
+  expect(streakLine(twelve, many)).toBe('Streak 12 days (best 30) · 340 turns · 2,104 tool calls')
+  const one = { ...zeroCounts(), turns: 1, calls: { ...zeroCounts().calls, edit: 1 } }
+  expect(streakLine({ lastDay: '2026-10-07', streak: 1, bestStreak: 1, days: 1 }, one)).toBe(
+    'Streak 1 day (best 1) · 1 turn · 1 tool call',
+  )
+  expect(streakLine(twelve, { ...zeroCounts(), turns: 1_234_567 })).toContain('1,234,567 turns')
+  const card = [...cardLines(SOUL, rollBones('layout-seed'), 2), streakLine(twelve, many)]
+  expect(card.length).toBeLessThanOrEqual(12)
 })

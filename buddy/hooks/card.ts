@@ -1,11 +1,14 @@
 // The card pane's drawings: the whole card as one SVG where the surface draws SVG,
 // solid stat meters on the terminal.
 
-import type { Soul } from '../types'
-import { wrap } from './layout'
+import type { Counts, Soul, You } from '../types'
+import { countsText, streakLine, streakText, wrap } from './layout'
 import { RARITY, STATS } from './roll'
 import type { Bones, Hat, Rarity } from './roll'
 import { spriteRows, topRow } from './sprites'
+
+// The person's streak and the buddy's counts, for the card's last row.
+export type CardHistory = { you: You; counts: Counts }
 
 // The radar, in its own box.
 const CX = 200
@@ -108,7 +111,7 @@ function chips(bones: Bones): string[] {
 }
 
 // The whole card, top to bottom: name and stars, kind, portrait, quote, chips, radar, history.
-export function cardSvg(soul: Soul, bones: Bones, rerolls: number): string {
+export function cardSvg(soul: Soul, bones: Bones, rerolls: number, history?: CardHistory): string {
   const color = FILL[bones.rarity]
   const marks: string[] = [
     `<text x="${PAD}" y="44" font-size="22" font-weight="700" fill="${color}">${esc(soul.name)}</text>`,
@@ -157,7 +160,14 @@ export function cardSvg(soul: Soul, bones: Bones, rerolls: number): string {
     `<text x="${W - PAD}" y="${foot + 22}" text-anchor="end" font-size="12" fill="${INK}">Rerolls ${rerolls}</text>`,
   )
 
-  const h = foot + 38
+  if (history) {
+    marks.push(
+      `<text x="${PAD}" y="${foot + 42}" font-size="12" fill="${INK}">${esc(streakText(history.you))}</text>`,
+      `<text x="${W - PAD}" y="${foot + 42}" text-anchor="end" font-size="12" fill="${INK}">${esc(countsText(history.counts))}</text>`,
+    )
+  }
+
+  const h = foot + (history ? 58 : 38)
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${h}" width="${W}" height="${h}" ` +
     `font-family="ui-sans-serif, system-ui, sans-serif">` +
@@ -167,12 +177,13 @@ export function cardSvg(soul: Soul, bones: Bones, rerolls: number): string {
   )
 }
 
-export function cardAlt(soul: Soul, bones: Bones, rerolls: number): string {
+export function cardAlt(soul: Soul, bones: Bones, rerolls: number, history?: CardHistory): string {
   const stars = RARITY[bones.rarity].stars
   return (
     `${soul.name}, ${bones.rarity} ${bones.species}, ${stars} star${stars === 1 ? '' : 's'}. ` +
     `"${soul.personality}" ${chips(bones).join(', ')}. ${statAlt(bones)}. ` +
-    `Hatched ${hatchDay(soul.hatchedAt)}. Rerolls ${rerolls}.`
+    `Hatched ${hatchDay(soul.hatchedAt)}. Rerolls ${rerolls}.` +
+    (history ? ` ${streakLine(history.you, history.counts)}.` : '')
   )
 }
 

@@ -27,10 +27,10 @@ To install from a local copy of this repo instead, run `claude plugin marketplac
 |-|-|
 | `/buddy` | Hatch your buddy, or bring it back after `off` |
 | `/buddy pet` | Hearts, then a reply |
-| `/buddy card` | Name, species, rarity, stats |
+| `/buddy card` | Its card: name, species, rarity, stats, your streak and its lifetime counts |
 | `/buddy mute` / `unmute` | Stop or resume its comments (it still answers when you talk to it) |
 | `/buddy off` | Hide it |
-| `/buddy reroll`, then `/buddy reroll confirm` | Replace it with a new one, for good |
+| `/buddy reroll`, then `/buddy reroll confirm` | Retire it and hatch a new one; the old one is kept |
 | `<name>, how's it going?` | Talk to it. That prompt goes to the buddy, not to Claude |
 
 ## What it does with your session
@@ -43,7 +43,8 @@ A mod runs inside Claude Code with your permissions, so here is exactly what thi
   - for a comment after a turn, at most one every 3 minutes
 - **What a turn comment sees.** Only the turn's outcome, how long it took, and which tools ran or failed. It never sees your prompt, Claude's answer, file contents or command arguments.
 - **Prompts addressed to it.** A prompt that starts with the buddy's name and a comma or colon (`Pip, hi`) is dropped before it reaches Claude, and the buddy answers it. Prompts that carry an attachment always go to Claude.
-- **What it saves.** One small record in the mod's own store: the seed, the name, the personality, the hatch date, the mute/off mode and the reroll count.
+- **What it saves.** One record in the mod's own store. For each buddy you've had: its seed, name, personality, hatch date, the time it was retired, and lifetime counts of turns, failed turns, longest turn, tool calls by kind, failed calls, pets and talks. Then the mode (on, muted or off), the reroll count, and your streak: the last day you visited, your current and best streak, and the days you've visited. Never prompt text, answers, file contents or command arguments.
+- **Upgrading.** The record is now schema 2, and the first save after the update converts an older one. A session still open on 0.1.x doesn't know schema 2 and answers `Saved buddy uses schema 2; this mod knows 1.` until you reload it with `/reload-plugins`.
 
 ## Develop
 
@@ -55,4 +56,4 @@ claude plugin test ./buddy
 
 ## Design
 
-[`docs/specs/2026-10-07-buddy-mod-design.md`](docs/specs/2026-10-07-buddy-mod-design.md) is the design spec, and [`docs/specs/2026-10-07-buddy-mod-plan.md`](docs/specs/2026-10-07-buddy-mod-plan.md) is the test-driven plan the mod was built from. Both are point-in-time records: the spec's status line lists what changed during the build.
+[`docs/specs/2026-10-07-buddy-mod-design.md`](docs/specs/2026-10-07-buddy-mod-design.md) is the design spec, and [`docs/specs/2026-10-07-buddy-mod-plan.md`](docs/specs/2026-10-07-buddy-mod-plan.md) is the test-driven plan the mod was built from. The saved record, counts and streak come from [`docs/specs/2026-10-07-buddy-foundation-design.md`](docs/specs/2026-10-07-buddy-foundation-design.md) and its plan, [`docs/specs/2026-10-07-buddy-foundation-plan.md`](docs/specs/2026-10-07-buddy-foundation-plan.md). These are point-in-time records: each spec's status line lists what changed during its build.

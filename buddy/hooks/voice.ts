@@ -1,6 +1,6 @@
 // What the buddy says and when: prompts for Haiku, the speak-or-not rule,
 // reply cleanup, and fallbacks for when the model doesn't answer.
-import type { Mode, Soul } from '../types'
+import type { Mode, Soul, You } from '../types'
 import { STATS, rngFor } from './roll'
 import type { Bones, StatName } from './roll'
 
@@ -176,4 +176,20 @@ const CANNED: Record<StatName, readonly string[]> = {
 export function cannedLine(b: Bones, n: number): string {
   const pool = CANNED[b.peak]
   return pool[((n % pool.length) + pool.length) % pool.length]!
+}
+
+const STREAK_LINES: readonly string[] = [
+  'Day {n} together.',
+  "{n} days in a row. Not that I'm counting.",
+  "Back again. That's {n} days.",
+  "{n}-day streak. Don't make it weird.",
+]
+
+// Said without a model call when the first session of a new day extends a streak.
+export function streakGreeting(streak: number): string {
+  return STREAK_LINES[streak % STREAK_LINES.length]!.replace('{n}', String(streak))
+}
+
+export function shouldGreet(o: { mode: Mode; dayBefore: string | null; you: You }): boolean {
+  return o.mode === 'on' && o.you.lastDay !== o.dayBefore && o.you.streak >= 2
 }
