@@ -52,3 +52,7 @@ The mod lives in `buddy/`. To run its tests:
 ```bash
 claude plugin test ./buddy
 ```
+
+## Design
+
+[`docs/specs/2026-10-07-buddy-mod-design.md`](docs/specs/2026-10-07-buddy-mod-design.md) is the design spec, and [`docs/specs/2026-10-07-buddy-mod-plan.md`](docs/specs/2026-10-07-buddy-mod-plan.md) is the test-driven plan the mod was built from. Both are point-in-time records: the spec's status line lists what changed during the build.
