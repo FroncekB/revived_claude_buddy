@@ -378,7 +378,7 @@ async function runBuddy($: EngineInterface, sub: Sub): Promise<string | undefine
       if (saved.mode === 'off') return hidden
       const now = await read($, tick)
       await update($, tourStart, () => now)
-      return `Touring all ${TOUR_STEPS} species, plain then shiny. Run /buddy debug off to stop.`
+      return `Touring all ${TOUR_STEPS} species with their reactions, then the holidays and moods. Run /buddy debug off to stop.`
     }
     case 'debug-off':
       await update($, tourStart, () => null)
@@ -435,14 +435,24 @@ async function buddyLook($: EngineInterface, saved: Saved, t: number): Promise<L
   const started = await read($, tourStart)
   const tour = started === null ? null : tourAt(t - started)
   const bones = tour ? { ...rollBones(buddy.seed), ...tour.look } : rollBones(buddy.seed)
-  const name = tour ? `tour ${tour.step + 1}/${TOUR_STEPS}` : buddy.soul.name
+  const name = tour ? tour.name : buddy.soul.name
   const animTick = tour ? tour.tick : t
   const heartsUntilTick = await read($, heartsUntil)
   const heartsFrame = t < heartsUntilTick ? t : null
   const said = await read($, bubble)
   const saying = said !== null && t < said.untilTick
   const scene: Scene = tour
-    ? { bones, tick: animTick, mood: 'neutral', pose: null, idleTicks: 0, night: false, holiday: null, heartsFrame, saying }
+    ? {
+        bones,
+        tick: animTick,
+        mood: tour.mood,
+        pose: tour.pose,
+        idleTicks: 0,
+        night: false,
+        holiday: tour.holiday,
+        heartsFrame,
+        saying,
+      }
     : await liveScene($, buddy, bones, t, heartsFrame, saying)
   const drawn = draw(scene)
   const { label, stars } = nameLine(name, bones)

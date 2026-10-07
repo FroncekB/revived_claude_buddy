@@ -5,6 +5,7 @@ import type { Engine } from 'claude-code/testing'
 import type { Saved } from '../types'
 import { SHIMMER } from './layout'
 import { zeroCounts } from './ledger'
+import { TOUR_TICKS } from './tour'
 import { FALLBACK_NAMES } from './voice'
 
 const ZERO = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
@@ -633,8 +634,9 @@ test("a subagent's failed tool doesn't leak into the main turn's reaction", asyn
   expect(reactions[0]).toContain('Failed tools: none.')
 })
 
-// One tour step is a 16-tick animation cycle at 500 ms a tick: 4 s plain, then 4 s shiny.
+// One tour step is 28 ticks at 500 ms a tick: 4 s plain, 4 s shiny, then 6 s of poses.
 const HALF_STEP_MS = 4_000
+const STEP_MS = 14_000
 
 test('the debug tour shows each species plain, then shiny, and never writes the store', async ($, on) => {
   const writes: unknown[] = []
@@ -648,7 +650,9 @@ test('the debug tour shows each species plain, then shiny, and never writes the 
   // The session's visit is its own write; the tour adds none.
   await clock.settle()
   const visits = writes.length
-  expect(await runner($)('debug')).toBe('Touring all 18 species, plain then shiny. Run /buddy debug off to stop.')
+  expect(await runner($)('debug')).toBe(
+    'Touring all 18 species with their reactions, then the holidays and moods. Run /buddy debug off to stop.',
+  )
   const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
   const shimmering = async () => (await spriteTexts(ui)).every(t => t.props.bold === true)
   expect(await ui.find({ type: 'Text', text: /tour 1\/18  common duck  $/ })).toBeDefined()
@@ -657,6 +661,9 @@ test('the debug tour shows each species plain, then shiny, and never writes the 
   expect(await ui.find({ type: 'Text', text: /tour 1\/18  common duck \(shiny\)  $/ })).toBeDefined()
   expect(await shimmering()).toBe(true)
   await clock.advance(HALF_STEP_MS)
+  // The duck's flinch, wide-eyed.
+  expect(await ui.find({ type: 'Text', text: /<\(O \)___/ })).toBeDefined()
+  await clock.advance(STEP_MS - 2 * HALF_STEP_MS)
   expect(await ui.find({ type: 'Text', text: /tour 2\/18  uncommon goose  $/ })).toBeDefined()
   const desktop = await $.ui.mount({ plugin: 'buddy', surface: 'desktop', ...band() })
   expect(await desktop.find({ type: 'Text', text: /tour 2\/18/ })).toBeDefined()
@@ -674,13 +681,13 @@ test('debug off ends the tour', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: /Pip/ })).toBeDefined()
 })
 
-test('the tour ends by itself after the last species', async ($, on) => {
+test('the tour ends by itself after the last mood', async ($, on) => {
   const clock = world(on, { buddy: RECORD })
   await $.session.start(START)
   await runner($)('debug')
   const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
-  await clock.advance(18 * 2 * HALF_STEP_MS - 500)
-  expect(await ui.find({ type: 'Text', text: /tour 18\/18/ })).toBeDefined()
+  await clock.advance(TOUR_TICKS * 500 - 500)
+  expect(await ui.find({ type: 'Text', text: /tour: sulky/ })).toBeDefined()
   await clock.advance(500)
   expect(await ui.find({ type: 'Text', text: /tour/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /Pip/ })).toBeDefined()
@@ -1016,4 +1023,18 @@ test('at night the buddy dozes off after a minute', async ($, on) => {
   expect((await drawnSprite(ui))[0]).not.toMatch(/z$/)
   await clock.advance(500)
   expect((await drawnSprite(ui))[0]).toMatch(/z$/)
+})
+
+test('the tour dresses the real buddy for each holiday, then shows each mood', async ($, on) => {
+  const clock = world(on, { buddy: RECORD })
+  await $.session.start(START)
+  await runner($)('debug')
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  // Independence Day is the eighth decoration.
+  await clock.advance((18 * 28 + 7 * 8) * 500)
+  expect(await ui.find({ type: 'Text', text: /tour: Independence Day  common ghost/ })).toBeDefined()
+  expect((await ui.find({ type: 'Text', text: /^\*:\*:$/ }))?.props.color).toBe('blue')
+  await clock.advance(8 * 8 * 500)
+  expect(await ui.find({ type: 'Text', text: /tour: anxious/ })).toBeDefined()
+  expect((await drawnSprite(ui)).join('\n')).toContain('/ ;  ; \\')
 })
