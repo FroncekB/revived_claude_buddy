@@ -17,6 +17,7 @@ export function bubbleWidth(bodyColumns: number): number {
 }
 
 export function wrap(text: string, width: number, maxLines: number): string[] {
+  if (width < 1 || maxLines < 1) return []
   const lines: string[] = []
   let line = ''
   for (let word of text.split(/\s+/).filter(Boolean)) {

@@ -57,3 +57,9 @@ test('name line, compact line and card', () => {
   expect(card.join('\n')).toContain('Rerolls: 2')
   expect(card.join('\n')).toContain('Hatched 2026-10-07')
 })
+
+test('wrap returns nothing for a degenerate width or line count', () => {
+  expect(wrap('hello', 0, 3)).toEqual([])
+  expect(wrap('hello', -5, 3)).toEqual([])
+  expect(wrap('hello', 10, 0)).toEqual([])
+})
