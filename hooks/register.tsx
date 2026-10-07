@@ -25,6 +25,7 @@ import {
   reactionPrompt,
   shouldQuip,
   talkPrompt,
+  withArticle,
 } from './voice'
 import type { TurnSummary } from './voice'
 
@@ -143,7 +144,7 @@ async function reply($: EngineInterface, rec: BuddyRecord, prompt: string) {
 // A finished main turn: speak only when shouldQuip says so, never muted, never while a call is pending.
 async function react($: EngineInterface, summary: TurnSummary) {
   const rec = await read($, record)
-  if (!rec) return
+  if (!rec || (await read($, hatching))) return
   const now = await $.clock.now()
   const speak = shouldQuip({
     mode: rec.mode,
@@ -184,7 +185,7 @@ async function hatch($: EngineInterface, rerolls: number): Promise<string> {
     const note = await save($, rec)
     await update($, bubble, () => null)
     later($, () => reply($, rec, HELLO_PROMPT))
-    return note ?? `${soul.name}, a ${bones.rarity}${bones.shiny ? ' shiny' : ''} ${bones.species}, hatched.`
+    return note ?? `${soul.name}, ${withArticle(bones.rarity)}${bones.shiny ? ' shiny' : ''} ${bones.species}, hatched.`
   } finally {
     // The egg never stays out, whatever went wrong above.
     await update($, hatching, () => false)
@@ -344,7 +345,9 @@ export const register: Register = on => {
     try {
       const rec = await read($, record)
       const fromPerson = e.origin.kind === 'composer' || e.origin.kind === 'bridge'
-      const message = rec && rec.mode !== 'off' && fromPerson ? matchAddress(rec.soul.name, e.text) : null
+      // A prompt carrying images or files is a request for Claude, whatever it starts with.
+      const bare = !e.attachments || e.attachments.length === 0
+      const message = rec && rec.mode !== 'off' && fromPerson && bare ? matchAddress(rec.soul.name, e.text) : null
       if (rec && message !== null) {
         later($, () => reply($, rec, talkPrompt(message)))
         return { drop: `(to ${rec.soul.name})` }
@@ -372,7 +375,7 @@ export const register: Register = on => {
       const rows = bandRows(view.sprite, view.say, e.props.bodyColumns)
       const nameRow = (
         <Box>
-          <Text dimColor>{view.label}</Text>
+          <Text dimColor wrap="truncate-end">{view.label}</Text>
           <Text {...tint(view.starColor)}>{view.stars}</Text>
         </Box>
       )

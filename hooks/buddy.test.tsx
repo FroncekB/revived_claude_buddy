@@ -72,7 +72,7 @@ test('hatching names the buddy and draws it on terminal and desktop', async ($, 
   const clock = world(on)
   model(on, '{"name": "Pip", "personality": "Counts semicolons."}', 'Hello there.')
   await $.session.start(START)
-  expect(await runner($)('')).toMatch(/^Pip, a .* hatched\.$/)
+  expect(await runner($)('')).toMatch(/^Pip, (a (common|rare|legendary)|an (uncommon|epic)) .* hatched\.$/)
   await clock.settle()
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ plugin: 'buddy', surface, ...band() })
@@ -145,7 +145,7 @@ test('reroll asks first, then replaces the buddy and counts the reroll', async (
   const run = runner($)
   expect(await run('reroll')).toMatch(/^This replaces Pip, .* for good\. Run \/buddy reroll confirm\.$/)
   expect(await run('card')).toMatch(/Rerolls: 0/)
-  expect(await run('reroll confirm')).toMatch(/^Bix, a /)
+  expect(await run('reroll confirm')).toMatch(/^Bix, an? /)
   const card = (await run('card')) ?? ''
   expect(card).toMatch(/^Bix, /)
   expect(card).toMatch(/Rerolls: 1/)
@@ -339,6 +339,61 @@ test('tool results pass through unchanged', async ($, on) => {
   await $.session.start(START)
   expect(await $.tool.call({ tool: 'Bash', command: 'false' })).toMatchObject({ isError: true, result: 'boom' })
   expect(JSON.stringify(await $.tool.call({ tool: 'Bash', command: 'deny' }))).toContain('not here')
+})
+
+test('the name label is truncated, never wrapped', async ($, on) => {
+  world(on, { buddy: RECORD })
+  await $.session.start(START)
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  const texts = await ui.findAll({ type: 'Text' })
+  const label = texts.find(t => /Pip {2}\w+ \w+/.test(t.text ?? ''))
+  expect(label?.props).toMatchObject({ wrap: 'truncate-end' })
+})
+
+test('a prompt with attachments goes to Claude even when it starts with the name', async ($, on) => {
+  const clock = world(on, { buddy: RECORD })
+  engineBelow(on)
+  const prompts = model(on, null, 'Hi.')
+  await $.session.start(START)
+  const passed = await $.prompt.submit({
+    text: 'Pip, what is in this screenshot?',
+    attachments: [{ type: 'image', mediaType: 'image/png' }],
+    wait: false,
+    origin: { kind: 'composer' },
+  })
+  expect(passed).toMatchObject({ text: 'Pip, what is in this screenshot?' })
+  await clock.settle()
+  expect(prompts).toHaveLength(0)
+})
+
+test('no reaction while the egg is out', async ($, on) => {
+  const clock = world(on, { buddy: RECORD })
+  engineBelow(on)
+  // Hatch requests wait for the test; every other model prompt is recorded.
+  let release!: () => void
+  const gate = new Promise<void>(resolve => {
+    release = resolve
+  })
+  const others: string[] = []
+  on('model.complete', async (_$, e) => {
+    if (e.system?.includes('JSON only')) {
+      await gate
+      return { value: failed() }
+    }
+    others.push(e.prompt)
+    return { value: ok('Ouch.') }
+  })
+  await $.session.start(START)
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  const hatched = runner($)('reroll confirm')
+  for (let i = 0; i < 100 && !(await ui.find({ text: /hatching/ })); i++) await Promise.resolve()
+  expect(await ui.find({ text: /hatching/ })).toBeDefined()
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  await $.turn.complete(TURN)
+  await clock.advance(10)
+  expect(others).toHaveLength(0)
+  release()
+  await hatched
 })
 
 test('a prompt addressed to the buddy is answered by it and never reaches Claude', async ($, on) => {

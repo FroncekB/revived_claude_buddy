@@ -40,6 +40,11 @@ export function shouldQuip(o: {
   return isNotable(o.summary) || o.roll < QUIP_CHANCE
 }
 
+// "a common", "an uncommon": the article agrees with the word it goes before.
+export function withArticle(word: string): string {
+  return `${/^[aeiou]/i.test(word) ? 'an' : 'a'} ${word}`
+}
+
 function escapeRe(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
@@ -66,7 +71,7 @@ function statLine(b: Bones): string {
 
 export function personaSystem(soul: Soul, b: Bones): string {
   return [
-    `You are ${soul.name}, a ${b.rarity}${b.shiny ? ' shiny' : ''} ${b.species} who lives in a developer's terminal, above their prompt.`,
+    `You are ${soul.name}, ${withArticle(b.rarity)}${b.shiny ? ' shiny' : ''} ${b.species} who lives in a developer's terminal, above their prompt.`,
     `Personality: ${soul.personality}`,
     `Stats: ${statLine(b)}.`,
     `Reply with one line of at most ${MAX_SAY} characters, in character. No markdown, no emoji, no quotation marks.`,

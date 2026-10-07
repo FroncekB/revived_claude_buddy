@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import { rollBones } from './roll'
 import {
   FALLBACK_NAMES, MAX_SAY, QUIP_COOLDOWN_MS, RESERVED_NAMES, cannedLine, cleanSay, fallbackSoul, hatchRequest,
-  matchAddress, parseSoul, reactionPrompt, shouldQuip,
+  matchAddress, parseSoul, personaSystem, reactionPrompt, shouldQuip, withArticle,
 } from './voice'
 import type { TurnSummary } from './voice'
 
@@ -67,6 +67,16 @@ test('names that read as prompt openers are rejected, in any case', () => {
   expect(RESERVED_NAMES.size).toBe(29)
   for (const name of FALLBACK_NAMES) expect(RESERVED_NAMES.has(name.toLowerCase())).toBe(false)
   expect(FALLBACK_NAMES).toHaveLength(24)
+})
+
+test('a or an agrees with the word that follows', () => {
+  expect(withArticle('common')).toBe('a common')
+  expect(withArticle('uncommon')).toBe('an uncommon')
+  expect(withArticle('epic')).toBe('an epic')
+  expect(withArticle('legendary')).toBe('a legendary')
+  const epic = { ...rollBones('voice-seed'), rarity: 'epic' as const, shiny: true }
+  const soul = { name: 'Pip', personality: 'Counts semicolons.', hatchedAt: '2026-10-07T00:00:00.000Z' }
+  expect(personaSystem(soul, epic)).toContain(`You are Pip, an epic shiny ${epic.species} who lives`)
 })
 
 test('the reaction prompt carries the event summary and nothing else', () => {
