@@ -192,3 +192,80 @@ test('a failed save after a stored record keeps the new mode', async ($, on) => 
   expect(await run('off')).toBe('Could not save your buddy; it lives for this session only.')
   expect(await run('pet')).toBe('Pip is hidden. Run /buddy to bring it back.')
 })
+
+const TURN = { answer: 'done', durationMs: 4_000, isAborted: false, turnId: 't1', reason: 'answer' as const }
+
+// Beneath the plugin: Bash fails, turns and prompts pass straight through.
+function engineBelow(on: On) {
+  on('tool.call', async () => ({ isError: true as const, result: 'boom' }))
+  on('turn.complete', async (_$, e) => ({ text: e.answer }))
+  on('prompt.submit', async (_$, e) => ({ text: e.text }))
+}
+
+test('a turn with a failed tool gets one reaction, then the cooldown holds', async ($, on) => {
+  const clock = world(on, { buddy: RECORD })
+  engineBelow(on)
+  const prompts = model(on, null, 'Ouch.')
+  await $.session.start(START)
+  const reactions = () => prompts.filter(p => p.includes('Failed tools'))
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(reactions()).toHaveLength(1)
+  expect(reactions()[0]).toContain('Failed tools: Bash.')
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await ui.find({ text: /Ouch\./ })).toBeDefined()
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  await $.turn.complete({ ...TURN, turnId: 't2' })
+  await clock.settle()
+  expect(reactions()).toHaveLength(1)
+})
+
+test('subagent turns and a muted buddy stay quiet', async ($, on) => {
+  const clock = world(on, { buddy: RECORD })
+  engineBelow(on)
+  const prompts = model(on, null, 'Ouch.')
+  await $.session.start(START)
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  await $.turn.complete({ ...TURN, agentId: 'a1' })
+  await clock.settle()
+  expect(prompts).toHaveLength(0)
+  await runner($)('mute')
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(prompts).toHaveLength(0)
+})
+
+test('tool results pass through unchanged', async ($, on) => {
+  world(on, { buddy: RECORD })
+  on('tool.call', async (_$, e) =>
+    e.tool === 'Bash' && e.command === 'deny' ? { deny: 'not here' } : { isError: true as const, result: 'boom' },
+  )
+  await $.session.start(START)
+  expect(await $.tool.call({ tool: 'Bash', command: 'false' })).toMatchObject({ isError: true, result: 'boom' })
+  expect(JSON.stringify(await $.tool.call({ tool: 'Bash', command: 'deny' }))).toContain('not here')
+})
+
+test('a prompt addressed to the buddy is answered by it and never reaches Claude', async ($, on) => {
+  const clock = world(on, { buddy: RECORD })
+  engineBelow(on)
+  const prompts = model(on, null, 'Doing great.')
+  await $.session.start(START)
+  const asked = await $.prompt.submit({ text: 'Pip, how are you?', wait: false, origin: { kind: 'composer' } })
+  expect(asked).toEqual({ drop: '(to Pip)' })
+  await clock.settle()
+  expect(prompts[0]).toContain('how are you?')
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await ui.find({ text: /Doing great\./ })).toBeDefined()
+  const passed = await $.prompt.submit({ text: 'Pipeline, run it', wait: false, origin: { kind: 'composer' } })
+  expect(passed).toMatchObject({ text: 'Pipeline, run it' })
+})
+
+test('when the buddy is off, even its name goes to Claude', async ($, on) => {
+  world(on, { buddy: RECORD })
+  engineBelow(on)
+  await $.session.start(START)
+  await runner($)('off')
+  const passed = await $.prompt.submit({ text: 'Pip, hi', wait: false, origin: { kind: 'composer' } })
+  expect(passed).toMatchObject({ text: 'Pip, hi' })
+})

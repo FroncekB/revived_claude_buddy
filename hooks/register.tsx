@@ -19,9 +19,14 @@ import {
   cleanSay,
   fallbackSoul,
   hatchRequest,
+  matchAddress,
   parseSoul,
   personaSystem,
+  reactionPrompt,
+  shouldQuip,
+  talkPrompt,
 } from './voice'
+import type { TurnSummary } from './voice'
 
 const record = atom({ plugin: 'buddy', key: 'record' } as const, null)
 const hatching = atom({ plugin: 'buddy', key: 'hatching' } as const, false)
@@ -48,6 +53,9 @@ const tint = (color: string | undefined) => (color ? { color } : {})
 let timer: { cancel: () => void } | null = null
 let inFlight: { controller: AbortController; kind: 'react' | 'reply' } | null = null
 let cannedCount = 0
+// The current main turn's tool tally; reset when that turn completes.
+let tally: Record<string, number> = {}
+let failedTools: string[] = []
 
 function startTimer($: EngineInterface) {
   timer?.cancel()
@@ -121,6 +129,25 @@ async function reply($: EngineInterface, rec: BuddyRecord, prompt: string) {
   await update($, lastReplyAt, () => now)
   const text = now - last < REPLY_FLOOR_MS ? null : await ask($, rec, bones, prompt, 'reply')
   await showBubble($, text ?? cannedLine(bones, cannedCount++))
+}
+
+// A finished main turn: speak only when shouldQuip says so, never muted, never while a call is pending.
+async function react($: EngineInterface, summary: TurnSummary) {
+  const rec = await read($, record)
+  if (!rec) return
+  const now = await $.clock.now()
+  const speak = shouldQuip({
+    mode: rec.mode,
+    inFlight: inFlight !== null,
+    now,
+    lastQuipAt: await read($, lastQuipAt),
+    summary,
+    roll: Math.random(),
+  })
+  if (!speak) return
+  await update($, lastQuipAt, () => now)
+  const text = await ask($, rec, rollBones(rec.seed), reactionPrompt(summary), 'react')
+  if (text) await showBubble($, text)
 }
 
 async function hatch($: EngineInterface, rerolls: number): Promise<string> {
@@ -255,6 +282,47 @@ export const register: Register = on => {
     } catch {
       return { text: 'Your buddy hit a snag. Try again.' }
     }
+  })
+
+  on('tool.call', async ($, e, next) => {
+    const ran = await next(e)
+    try {
+      tally[e.tool] = (tally[e.tool] ?? 0) + 1
+      if (ran.deny === undefined && ran.isError === true) failedTools.push(e.tool)
+    } catch {
+      // Counting never changes a tool call.
+    }
+    return ran
+  })
+
+  on('turn.complete', async ($, e, next) => {
+    const result = await next(e)
+    try {
+      if (e.agentId === undefined) {
+        const summary: TurnSummary = { reason: e.reason, durationMs: e.durationMs, tools: tally, failed: failedTools }
+        tally = {}
+        failedTools = []
+        later($, () => react($, summary))
+      }
+    } catch {
+      // A reaction is never worth breaking a turn over.
+    }
+    return result
+  })
+
+  on('prompt.submit', async ($, e, next) => {
+    try {
+      const rec = await read($, record)
+      const fromPerson = e.origin.kind === 'composer' || e.origin.kind === 'bridge'
+      const message = rec && rec.mode !== 'off' && fromPerson ? matchAddress(rec.soul.name, e.text) : null
+      if (rec && message !== null) {
+        later($, () => reply($, rec, talkPrompt(message)))
+        return { drop: `(to ${rec.soul.name})` }
+      }
+    } catch {
+      // Fall through: the prompt goes to Claude.
+    }
+    return next(e)
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
