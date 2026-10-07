@@ -13,13 +13,13 @@ The sprites are original art drawn in the original's format, not copies.
 ## Install
 
 ```bash
-claude plugin marketplace add FroncekB/claude-buddy
+claude plugin marketplace add FroncekB/revived_claude_buddy
 claude plugin install buddy@buddy-mods
 ```
 
 Then start a new session, or run `/reload-plugins` in an open one.
 
-To install from a local copy of this repo instead, run `claude plugin marketplace add /path/to/claude-buddy`.
+To install from a local copy of this repo instead, run `claude plugin marketplace add /path/to/revived_claude_buddy`.
 
 ## Use
 
