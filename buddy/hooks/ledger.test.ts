@@ -1,5 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
+import type { Counts } from '../types'
 import {
   addCounts, countEvent, localDay, mergePending, prevDay, toolGroup, totalCalls, visit, zeroCounts,
 } from './ledger'
@@ -39,13 +40,34 @@ test('each event adds to its own counts', () => {
 })
 
 test('adding counts sums them, except the longest turn, which takes the larger', () => {
-  const a = countEvent(countEvent(zeroCounts(), { kind: 'turn', reason: 'answer', durationMs: 5_000 }), {
-    kind: 'call', tool: 'Read', failed: false,
+  const a: Counts = {
+    turns: 3,
+    failedTurns: 1,
+    longestTurnMs: 5_000,
+    calls: { shell: 1, edit: 2, read: 3, web: 4, agent: 5, mcp: 6, other: 7 },
+    failedCalls: 2,
+    pets: 4,
+    talks: 5,
+  }
+  const b: Counts = {
+    turns: 10,
+    failedTurns: 20,
+    longestTurnMs: 3_000,
+    calls: { shell: 10, edit: 20, read: 30, web: 40, agent: 50, mcp: 60, other: 70 },
+    failedCalls: 30,
+    pets: 40,
+    talks: 50,
+  }
+  expect(addCounts(a, b)).toEqual({
+    turns: 13,
+    failedTurns: 21,
+    longestTurnMs: 5_000,
+    calls: { shell: 11, edit: 22, read: 33, web: 44, agent: 55, mcp: 66, other: 77 },
+    failedCalls: 32,
+    pets: 44,
+    talks: 55,
   })
-  const b = countEvent(countEvent(zeroCounts(), { kind: 'turn', reason: 'answer', durationMs: 3_000 }), {
-    kind: 'call', tool: 'Read', failed: true,
-  })
-  expect(addCounts(a, b)).toMatchObject({ turns: 2, longestTurnMs: 5_000, failedCalls: 1, calls: { read: 2 } })
+  expect(addCounts(b, a).longestTurnMs).toBe(5_000)
 })
 
 test('pending counts merge seed by seed', () => {

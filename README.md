@@ -43,7 +43,8 @@ A mod runs inside Claude Code with your permissions, so here is exactly what thi
   - for a comment after a turn, at most one every 3 minutes
 - **What a turn comment sees.** Only the turn's outcome, how long it took, and which tools ran or failed. It never sees your prompt, Claude's answer, file contents or command arguments.
 - **Prompts addressed to it.** A prompt that starts with the buddy's name and a comma or colon (`Pip, hi`) is dropped before it reaches Claude, and the buddy answers it. Prompts that carry an attachment always go to Claude.
-- **What it saves.** One record in the mod's own store: every buddy you've had (its seed, name, personality and hatch date, plus lifetime counts of turns, tool calls by kind, failures, pets and talks), the mute/off mode, the reroll count, and your visit streak by date. Never prompt text, answers, file contents or command arguments.
+- **What it saves.** One record in the mod's own store. For each buddy you've had: its seed, name, personality, hatch date, the time it was retired, and lifetime counts of turns, failed turns, longest turn, tool calls by kind, failed calls, pets and talks. Then the mode (on, muted or off), the reroll count, and your streak: the last day you visited, your current and best streak, and the days you've visited. Never prompt text, answers, file contents or command arguments.
+- **Upgrading.** The record is now schema 2, and the first save after the update converts an older one. A session still open on 0.1.x doesn't know schema 2 and answers `Saved buddy uses schema 2; this mod knows 1.` until you reload it with `/reload-plugins`.
 
 ## Develop
 
