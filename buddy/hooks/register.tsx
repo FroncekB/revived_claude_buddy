@@ -15,11 +15,11 @@ import type { Frame } from './sprites'
 import { bandSvg } from './svg'
 import { TOUR_STEPS, tourAt } from './tour'
 import {
-  BUBBLE_TICKS,
   HEART_TICKS,
   HELLO_PROMPT,
   PET_PROMPT,
   REPLY_FLOOR_MS,
+  bubbleTicks,
   cannedLine,
   cleanSay,
   fallbackSoul,
@@ -62,6 +62,8 @@ type Look = {
   spriteColor: string | undefined
   spriteBold: boolean
   say: string | null
+  // How far through its life the bubble is, 0 to 1: which page a long one is on.
+  sayAt: number
 }
 
 // The part of a buddy that speaks: its seed, for the bones, and its soul.
@@ -204,7 +206,7 @@ async function countsOf($: EngineInterface, buddy: Buddy): Promise<Counts> {
 
 async function showBubble($: EngineInterface, text: string) {
   const now = await read($, tick)
-  await update($, bubble, () => ({ text, untilTick: now + BUBBLE_TICKS }))
+  await update($, bubble, () => ({ text, fromTick: now, untilTick: now + bubbleTicks(text) }))
 }
 
 // The session's visit (spec section 3), greeting the streak on the first session of a new day.
@@ -378,6 +380,7 @@ function eggLook(frame: Frame): Look {
     spriteColor: undefined,
     spriteBold: false,
     say: null,
+    sayAt: 0,
   }
 }
 
@@ -399,6 +402,7 @@ async function buddyLook($: EngineInterface, saved: Saved, t: number, withTour =
     sparkle: bones.shiny ? animTick : null,
   })
   const said = await read($, bubble)
+  const saying = said !== null && t < said.untilTick
   const { label, stars } = nameLine(name, bones)
   const sprite = spriteTint(bones, animTick)
   return {
@@ -410,7 +414,8 @@ async function buddyLook($: EngineInterface, saved: Saved, t: number, withTour =
     starColor: RARITY[bones.rarity].color,
     spriteColor: sprite.color,
     spriteBold: sprite.bold,
-    say: said && t < said.untilTick ? said.text : null,
+    say: saying ? said.text : null,
+    sayAt: saying ? (t - said.fromTick) / (said.untilTick - said.fromTick) : 0,
   }
 }
 
@@ -515,10 +520,10 @@ export const register: Register = on => {
       const view = isHatching || !rec ? eggLook(frameAt(t).frame) : await buddyLook($, rec, t)
 
       if (isCompact(e.props.maxRows, e.props.bodyColumns)) {
-        return <Text wrap="truncate-end">{compactLine(view.face, view.name, view.say)}</Text>
+        return <Text wrap="truncate-end">{compactLine(view.face, view.name, view.say, e.props.bodyColumns, view.sayAt)}</Text>
       }
 
-      const rows = bandRows(view.sprite, view.say, e.props.bodyColumns)
+      const rows = bandRows(view.sprite, view.say, e.props.bodyColumns, view.sayAt)
       const nameRow = (
         <Box>
           <Text dimColor wrap="truncate-end">{view.label}</Text>

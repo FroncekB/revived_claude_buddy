@@ -1,52 +1,127 @@
 import { expect, test } from 'claude-code/testing'
 
 import {
-  SHIMMER, bandRows, bubbleRows, cardLines, compactLine, isCompact, nameLine, spriteTint, streakLine, wrap,
+  MAX_BUBBLE_W, MIN_FULL_COLS, SHIMMER, bandRows, bubbleRows, bubbleWidth, cardLines, compactLine, isCompact, nameLine,
+  pageAt, spriteTint, streakLine, wrap,
 } from './layout'
 import { zeroCounts } from './ledger'
 import { rollBones } from './roll'
+import { MAX_SAY, cleanSay } from './voice'
 
 const SPRITE = ['a', 'b', 'c', 'd', 'e'].map(s => s.padEnd(12))
 const SOUL = { name: 'Pip', personality: 'Counts semicolons.', hatchedAt: '2026-10-07T12:00:00.000Z' }
 
 test('wrap keeps short text on one line', () => {
-  expect(wrap('Three retries. Bold strategy.', 30, 3)).toEqual(['Three retries. Bold strategy.'])
+  expect(wrap('Three retries. Bold strategy.', 30)).toEqual(['Three retries. Bold strategy.'])
 })
 
-test('wrap breaks on words and cuts the third line with an ellipsis', () => {
+test('wrap breaks on words and keeps every one', () => {
+  expect(wrap('one two three four five six', 9)).toEqual(['one two', 'three', 'four five', 'six'])
+})
+
+test('wrap given a line count cuts the last line it keeps with an ellipsis', () => {
   expect(wrap('one two three four five six', 9, 3)).toEqual(['one two', 'three', 'four fiv…'])
 })
 
 test('wrap hard-splits a word longer than a line and never exceeds the width', () => {
+  expect(wrap('x'.repeat(25), 10)).toEqual(['x'.repeat(10), 'x'.repeat(10), 'x'.repeat(5)])
   const lines = wrap('x'.repeat(200), 10, 3)
   expect(lines).toHaveLength(3)
   expect(lines.every(l => l.length <= 10)).toBe(true)
   expect(lines[2]?.endsWith('…')).toBe(true)
 })
 
+test('every bubble row is exactly the box width, with the tail on the first text line', () => {
+  const rows = bubbleRows('hi there', 20, 0)
+  expect(rows).toHaveLength(3)
+  expect(rows.every(r => r.length === 'hi there'.length + 4)).toBe(true)
+  expect(rows[1]?.startsWith('< ')).toBe(true)
+  expect(rows[2]).toBe(" '" + '-'.repeat(9) + "'")
+  expect(bubbleRows('word '.repeat(40), 30, 0)).toHaveLength(5)
+})
+
+// The text lines a bubble shows, without its edges.
+const said = (rows: readonly string[]) => rows.filter(r => /^[<|] /.test(r)).map(r => r.slice(2, -2).trimEnd())
+
+test('text past three lines turns pages that keep the box its height and number themselves', () => {
+  // Inner width 9: one two / three / four five | six seven / eight / nine ten | eleven
+  const text = 'one two three four five six seven eight nine ten eleven'
+  const [first, second, third] = [0, 0.5, 0.99].map(at => bubbleRows(text, 13, at))
+  expect(said(first!)).toEqual(['one two', 'three', 'four five'])
+  expect(said(second!)).toEqual(['six seven', 'eight', 'nine ten'])
+  expect(said(third!)).toEqual(['eleven', '', ''])
+  expect(first![4]).toBe(" '---- 1/3 -'")
+  expect(third![4]).toBe(" '---- 3/3 -'")
+  expect([first, second, third].every(rows => rows!.length === 5 && rows!.every(r => r.length === 13))).toBe(true)
+})
+
+test('a bubble shows each page for an equal share of its life', () => {
+  expect([0, 0.32, 0.34, 0.66, 0.67, 0.999].map(at => pageAt(3, at))).toEqual([0, 0, 1, 1, 2, 2])
+  expect(pageAt(3, 1.5)).toBe(2)
+  expect(pageAt(3, -1)).toBe(0)
+  expect(pageAt(3, Number.NaN)).toBe(0)
+  expect(pageAt(1, 0.9)).toBe(0)
+})
+
+test('the bubble widens to 80 columns where the band has room', () => {
+  expect(MAX_BUBBLE_W).toBe(80)
+  expect(bubbleWidth(94)).toBe(80)
+  expect(bubbleWidth(200)).toBe(80)
+  expect(bubbleWidth(MIN_FULL_COLS)).toBe(MIN_FULL_COLS - 14)
+})
+
+// The longest reply cleanup lets through.
+const LONGEST = cleanSay('Every refactor begins with a nap, and every nap begins with a flaky test nobody owns, '.repeat(3))
+
+// Everything a band shows over a bubble's life, page by page.
+function shown(page: (at: number) => string): string {
+  const pages: string[] = []
+  for (let i = 0; i < 200; i++) {
+    const text = page(i / 200)
+    if (pages.at(-1) !== text) pages.push(text)
+  }
+  return pages.join(' ')
+}
+
+test('the longest reply is shown whole at every width the full band is drawn at', () => {
+  expect(LONGEST.length).toBeGreaterThan(MAX_SAY - 10)
+  for (let cols = MIN_FULL_COLS; cols <= 200; cols++) {
+    const bubble = (at: number) => said(bandRows(SPRITE, LONGEST, cols, at).bubble).filter(Boolean).join(' ')
+    expect(shown(bubble)).toBe(LONGEST)
+  }
+})
+
+test('the one-line band pages the longest reply too, and never outgrows its columns', () => {
+  for (let cols = 24; cols <= 200; cols++) {
+    const line = (at: number) => compactLine('<(·)', 'Pip', LONGEST, cols, at)
+    for (let i = 0; i < 200; i++) expect(line(i / 200).length).toBeLessThanOrEqual(cols)
+    expect(shown(at => line(at).replace(/^<\(·\)  Pip: /, '').replace(/ …$/, ''))).toBe(LONGEST)
+  }
+})
+
 test('every bubble row is the same width, with the tail on the first text line', () => {
-  const rows = bubbleRows('word '.repeat(40), 30)
+  const rows = bubbleRows('word '.repeat(40), 30, 0)
   expect(rows).toHaveLength(5)
   expect(rows.every(r => r.length === rows[0]!.length && r.length <= 30)).toBe(true)
   expect(rows[1]?.startsWith('< ')).toBe(true)
 })
 
 test('a short line gets a box that fits it, not the widest box', () => {
-  const rows = bubbleRows('hi there', 40)
+  const rows = bubbleRows('hi there', 40, 0)
   expect(rows).toHaveLength(3)
   expect(rows.every(r => r.length === 'hi there'.length + 4)).toBe(true)
 })
 
 test('the bubble grows with the pane up to 80 columns', () => {
   const long = 'x'.repeat(300)
-  expect(bandRows(SPRITE, long, 60).bubble[0]).toHaveLength(46)
-  expect(bandRows(SPRITE, long, 200).bubble[0]).toHaveLength(80)
+  expect(bandRows(SPRITE, long, 60, 0).bubble[0]).toHaveLength(46)
+  expect(bandRows(SPRITE, long, 200, 0).bubble[0]).toHaveLength(80)
 })
 
 test('a full-length reply fits the widest bubble without being cut', () => {
   const say = 'Three retries, two stack traces and a semicolon that was never the problem. Bold strategy, friend. I would have read the error message first, but who am I?'
   expect(say.length).toBeLessThanOrEqual(160)
-  const rows = bubbleRows(say, 80)
+  const rows = bubbleRows(say, 80, 0)
   expect(rows.join('\n')).not.toContain('…')
   expect(rows.slice(1, -1).map(r => r.slice(2, -2).trim()).join(' ')).toBe(say)
 })
@@ -58,10 +133,10 @@ test('compact below 6 rows or 44 columns', () => {
 })
 
 test('the band is always 5 sprite rows beside 5 bubble rows', () => {
-  const quiet = bandRows(SPRITE, null, 80)
+  const quiet = bandRows(SPRITE, null, 80, 0)
   expect(quiet.sprite).toHaveLength(5)
   expect(quiet.bubble).toEqual(['', '', '', '', ''])
-  const talking = bandRows(SPRITE, 'Hello there.', 80)
+  const talking = bandRows(SPRITE, 'Hello there.', 80, 0)
   expect(talking.bubble).toHaveLength(5)
   expect(talking.bubble[1]).toContain('Hello there.')
 })
@@ -71,8 +146,8 @@ test('name line, compact line and card', () => {
   const { label, stars } = nameLine('Pip', bones)
   expect(label).toContain(`Pip  ${bones.rarity} ${bones.species}`)
   expect(stars.length).toBeGreaterThanOrEqual(1)
-  expect(compactLine('<(·)', 'Pip', null)).toBe('<(·)  Pip')
-  expect(compactLine('<(·)', 'Pip', 'Hi.')).toBe('<(·)  Pip: Hi.')
+  expect(compactLine('<(·)', 'Pip', null, 80, 0)).toBe('<(·)  Pip')
+  expect(compactLine('<(·)', 'Pip', 'Hi.', 80, 0)).toBe('<(·)  Pip: Hi.')
   const card = cardLines(SOUL, bones, 2)
   expect(card.length).toBeLessThanOrEqual(12)
   expect(card[0]).toMatch(/^Pip, /)
@@ -81,8 +156,8 @@ test('name line, compact line and card', () => {
 })
 
 test('wrap returns nothing for a degenerate width or line count', () => {
-  expect(wrap('hello', 0, 3)).toEqual([])
-  expect(wrap('hello', -5, 3)).toEqual([])
+  expect(wrap('hello', 0)).toEqual([])
+  expect(wrap('hello', -5)).toEqual([])
   expect(wrap('hello', 10, 0)).toEqual([])
 })
 

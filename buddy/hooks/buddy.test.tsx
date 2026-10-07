@@ -220,6 +220,29 @@ test('petting shows hearts then a reply; a second pet inside 5 s gets a canned l
   expect(await ui.find({ text: /♥/ })).toBeUndefined()
 })
 
+test('a long reply in a narrow band turns pages until every word has shown, then goes', async ($, on) => {
+  const clock = world(on, { buddy: RECORD })
+  const reply = 'Three retries and a green build. I am choosing to believe that was all part of the plan, mostly.'
+  model(on, null, reply)
+  await $.session.start(START)
+  await runner($)('pet')
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band(10, 44) })
+  const pages: string[] = []
+  for (let i = 0; i < 40; i++) {
+    const lines = (await ui.findAll({ type: 'Text' }))
+      .map(t => t.text)
+      .filter(text => /^ [<|] /.test(text))
+      .map(text => text.slice(3, -2).trim())
+    const page = lines.filter(Boolean).join(' ')
+    if (pages.at(-1) !== page) pages.push(page)
+    await clock.advance(500)
+  }
+  expect(pages.length).toBeGreaterThan(2)
+  expect(pages.at(-1)).toBe('')
+  expect(pages.filter(Boolean).join(' ')).toBe(reply)
+})
+
 test('card opens a pane with the name, personality, rerolls and streak, and prints nothing', async ($, on) => {
   const clock = world(on, { buddy: RECORD })
   await $.session.start(START)

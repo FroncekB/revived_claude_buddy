@@ -17,7 +17,13 @@ export function bubbleWidth(bodyColumns: number): number {
   return Math.min(bodyColumns - 14, MAX_BUBBLE_W)
 }
 
-export function wrap(text: string, width: number, maxLines: number): string[] {
+// Which of `count` pages is up `at` (0 to 1) of the way through a bubble's life: each gets an equal share.
+export function pageAt(count: number, at: number): number {
+  return at > 0 ? Math.min(count - 1, Math.floor(at * count)) : 0
+}
+
+// Every line by default; with `maxLines`, the last one kept ends in "…" when there were more.
+export function wrap(text: string, width: number, maxLines = Infinity): string[] {
   if (width < 1 || maxLines < 1) return []
   const lines: string[] = []
   let line = ''
@@ -46,16 +52,25 @@ export function wrap(text: string, width: number, maxLines: number): string[] {
   return kept
 }
 
-// A box at most `maxWidth` wide, shrunk to its longest line:
-// " .---." / "< text |" / "| text |" / " '---'".
-export function bubbleRows(text: string, maxWidth: number): string[] {
-  const lines = wrap(text, maxWidth - 4, MAX_BUBBLE_LINES)
-  const inner = Math.max(0, ...lines.map(line => line.length))
+// A box at most `maxWidth` wide, shrunk to its longest line over every page, so it keeps its
+// width as the pages turn: " .---." / "< text |" / "| text |" / " '---'". Text past
+// MAX_BUBBLE_LINES turns pages, `at` (0 to 1) of the way through the bubble's life; a paged
+// box keeps its height and numbers the page in its bottom edge, which it is never too narrow for.
+export function bubbleRows(text: string, maxWidth: number, at: number): string[] {
+  const lines = wrap(text, maxWidth - 4)
+  const count = Math.max(1, Math.ceil(lines.length / MAX_BUBBLE_LINES))
+  const page = pageAt(count, at)
+  const shown = lines.slice(page * MAX_BUBBLE_LINES, (page + 1) * MAX_BUBBLE_LINES)
+  const mark = count > 1 ? ` ${page + 1}/${count} ` : ''
+  if (mark) while (shown.length < MAX_BUBBLE_LINES) shown.push('')
+  const longestMark = count > 1 ? ` ${count}/${count} `.length : 0
+  const inner = Math.max(longestMark ? longestMark + 1 : 0, ...lines.map(line => line.length))
   const width = inner + 4
+  const edge = mark ? '-'.repeat(width - 4 - mark.length) + mark + '-' : '-'.repeat(width - 3)
   return [
     ' .' + '-'.repeat(width - 3) + '.',
-    ...lines.map((line, i) => (i === 0 ? '< ' : '| ') + line.padEnd(inner) + ' |'),
-    " '" + '-'.repeat(width - 3) + "'",
+    ...shown.map((line, i) => (i === 0 ? '< ' : '| ') + line.padEnd(inner) + ' |'),
+    " '" + edge + "'",
   ]
 }
 
@@ -63,8 +78,9 @@ export function bandRows(
   sprite: readonly string[],
   say: string | null,
   bodyColumns: number,
+  at: number,
 ): { sprite: string[]; bubble: string[] } {
-  const box = say ? bubbleRows(say, bubbleWidth(bodyColumns)) : []
+  const box = say ? bubbleRows(say, bubbleWidth(bodyColumns), at) : []
   return {
     sprite: Array.from({ length: 5 }, (_, i) => sprite[i] ?? ''),
     bubble: Array.from({ length: 5 }, (_, i) => box[i] ?? ''),
@@ -86,8 +102,15 @@ export function nameLine(name: string, bones: Bones): { label: string; stars: st
   }
 }
 
-export function compactLine(face: string, name: string, say: string | null): string {
-  return say ? `${face}  ${name}: ${say}` : `${face}  ${name}`
+// One row; a bubble too long for it turns pages like the full one, each but the last ending " …".
+export function compactLine(face: string, name: string, say: string | null, columns: number, at: number): string {
+  const head = `${face}  ${name}`
+  if (!say) return head
+  const room = columns - head.length - 2
+  const lines = say.length <= room ? [say] : wrap(say, room - 2)
+  if (lines.length === 0) return `${head}: ${say}`
+  const page = pageAt(lines.length, at)
+  return `${head}: ${lines[page]}${page < lines.length - 1 ? ' …' : ''}`
 }
 
 export function cardLines(soul: Soul, bones: Bones, rerolls: number): string[] {

@@ -49,7 +49,7 @@ export type Saved = {
   you: You
 }
 
-export type Bubble = { text: string; untilTick: number }
+export type Bubble = { text: string; fromTick: number; untilTick: number }
 
 declare module 'claude-code' {
   interface PluginState {
