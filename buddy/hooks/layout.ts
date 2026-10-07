@@ -6,7 +6,7 @@ import type { Bones } from './roll'
 export const MIN_FULL_ROWS = 6
 export const MIN_FULL_COLS = 44
 export const MAX_BUBBLE_LINES = 3
-export const MAX_BUBBLE_W = 50
+export const MAX_BUBBLE_W = 80
 
 export function isCompact(maxRows: number, bodyColumns: number): boolean {
   return maxRows < MIN_FULL_ROWS || bodyColumns < MIN_FULL_COLS
@@ -45,10 +45,12 @@ export function wrap(text: string, width: number, maxLines: number): string[] {
   return kept
 }
 
-// A box exactly `width` wide: " .---." / "< text |" / "| text |" / " '---'".
-export function bubbleRows(text: string, width: number): string[] {
-  const inner = width - 4
-  const lines = wrap(text, inner, MAX_BUBBLE_LINES)
+// A box at most `maxWidth` wide, shrunk to its longest line:
+// " .---." / "< text |" / "| text |" / " '---'".
+export function bubbleRows(text: string, maxWidth: number): string[] {
+  const lines = wrap(text, maxWidth - 4, MAX_BUBBLE_LINES)
+  const inner = Math.max(0, ...lines.map(line => line.length))
+  const width = inner + 4
   return [
     ' .' + '-'.repeat(width - 3) + '.',
     ...lines.map((line, i) => (i === 0 ? '< ' : '| ') + line.padEnd(inner) + ' |'),

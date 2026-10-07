@@ -43,6 +43,15 @@ test('reply cleanup strips quotes, newlines and emoji, and caps the length', () 
   expect(cleanSay('  \n ')).toBe('')
 })
 
+test('a reply over the limit is cut after its last whole word', () => {
+  const words = 'semicolon '.repeat(30).trim()
+  const cut = cleanSay(words)
+  expect(MAX_SAY).toBe(160)
+  expect(cut.length).toBeLessThanOrEqual(MAX_SAY)
+  expect(cut.endsWith('semicolon…')).toBe(true)
+  expect(words.startsWith(cut.slice(0, -1) + ' ')).toBe(true)
+})
+
 test('hatch JSON is validated, with a seeded fallback', () => {
   expect(parseSoul('```json\n{"name": "Pip", "personality": "Counts semicolons."}\n```')).toEqual({
     name: 'Pip',

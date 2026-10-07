@@ -21,12 +21,31 @@ test('wrap hard-splits a word longer than a line and never exceeds the width', (
   expect(lines[2]?.endsWith('…')).toBe(true)
 })
 
-test('every bubble row is exactly the bubble width, with the tail on the first text line', () => {
-  const rows = bubbleRows('hi there', 20)
-  expect(rows).toHaveLength(3)
-  expect(rows.every(r => r.length === 20)).toBe(true)
+test('every bubble row is the same width, with the tail on the first text line', () => {
+  const rows = bubbleRows('word '.repeat(40), 30)
+  expect(rows).toHaveLength(5)
+  expect(rows.every(r => r.length === rows[0]!.length && r.length <= 30)).toBe(true)
   expect(rows[1]?.startsWith('< ')).toBe(true)
-  expect(bubbleRows('word '.repeat(40), 30)).toHaveLength(5)
+})
+
+test('a short line gets a box that fits it, not the widest box', () => {
+  const rows = bubbleRows('hi there', 40)
+  expect(rows).toHaveLength(3)
+  expect(rows.every(r => r.length === 'hi there'.length + 4)).toBe(true)
+})
+
+test('the bubble grows with the pane up to 80 columns', () => {
+  const long = 'x'.repeat(300)
+  expect(bandRows(SPRITE, long, 60).bubble[0]).toHaveLength(46)
+  expect(bandRows(SPRITE, long, 200).bubble[0]).toHaveLength(80)
+})
+
+test('a full-length reply fits the widest bubble without being cut', () => {
+  const say = 'Three retries, two stack traces and a semicolon that was never the problem. Bold strategy, friend. I would have read the error message first, but who am I?'
+  expect(say.length).toBeLessThanOrEqual(160)
+  const rows = bubbleRows(say, 80)
+  expect(rows.join('\n')).not.toContain('…')
+  expect(rows.slice(1, -1).map(r => r.slice(2, -2).trim()).join(' ')).toBe(say)
 })
 
 test('compact below 6 rows or 44 columns', () => {
