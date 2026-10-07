@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import { rollBones } from './roll'
 import {
-  FALLBACK_NAMES, MAX_SAY, QUIP_COOLDOWN_MS, cannedLine, cleanSay, fallbackSoul, hatchRequest,
+  FALLBACK_NAMES, MAX_SAY, QUIP_COOLDOWN_MS, RESERVED_NAMES, cannedLine, cleanSay, fallbackSoul, hatchRequest,
   matchAddress, parseSoul, reactionPrompt, shouldQuip,
 } from './voice'
 import type { TurnSummary } from './voice'
@@ -57,6 +57,16 @@ test('hatch JSON is validated, with a seeded fallback', () => {
   expect(FALLBACK_NAMES).toContain(a.name)
   expect(a.personality.length).toBeLessThanOrEqual(160)
   expect(hatchRequest(bones).prompt).toContain(`Species: ${bones.species}.`)
+})
+
+test('names that read as prompt openers are rejected, in any case', () => {
+  expect(parseSoul('{"name": "Claude", "personality": "x"}')).toBeNull()
+  expect(parseSoul('{"name": "fix", "personality": "x"}')).toBeNull()
+  expect(parseSoul('{"name": "BUG", "personality": "x"}')).toBeNull()
+  expect(parseSoul('{"name": "Pip", "personality": "x"}')).not.toBeNull()
+  expect(RESERVED_NAMES.size).toBe(29)
+  for (const name of FALLBACK_NAMES) expect(RESERVED_NAMES.has(name.toLowerCase())).toBe(false)
+  expect(FALLBACK_NAMES).toHaveLength(24)
 })
 
 test('the reaction prompt carries the event summary and nothing else', () => {

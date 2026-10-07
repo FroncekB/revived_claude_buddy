@@ -302,6 +302,19 @@ test('when the buddy is off, even its name goes to Claude', async ($, on) => {
   expect(passed).toMatchObject({ text: 'Pip, hi' })
 })
 
+test('prompts from other origins are never intercepted', async ($, on) => {
+  const clock = world(on, { buddy: RECORD })
+  engineBelow(on)
+  const prompts = model(on, null, 'Hi.')
+  await $.session.start(START)
+  const notice = await $.prompt.submit({ text: 'Pip, hi', wait: false, origin: { kind: 'task-notification' } })
+  expect(notice).toMatchObject({ text: 'Pip, hi' })
+  const peer = await $.prompt.submit({ text: 'Pip, hi', wait: false, origin: { kind: 'plugin', name: 'other' } })
+  expect(peer).toMatchObject({ text: 'Pip, hi' })
+  await clock.settle()
+  expect(prompts).toHaveLength(0)
+})
+
 test("a subagent's failed tool doesn't leak into the main turn's reaction", async ($, on) => {
   const clock = world(on, { buddy: RECORD })
   engineBelow(on)

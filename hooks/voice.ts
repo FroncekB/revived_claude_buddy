@@ -102,6 +102,14 @@ export function hatchRequest(b: Bones): { system: string; prompt: string } {
   }
 }
 
+// Words a prompt opens with ("Claude, fix the test", "Note: ..."). A buddy with one of these
+// as its name would swallow real prompts, so hatching never accepts them. Lower case.
+export const RESERVED_NAMES: ReadonlySet<string> = new Set([
+  'claude', 'note', 'bug', 'todo', 'fix', 'task', 'context', 'question', 'update', 'error',
+  'issue', 'test', 'plan', 'goal', 'edit', 'also', 'ok', 'okay', 'yes', 'no',
+  'hey', 'hi', 'please', 'thanks', 'wait', 'next', 'now', 'so', 'lint',
+])
+
 export function parseSoul(text: string): { name: string; personality: string } | null {
   const json = /\{[\s\S]*\}/.exec(text)?.[0]
   if (!json) return null
@@ -109,7 +117,7 @@ export function parseSoul(text: string): { name: string; personality: string } |
     const value = JSON.parse(json) as { name?: unknown; personality?: unknown }
     const name = typeof value.name === 'string' ? value.name.trim() : ''
     const personality = typeof value.personality === 'string' ? value.personality.trim() : ''
-    if (!/^[A-Za-z]{1,12}$/.test(name)) return null
+    if (!/^[A-Za-z]{1,12}$/.test(name) || RESERVED_NAMES.has(name.toLowerCase())) return null
     if (personality.length === 0 || personality.length > 160) return null
     return { name, personality }
   } catch {
@@ -120,7 +128,7 @@ export function parseSoul(text: string): { name: string; personality: string } |
 export const FALLBACK_NAMES: readonly string[] = [
   'Pip', 'Biscuit', 'Mochi', 'Byte', 'Nib', 'Pixel', 'Tofu', 'Gizmo',
   'Sprocket', 'Noodle', 'Widget', 'Pebble', 'Bloop', 'Cosmo', 'Dot', 'Fennel',
-  'Grub', 'Juniper', 'Kiwi', 'Lint', 'Moss', 'Nacho', 'Quill', 'Ziggy',
+  'Grub', 'Juniper', 'Kiwi', 'Mango', 'Moss', 'Nacho', 'Quill', 'Ziggy',
 ]
 
 const TRAITS: Record<StatName, string> = {
