@@ -609,3 +609,22 @@ test('the tour needs a buddy on screen', async ($, on) => {
   await $.session.start(START)
   expect(await runner($)('debug')).toBe('Pip is hidden. Run /buddy to bring it back.')
 })
+
+test('the card pane shows the real buddy even mid-tour', async ($, on) => {
+  world(on, { buddy: RECORD })
+  await $.session.start(START)
+  const before = await cardText($)
+  await runner($)('debug')
+  expect(await cardText($)).toBe(before)
+})
+
+test("the card pane's terminal sprite takes its rarity color without bold", async ($, on) => {
+  // 'tint-11' rolls a plain rare penguin.
+  world(on, { buddy: { ...RECORD, seed: 'tint-11' } })
+  await $.session.start(START)
+  expect(await runner($)('card')).toBeUndefined()
+  const card = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...pane() })
+  const blue = (await card.findAll({ type: 'Text' })).filter(t => t.props.color === 'blue' && 'bold' in t.props)
+  expect(blue).toHaveLength(5)
+  expect(blue.every(t => t.props.bold === false)).toBe(true)
+})

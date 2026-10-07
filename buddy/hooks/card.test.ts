@@ -106,3 +106,15 @@ test('a meter fills in eighths of a cell and pads to its width', () => {
   expect(meter(18, 20)).toBe('███▋' + ' '.repeat(16))
   expect(meter(94, 20)).toBe('█'.repeat(18) + '▊' + ' ')
 })
+
+test('the card colors epic gold and legendary purple, like the band', () => {
+  const fillOf = (rarity: Bones['rarity']) => /font-size="22" font-weight="700" fill="(#[0-9a-f]{6})"/.exec(cardSvg(SOUL, { ...BONES, rarity }, 0))?.[1]
+  expect(fillOf('epic')).toBe('#c99a12')
+  expect(fillOf('legendary')).toBe('#b45bd1')
+})
+
+test("a shiny buddy's portrait stays gold whatever its rarity", () => {
+  for (const rarity of ['common', 'legendary'] as const) {
+    expect(cardSvg(SOUL, { ...BONES, rarity, shiny: true }, 0)).toContain('font-size="15" fill="#c99a12"')
+  }
+})

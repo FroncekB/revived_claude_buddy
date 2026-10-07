@@ -1,6 +1,6 @@
 # `buddy` mod — Design Spec
 
-**Status:** built 2026-10-07; live check pending. The mod, this spec and its plan moved to this repo after the build. Plan: [`2026-10-07-buddy-mod-plan.md`](2026-10-07-buddy-mod-plan.md); its "Deliberate deviations" section lists six small departures from this spec. Changes made during the build: `$`-taking helpers live at module top level of `register.tsx` (the engine loader requires it); `wrap` returns nothing for a width or line count under 1; a failed save keeps the buddy alive in `$.state` (an `unsaved` flag) while another session's newer record still wins (section 9); the tool-call tally skips subagent calls (section 6); names that read as prompt openers are rejected at hatch (section 7).
+**Status:** built 2026-10-07; live check pending. The mod, this spec and its plan moved to this repo after the build. Plan: [`2026-10-07-buddy-mod-plan.md`](2026-10-07-buddy-mod-plan.md); its "Deliberate deviations" section lists six small departures from this spec. Changes made during the build: `$`-taking helpers live at module top level of `register.tsx` (the engine loader requires it); `wrap` returns nothing for a width or line count under 1; a failed save keeps the buddy alive in `$.state` (an `unsaved` flag) while another session's newer record still wins (section 9); the tool-call tally skips subagent calls (section 6); names that read as prompt openers are rejected at hatch (section 7). Added after the build: the hidden `/buddy debug` tour, rarity-colored sprites with a shiny shimmer (epic and legendary colors swapped), and SVG art on the desktop.
 **Author:** Brandon Froncek + Claude
 **Date:** 2026-10-07
 **Scope:** personal Claude Code mod, distributed from this repo as the `buddy-mods` marketplace (see the README).
@@ -61,8 +61,8 @@ Recomputed from `record.seed` on every load and never saved, as in the original.
 | common | 60 | 1 | 5 | none | default |
 | uncommon | 25 | 2 | 15 | none, crown, tophat, propeller | green |
 | rare | 10 | 3 | 25 | + halo, wizard | blue |
-| epic | 4 | 4 | 35 | + beanie | magenta |
-| legendary | 1 | 5 | 50 | + tinyduck | yellow |
+| epic | 4 | 4 | 35 | + beanie | yellow |
+| legendary | 1 | 5 | 50 | + tinyduck | magenta |
 
 **Species** (uniform, independent of rarity): duck, goose, blob, cat, dragon, octopus, owl, penguin, turtle, snail, ghost, axolotl, capybara, cactus, robot, rabbit, mushroom, chonk.
 
@@ -120,6 +120,7 @@ Module variables (lost on reload, which is acceptable): the current turn's tool 
 | `/buddy off` | Mode `off`; animation timer stops | One line |
 | `/buddy reroll` | Nothing changes | `This replaces <name>, <rarity> <species>, for good. Run /buddy reroll confirm.` |
 | `/buddy reroll confirm` | New seed, new hatch, `rerolls + 1`, mode `on` | One line naming the new buddy |
+| `/buddy debug` (hidden: not in the usage line, the hint or the README) | Tours every species for one 16-tick cycle each, plain then shiny, rotating hats, rarities and eyes; ends by itself, on `/buddy debug off`, or on a hatch. Never writes the store | One line |
 | anything else | Nothing changes | The usage line |
 
 Before hatching, every subcommand except `/buddy` replies `No buddy yet. Run /buddy to hatch one.` With an unknown-schema record, every subcommand, `reroll confirm` included, replies with the schema line from Section 3 and changes nothing.
@@ -171,7 +172,7 @@ notable = failures > 0 || reason in {error, aborted} || durationMs > 120_000
 
 One `ui.render` hook on `{ component: 'AbovePrompt' }`. It returns `next(e)` (draws nothing) when there is no `record` and `hatching` is false, when mode is `off`, or when `e.props.hasSurvey` is true.
 
-Elements come from `$.ui.resolve(e)`. On the desktop surface the sprite goes inside the `Code` element if `Text` there isn't monospace (verified first in the build).
+Elements come from `$.ui.resolve(e)`. The desktop's `Text` is proportional and a `Code` block takes the engine's colors, so on the desktop surface the sprite and bubble are one `Svg` of monospace text whose fills the mod picks, with a light and a dark fill per color. Bubble text is escaped before it goes into the markup.
 
 **Full layout** when `maxRows >= 6` and `bodyColumns >= 44`. The band is always 6 rows, with or without a bubble.
 
@@ -199,8 +200,8 @@ Elements come from `$.ui.resolve(e)`. On the desktop surface the sprite goes ins
 **Animation:** `$.clock.every(500)` sets `tick + 1`, which redraws only the band's readers. Over a 16-tick cycle the frame is rest, except tick 5 (fidget A), tick 11 (fidget B) and tick 14 (rest frame with eyes drawn as `-`, a blink). The timer is created in `session.start` and on `/buddy`, and cancelled on `/buddy off`.
 
 **Color:**
-- The name and stars use the rarity color.
-- A shiny buddy's sprite is bold yellow, with a `*` in a corner of row 0 that moves between corners per frame. The sparkle is hidden when a hat or hearts take the row.
+- The sprite, name and stars use the rarity color; a common sprite keeps the text color.
+- A shiny buddy's sprite is bold and shimmers through red, yellow, green, cyan, blue and magenta, one per tick, with a `*` in a corner of row 0 that moves between corners per frame. The sparkle is hidden when a hat or hearts take the row.
 
 **Glyph width:** `★ ♥ ◉ ✦` are narrow in Windows Terminal. A terminal that draws East Asian ambiguous-width characters wide will misalign the sprite; that's accepted.
 

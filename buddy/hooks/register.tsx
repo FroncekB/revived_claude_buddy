@@ -276,9 +276,10 @@ function eggLook(frame: Frame): Look {
   }
 }
 
-async function buddyLook($: EngineInterface, rec: BuddyRecord, t: number): Promise<Look> {
+// `withTour` false draws the real buddy whatever the band is touring (the card pane).
+async function buddyLook($: EngineInterface, rec: BuddyRecord, t: number, withTour = true): Promise<Look> {
   // A running /buddy debug tour dresses the real buddy up; nothing saved changes.
-  const started = await read($, tourStart)
+  const started = withTour ? await read($, tourStart) : null
   const tour = started === null ? null : tourAt(t - started)
   const bones = tour ? { ...rollBones(rec.seed), ...tour.look } : rollBones(rec.seed)
   const name = tour ? `tour ${tour.step + 1}/${TOUR_STEPS}` : rec.soul.name
@@ -457,7 +458,7 @@ export const register: Register = on => {
         return <Svg source={cardSvg(rec.soul, bones, rec.rerolls)} alt={cardAlt(rec.soul, bones, rec.rerolls)} />
       }
 
-      const view = await buddyLook($, rec, await read($, tick))
+      const view = await buddyLook($, rec, await read($, tick), false)
       const header = (
         <Box flexDirection="column">
           <Box>
@@ -475,7 +476,7 @@ export const register: Register = on => {
       return (
         <Box flexDirection="column">
           {view.sprite.map(row => (
-            <Text {...tint(view.spriteColor)} bold={view.spriteColor !== undefined}>
+            <Text {...tint(view.spriteColor)} bold={view.spriteBold}>
               {row}
             </Text>
           ))}
