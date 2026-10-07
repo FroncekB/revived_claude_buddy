@@ -275,7 +275,9 @@ test("a subagent's failed tool doesn't leak into the main turn's reaction", asyn
   engineBelow(on)
   const prompts = model(on, null, 'Ouch.')
   await $.session.start(START)
-  await $.tool.call({ tool: 'Bash', command: 'false', agentId: 'a1' })
+  // ToolCallReserved omits agentId, so a fresh literal fails the excess-property check; a hoisted const does not.
+  const fromSubagent = { tool: 'Bash', command: 'false', agentId: 'a1' } as const
+  await $.tool.call(fromSubagent)
   await $.turn.complete({ ...TURN, durationMs: 130_000 })
   await clock.settle()
   const reactions = prompts.filter(p => p.includes('Failed tools'))
