@@ -155,10 +155,11 @@ async function runBuddy($: EngineInterface, sub: Sub): Promise<string | undefine
   if (sub === 'usage') return USAGE
   const loaded = classifyRecord(await $.store.get(STORE_KEY))
   if (loaded.kind === 'foreign') return `Saved buddy uses schema ${loaded.schema}; this mod knows 1.`
-  if (loaded.kind === 'none') {
+  // An empty store with a record in $.state means the write failed: the session continues from state.
+  const rec = loaded.kind === 'ok' ? loaded.record : await read($, record)
+  if (!rec) {
     return sub === 'show' ? hatch($, 0) : 'No buddy yet. Run /buddy to hatch one.'
   }
-  const rec = loaded.record
   const bones = rollBones(rec.seed)
   const who = `${rec.soul.name}, ${bones.rarity} ${bones.species}`
   const hidden = `${rec.soul.name} is hidden. Run /buddy to bring it back.`

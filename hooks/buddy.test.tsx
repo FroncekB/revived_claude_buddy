@@ -32,9 +32,10 @@ const band = (maxRows = 10, bodyColumns = 80) => ({
 
 // The world beneath the plugin: a clock, a store, the command registry, session
 // start, and a stand-in for the engine's own band so a pass-through is visible.
-function world(on: On, store: Record<string, unknown> = {}) {
+// A null store leaves $.store to the test, which answers store.get and store.set itself.
+function world(on: On, store: Record<string, unknown> | null = {}) {
   const clock = mock.clock(on, { now: 1_000_000 })
-  mock.store(on, store)
+  if (store) mock.store(on, store)
   on('command.register', async (_$, e) => ({ value: { command: e.name } }))
   on('session.start', async (_$, e) => ({ cwd: e.cwd }))
   on('ui.render', { component: 'AbovePrompt' }, async ($, e) => {
@@ -165,4 +166,18 @@ test('a record from a newer schema is never touched', async ($, on) => {
   }
   const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
   expect(await ui.find({ text: 'engine band' })).toBeDefined()
+})
+
+test('a failed store write keeps the buddy alive for the session', async ($, on) => {
+  // A store that reads empty and refuses every write.
+  on('store.get', async () => ({ value: undefined }))
+  on('store.set', async () => ({ deny: 'disk full' }))
+  const clock = world(on, null)
+  model(on, '{"name": "Pip", "personality": "Counts semicolons."}', 'Hello there.')
+  await $.session.start(START)
+  const run = runner($)
+  expect(await run('')).toBe('Could not save your buddy; it lives for this session only.')
+  await clock.settle()
+  expect(await run('card')).toMatch(/^Pip, /)
+  expect(await run('pet')).toBeUndefined()
 })
