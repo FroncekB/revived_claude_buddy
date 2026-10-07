@@ -25,6 +25,47 @@ test('the same seed always gives the same bones', () => {
   expect(EYES).toContain(b.eye)
 })
 
+// Golden vectors: a compatibility contract. Saved buddies keep only their seed and recompute
+// everything else from it, so changing rollBones, mulberry32, fnv1a32 or SALT changes every
+// saved buddy. If one of these fails, the change is wrong, not the vector.
+test('mulberry32(42) is pinned', () => {
+  const rng = mulberry32(42)
+  expect([rng(), rng(), rng()]).toEqual([0.6011037519201636, 0.44829055899754167, 0.8524657934904099])
+})
+
+test('rollBones is pinned for three fixed seeds', () => {
+  expect(rollBones('golden-1')).toEqual({
+    rarity: 'common',
+    species: 'capybara',
+    eye: '·',
+    hat: 'none',
+    shiny: false,
+    stats: { DEBUGGING: 29, PATIENCE: 1, CHAOS: 32, WISDOM: 9, SNARK: 62 },
+    peak: 'SNARK',
+    low: 'PATIENCE',
+  })
+  expect(rollBones('golden-2')).toEqual({
+    rarity: 'common',
+    species: 'robot',
+    eye: '×',
+    hat: 'none',
+    shiny: false,
+    stats: { DEBUGGING: 42, PATIENCE: 43, CHAOS: 17, WISDOM: 1, SNARK: 74 },
+    peak: 'SNARK',
+    low: 'WISDOM',
+  })
+  expect(rollBones('golden-3')).toEqual({
+    rarity: 'common',
+    species: 'snail',
+    eye: '◉',
+    hat: 'none',
+    shiny: false,
+    stats: { DEBUGGING: 5, PATIENCE: 12, CHAOS: 20, WISDOM: 1, SNARK: 63 },
+    peak: 'SNARK',
+    low: 'WISDOM',
+  })
+})
+
 test('rarity and shiny odds match the weights over 100,000 fixed seeds', { timeoutMs: 30_000 }, () => {
   const N = 100_000
   const counts: Record<string, number> = {}

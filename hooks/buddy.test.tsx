@@ -103,6 +103,15 @@ test('the full band is six rows on the terminal; a short band is one line', asyn
   }
 })
 
+test("a survey takes the band even with a buddy on screen", async ($, on) => {
+  world(on, { buddy: RECORD })
+  await $.session.start(START)
+  const asked = band()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...asked, props: { ...asked.props, hasSurvey: true } })
+  expect(await ui.find({ text: 'engine band' })).toBeDefined()
+  expect(await ui.find({ text: /Pip/ })).toBeUndefined()
+})
+
 test('petting shows hearts then a reply; a second pet inside 5 s gets a canned line', async ($, on) => {
   const clock = world(on, { buddy: RECORD })
   const prompts = model(on, null, 'Purr.')
