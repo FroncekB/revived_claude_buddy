@@ -1,5 +1,6 @@
 // ASCII art drawn fresh for this mod in the original's format: 5 rows x 12
 // columns, row 0 kept for a hat, {E} marking each eye.
+import type { HolidayId } from './calendar'
 import type { Hat, Species } from './roll'
 
 export const SPRITE_W = 12
@@ -530,6 +531,91 @@ export const HAT_ART: Record<Hat, string> = {
 
 export const HEARTS: readonly string[] = ['   ♥    ♥', '  ♥   ♥  ♥', ' ♥  ♥   ♥']
 
+// Confetti over a celebration: two patterns that alternate each tick.
+export const CONFETTI: readonly string[] = [' *  .  *  . ', ' .  *  .  * ']
+// A sleeper's z, zZ, zZz, rising a step every 2 ticks.
+export const ZZZ: readonly string[] = ['z', 'zZ', 'zZz'].map(z => z.padStart(SPRITE_W))
+
+// Holiday hats replace the rolled hat for the day (Alive spec section 5). The quieter days
+// (MLK, Memorial, Juneteenth, Columbus and Indigenous Peoples', Veterans) have none.
+export const HOLIDAY_HATS: Readonly<Partial<Record<HolidayId, string>>> = {
+  newyear: '  * _|##|_ *',
+  presidents: '   _|==|_',
+  easter: '    (\\ /)',
+  aprilfools: '   o\\/\\/o',
+  july4: '   _|**|_',
+  labor: '   _.--._',
+  halloween: '   __/\\__',
+  thanksgiving: '   _[#]_',
+  winter: '    /\\__o',
+  hatchday: '   ~*/\\*~',
+}
+
+// A prop stands to the right of the sprite while no bubble is up. `paint` colors it: a string
+// per row, a letter per column from PAINT; a space, or a column past the paint's end, keeps
+// the text color.
+export type Prop = { art: readonly string[]; paint?: readonly string[] }
+export const PROP_ROWS = 5
+export const PROP_W = 10
+export const PAINT: Readonly<Record<string, string>> = {
+  r: 'red',
+  y: 'yellow',
+  g: 'green',
+  c: 'cyan',
+  b: 'blue',
+  m: 'magenta',
+}
+
+export const PROPS: Readonly<Partial<Record<HolidayId, Prop>>> = {
+  newyear: {
+    art: ['  \\ | /', ' -- * --', '  / | \\', '     .  *', ' *   .'],
+    paint: ['  y y y', ' yy y yy', '  y y y', '     m  m', ' m   m'],
+  },
+  mlk: {
+    art: ['   __', ' >(. \\__', '   \\    )', "    '--'~"],
+  },
+  easter: {
+    art: ['   ___', '  /   \\', ' |o 0 o|', ' |_____|'],
+    paint: ['', '', '  m c y'],
+  },
+  memorial: {
+    art: [' .@.', '(@*@)', " '@'", '  |', '  |'],
+    paint: [' rrr', 'rrrrr', ' rrr', '  g', '  g'],
+  },
+  juneteenth: {
+    art: ['|=========', '| --*--===', '|=========', '|', '|'],
+    paint: [' bbbbbbbbb', '       bbb', ' rrrrrrrrr'],
+  },
+  july4: {
+    art: ['|*:*:=====', '|:*:*-----', '|*:*:=====', '|---------', '|'],
+    paint: [' bbbbrrrrr', ' bbbb', ' bbbbrrrrr'],
+  },
+  columbus: {
+    art: ['  _/\\_', ' <    >', '  \\  /', '   \\/', '    \\'],
+    paint: ['  yyyy', ' yyyyyy', '  yyyy', '   yy'],
+  },
+  halloween: {
+    art: ['   _|_', " .'^ ^'.", '(  \\_/  )', " '.___.'"],
+    paint: ['   ggg', ' yyyyyyy', 'yyyyyyyyy', ' yyyyyyy'],
+  },
+  veterans: {
+    art: ['|*=-=', '|-=-=', '|', '|'],
+    paint: [' br r', '  r r'],
+  },
+  thanksgiving: {
+    art: [' \\|||/', '  (o>', ' /(  )\\', '  ^  ^'],
+    paint: [' yrrry', '    y'],
+  },
+  winter: {
+    art: ['    *', '   /.\\', '  /o *\\', ' /*_o__\\', '   [_]'],
+    paint: ['    y', '   ggg', '  gr yg', ' gygrggg'],
+  },
+  hatchday: {
+    art: ['  i i i', ' _|_|_|_', '|~~~~~~~|', '|_______|'],
+    paint: ['  y y y', '  m m m', ' mmmmmmm'],
+  },
+}
+
 // An art string's sections, split at its "~" lines.
 function parseArt(art: string): string[][] {
   const sections: string[][] = [[]]
@@ -564,8 +650,21 @@ export function spriteRows(o: { species: Species; eye: string; frame: Frame | Po
   return [o.top, ...bodyRows(o.species, o.frame).map(row => fillEyes(row, o.eye))].map(fit)
 }
 
-export function topRow(o: { hat: Hat | 'none'; heartsFrame: number | null; sparkle: number | null }): string {
+// The hat row, the first that applies: hearts, confetti, zZ, a holiday hat, the rolled hat, the sparkle.
+export function topRow(o: {
+  hat: Hat | 'none'
+  heartsFrame: number | null
+  sparkle: number | null
+  confetti?: number | null
+  zzz?: number | null
+  holidayHat?: string | null
+}): string {
+  const confetti = o.confetti ?? null
+  const zzz = o.zzz ?? null
   if (o.heartsFrame !== null) return fit(HEARTS[o.heartsFrame % HEARTS.length]!)
+  if (confetti !== null) return fit(CONFETTI[confetti % CONFETTI.length]!)
+  if (zzz !== null) return fit(ZZZ[Math.floor(zzz / 2) % ZZZ.length]!)
+  if (o.holidayHat) return fit(o.holidayHat)
   if (o.hat !== 'none') return fit(HAT_ART[o.hat])
   if (o.sparkle !== null) return fit(o.sparkle % 2 === 0 ? '*' : ' '.repeat(SPRITE_W - 1) + '*')
   return BLANK
