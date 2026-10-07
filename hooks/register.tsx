@@ -155,8 +155,9 @@ async function runBuddy($: EngineInterface, sub: Sub): Promise<string | undefine
   if (sub === 'usage') return USAGE
   const loaded = classifyRecord(await $.store.get(STORE_KEY))
   if (loaded.kind === 'foreign') return `Saved buddy uses schema ${loaded.schema}; this mod knows 1.`
-  // An empty store with a record in $.state means the write failed: the session continues from state.
-  const rec = loaded.kind === 'ok' ? loaded.record : await read($, record)
+  // $.state is never older than the store: session.start loads it from there, and save() writes
+  // it first. So after a failed write the session carries on from state, not the stale store.
+  const rec = (await read($, record)) ?? (loaded.kind === 'ok' ? loaded.record : null)
   if (!rec) {
     return sub === 'show' ? hatch($, 0) : 'No buddy yet. Run /buddy to hatch one.'
   }

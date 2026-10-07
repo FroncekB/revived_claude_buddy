@@ -181,3 +181,14 @@ test('a failed store write keeps the buddy alive for the session', async ($, on)
   expect(await run('card')).toMatch(/^Pip, /)
   expect(await run('pet')).toBeUndefined()
 })
+
+test('a failed save after a stored record keeps the new mode', async ($, on) => {
+  // The store still holds RECORD (mode on) and refuses every write.
+  on('store.get', async () => ({ value: RECORD }))
+  on('store.set', async () => ({ deny: 'disk full' }))
+  world(on, null)
+  await $.session.start(START)
+  const run = runner($)
+  expect(await run('off')).toBe('Could not save your buddy; it lives for this session only.')
+  expect(await run('pet')).toBe('Pip is hidden. Run /buddy to bring it back.')
+})
