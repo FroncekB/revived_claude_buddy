@@ -225,6 +225,60 @@ test('a reload after a failed write keeps the session-only buddy', async ($, on)
   expect(await run('card')).toMatch(/^Pip, /)
 })
 
+test('a refused command registration still loads the buddy', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  mock.store(on, { buddy: RECORD })
+  on('command.register', async () => ({ deny: 'name taken' }))
+  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return <Text>engine band</Text>
+  })
+  await $.session.start(START)
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await ui.find({ text: /Pip/ })).toBeDefined()
+})
+
+test('a hatch that dies midway still clears the egg', async ($, on) => {
+  world(on, { buddy: RECORD })
+  // The model call is rejected, then saving the new buddy into state fails: the egg is out by then.
+  let broken = false
+  on('model.complete', async () => {
+    broken = true
+    return { deny: 'model offline' }
+  })
+  on('state.set', { plugin: 'buddy', key: 'record' }, async (_$, e, next) =>
+    broken ? { deny: 'state offline' } : next(e),
+  )
+  await $.session.start(START)
+  expect(await runner($)('reroll confirm')).toBe('Your buddy hit a snag. Try again.')
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await ui.find({ text: /hatching/ })).toBeUndefined()
+  expect(await ui.find({ text: /Pip/ })).toBeDefined()
+})
+
+test('a reload in the middle of a hatch clears the egg', async ($, on) => {
+  world(on, {})
+  let release!: () => void
+  const gate = new Promise<void>(resolve => {
+    release = resolve
+  })
+  on('model.complete', async () => {
+    await gate
+    return { value: failed() }
+  })
+  await $.session.start(START)
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  const hatched = runner($)('')
+  // Wait for the egg to appear, then reload while the model call is still out.
+  for (let i = 0; i < 100 && !(await ui.find({ text: /hatching/ })); i++) await Promise.resolve()
+  expect(await ui.find({ text: /hatching/ })).toBeDefined()
+  await $.session.start(START)
+  expect(await ui.find({ text: /hatching/ })).toBeUndefined()
+  release()
+  await hatched
+})
+
 const TURN = { answer: 'done', durationMs: 4_000, isAborted: false, turnId: 't1', reason: 'answer' as const }
 
 // Beneath the plugin: Bash fails, turns and prompts pass straight through.

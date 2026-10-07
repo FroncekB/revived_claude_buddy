@@ -62,7 +62,7 @@ let failedTools: string[] = []
 function startTimer($: EngineInterface) {
   timer?.cancel()
   timer = $.clock.every(500, () => {
-    void update($, tick, n => n + 1)
+    void update($, tick, n => n + 1).catch(() => undefined)
   })
 }
 
@@ -163,28 +163,32 @@ async function hatch($: EngineInterface, rerolls: number): Promise<string> {
   const seed = crypto.randomUUID()
   const bones = rollBones(seed)
   await update($, hatching, () => true)
-  if (!timer) startTimer($)
-  let soul = fallbackSoul(seed, bones)
   try {
-    const request = hatchRequest(bones)
-    const result = await $.model.complete({
-      model: 'haiku',
-      system: request.system,
-      prompt: request.prompt,
-      maxTokens: 200,
-      timeoutMs: 8000,
-    })
-    if (result.isAnswered) soul = parseSoul(result.text) ?? soul
-  } catch {
-    // Keep the fallback soul: hatching never fails.
+    if (!timer) startTimer($)
+    let soul = fallbackSoul(seed, bones)
+    try {
+      const request = hatchRequest(bones)
+      const result = await $.model.complete({
+        model: 'haiku',
+        system: request.system,
+        prompt: request.prompt,
+        maxTokens: 200,
+        timeoutMs: 8000,
+      })
+      if (result.isAnswered) soul = parseSoul(result.text) ?? soul
+    } catch {
+      // Keep the fallback soul: hatching never fails.
+    }
+    const hatchedAt = new Date(await $.clock.now()).toISOString()
+    const rec = newRecord(seed, { ...soul, hatchedAt }, rerolls)
+    const note = await save($, rec)
+    await update($, bubble, () => null)
+    later($, () => reply($, rec, HELLO_PROMPT))
+    return note ?? `${soul.name}, a ${bones.rarity}${bones.shiny ? ' shiny' : ''} ${bones.species}, hatched.`
+  } finally {
+    // The egg never stays out, whatever went wrong above.
+    await update($, hatching, () => false)
   }
-  const hatchedAt = new Date(await $.clock.now()).toISOString()
-  const rec = newRecord(seed, { ...soul, hatchedAt }, rerolls)
-  const note = await save($, rec)
-  await update($, hatching, () => false)
-  await update($, bubble, () => null)
-  later($, () => reply($, rec, HELLO_PROMPT))
-  return note ?? `${soul.name}, a ${bones.rarity}${bones.shiny ? ' shiny' : ''} ${bones.species}, hatched.`
 }
 
 async function runBuddy($: EngineInterface, sub: Sub): Promise<string | undefined> {
@@ -281,6 +285,12 @@ export const register: Register = on => {
         argumentHint: '[pet | card | mute | unmute | off | reroll [confirm]]',
         immediate: true,
       })
+    } catch {
+      // A refused registration costs the slash command, not the buddy on screen.
+    }
+    try {
+      // A reload in the middle of a hatch leaves the egg flag set with nobody to clear it.
+      await update($, hatching, () => false)
       const loaded = classifyRecord(await $.store.get(STORE_KEY))
       // A write that failed before a reload left the only copy in state: keep it.
       const pending = (await read($, unsaved)) ? await read($, record) : null
