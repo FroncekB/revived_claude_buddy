@@ -2,16 +2,14 @@ export type Mode = 'on' | 'muted' | 'off'
 
 export type Soul = { name: string; personality: string; hatchedAt: string }
 
-export type BuddyRecord = {
+// The schema 1 record (base spec section 3), read only to migrate it.
+export type SavedV1 = {
   schema: 1
   seed: string
   soul: Soul
   mode: Mode
   rerolls: number
 }
-
-// The schema 1 record (base spec section 3), read only to migrate it.
-export type SavedV1 = BuddyRecord
 
 export type ToolGroup = 'shell' | 'edit' | 'read' | 'web' | 'agent' | 'mcp' | 'other'
 
@@ -56,7 +54,7 @@ export type Bubble = { text: string; untilTick: number }
 declare module 'claude-code' {
   interface PluginState {
     buddy: {
-      record: BuddyRecord | null
+      record: Saved | null
       unsaved: boolean
       hatching: boolean
       tick: number

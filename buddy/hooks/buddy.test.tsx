@@ -2,6 +2,7 @@ import type { ModelCompleteResult, On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
+import type { Saved } from '../types'
 import { SHIMMER } from './layout'
 import { FALLBACK_NAMES } from './voice'
 
@@ -76,6 +77,20 @@ function model(on: On, soul: string | null, say: string | null): string[] {
 
 const runner = ($: Engine) => async (args: string) =>
   (await $.command.run({ command: 'buddy', args, ...RUN })).text
+
+// A store this test can look into and turn off: one row under `buddy`, as another
+// session sharing it would see it.
+function sharedStore(on: On, row: unknown) {
+  const shared = { row, writes: 0, refuse: false }
+  on('store.get', async () => ({ value: shared.row }))
+  on('store.set', async (_$, e) => {
+    if (shared.refuse) return { deny: 'disk full' }
+    shared.row = e.value
+    shared.writes++
+    return { value: undefined }
+  })
+  return shared
+}
 
 // What the card pane shows on the terminal once /buddy card opened it, which prints nothing.
 async function cardText($: Engine): Promise<string> {
@@ -236,7 +251,7 @@ test('reroll asks first, then replaces the buddy and counts the reroll', async (
   model(on, '{"name": "Bix", "personality": "New here."}', 'Hi.')
   await $.session.start(START)
   const run = runner($)
-  expect(await run('reroll')).toMatch(/^This replaces Pip, .* for good\. Run \/buddy reroll confirm\.$/)
+  expect(await run('reroll')).toMatch(/^This retires Pip, \w+ \w+\. Run \/buddy reroll confirm\.$/)
   expect(await cardText($)).toMatch(/Rerolls: 0/)
   expect(await run('reroll confirm')).toMatch(/^Bix, an? /)
   const card = await cardText($)
@@ -259,16 +274,30 @@ test('off hides the buddy and /buddy brings it back', async ($, on) => {
   expect(await shown.find({ text: /Back again\./ })).toBeDefined()
 })
 
-test('a record from a newer schema is never touched', async ($, on) => {
-  world(on, { buddy: { schema: 2, seed: 'future' } })
-  await $.session.start(START)
-  const run = runner($)
-  for (const args of ['', 'pet', 'reroll confirm']) {
-    expect(await run(args)).toBe('Saved buddy uses schema 2; this mod knows 1.')
-  }
-  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
-  expect(await ui.find({ text: 'engine band' })).toBeDefined()
-})
+const UNTOUCHABLE = [
+  ['a record from a newer schema is never touched', { schema: 3, seed: 'future' }, 'Saved buddy uses schema 3; this mod knows 1 and 2.'],
+  ['a damaged record is never touched', { schema: 2, active: 'gone', buddies: [] }, "Saved buddy is damaged; this mod won't overwrite it."],
+] as const
+
+for (const [name, row, line] of UNTOUCHABLE) {
+  test(name, async ($, on) => {
+    const shared = sharedStore(on, row)
+    const clock = world(on, null)
+    engineBelow(on)
+    model(on, null, null)
+    await $.session.start(START)
+    const run = runner($)
+    for (const args of ['', 'pet', 'card', 'reroll confirm', 'debug']) {
+      expect(await run(args)).toBe(line)
+    }
+    await $.tool.call({ tool: 'Bash', command: 'false' })
+    await $.turn.complete(TURN)
+    await clock.settle()
+    expect(shared.writes).toBe(0)
+    const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+    expect(await ui.find({ text: 'engine band' })).toBeDefined()
+  })
+}
 
 test('a failed store write keeps the buddy alive for the session', async ($, on) => {
   // A store that reads empty and refuses every write.
@@ -311,7 +340,7 @@ test("another session's reroll is not overwritten", async ($, on) => {
   const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
   expect(await ui.find({ text: /Bix/ })).toBeDefined()
   await run('mute')
-  expect(shared.row).toMatchObject({ seed: 'other-seed', mode: 'muted' })
+  expect(shared.row).toMatchObject({ schema: 2, active: 'other-seed', mode: 'muted' })
 })
 
 test('a reload after a failed write keeps the session-only buddy', async ($, on) => {
@@ -627,4 +656,32 @@ test("the card pane's terminal sprite takes its rarity color without bold", asyn
   const blue = (await card.findAll({ type: 'Text' })).filter(t => t.props.color === 'blue' && 'bold' in t.props)
   expect(blue).toHaveLength(5)
   expect(blue.every(t => t.props.bold === false)).toBe(true)
+})
+
+test('a schema 1 record is upgraded by the first save', async ($, on) => {
+  const shared = sharedStore(on, RECORD)
+  world(on, null)
+  await $.session.start(START)
+  expect(shared.writes).toBe(0)
+  await runner($)('mute')
+  expect(shared.row).toMatchObject({
+    schema: 2,
+    mode: 'muted',
+    rerolls: 0,
+    active: 'test-seed',
+    buddies: [{ seed: 'test-seed', soul: { name: 'Pip' }, retiredAt: null }],
+  })
+})
+
+test('a reroll retires the old buddy and keeps it', async ($, on) => {
+  const shared = sharedStore(on, RECORD)
+  world(on, null)
+  model(on, '{"name": "Bix", "personality": "New here."}', 'Hi.')
+  await $.session.start(START)
+  expect(await runner($)('reroll confirm')).toMatch(/^Bix, an? /)
+  const saved = shared.row as Saved
+  expect(saved.buddies.map(b => b.soul.name)).toEqual(['Pip', 'Bix'])
+  expect(typeof saved.buddies[0]?.retiredAt).toBe('string')
+  expect(saved.buddies[1]?.retiredAt).toBeNull()
+  expect(saved).toMatchObject({ active: saved.buddies[1]?.seed, rerolls: 1, mode: 'on' })
 })

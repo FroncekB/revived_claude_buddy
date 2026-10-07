@@ -1,25 +1,9 @@
 // The saved record and the /buddy subcommands. Pure: no $.
-import type { Buddy, BuddyRecord, Counts, Mode, Saved, SavedV1, Soul } from '../types'
+import type { Buddy, Counts, Mode, Saved, SavedV1, Soul } from '../types'
 import { addCounts, localDay, visit, zeroCounts } from './ledger'
 
 export const STORE_KEY = 'buddy'
 export const USAGE = 'Usage: /buddy [pet | card | mute | unmute | off | reroll [confirm]]'
-
-export type Loaded =
-  | { kind: 'none' }
-  | { kind: 'ok'; record: BuddyRecord }
-  | { kind: 'foreign'; schema: string }
-
-export function classifyRecord(raw: unknown): Loaded {
-  if (raw === undefined || raw === null) return { kind: 'none' }
-  const schema = typeof raw === 'object' ? (raw as { schema?: unknown }).schema : undefined
-  if (schema === 1) return { kind: 'ok', record: raw as BuddyRecord }
-  return { kind: 'foreign', schema: schema === undefined ? 'unknown' : String(schema) }
-}
-
-export function newRecord(seed: string, soul: Soul, rerolls: number): BuddyRecord {
-  return { schema: 1, seed, soul, mode: 'on', rerolls }
-}
 
 // What the store holds, as this build reads it (Foundation spec section 1).
 export type Stored =

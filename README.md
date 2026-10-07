@@ -30,7 +30,7 @@ To install from a local copy of this repo instead, run `claude plugin marketplac
 | `/buddy card` | Name, species, rarity, stats |
 | `/buddy mute` / `unmute` | Stop or resume its comments (it still answers when you talk to it) |
 | `/buddy off` | Hide it |
-| `/buddy reroll`, then `/buddy reroll confirm` | Replace it with a new one, for good |
+| `/buddy reroll`, then `/buddy reroll confirm` | Retire it and hatch a new one; the old one is kept |
 | `<name>, how's it going?` | Talk to it. That prompt goes to the buddy, not to Claude |
 
 ## What it does with your session

@@ -1,11 +1,11 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { BuddyRecord } from '../types'
+import type { Buddy, Saved, Soul } from '../types'
 import { cardAlt, cardSvg, meter } from './card'
 import { bandRows, cardLines, compactLine, isCompact, nameLine, spriteTint } from './layout'
-import { STORE_KEY, USAGE, classifyRecord, newRecord, parseSub } from './record'
-import type { Sub } from './record'
+import { STORE_KEY, USAGE, activeBuddy, applyChange, classify, parseSub } from './record'
+import type { Change, Stored, Sub } from './record'
 import { RARITY, STATS, rollBones } from './roll'
 import type { Bones } from './roll'
 import { eggRows, faceFor, frameAt, spriteRows, topRow } from './sprites'
@@ -45,6 +45,7 @@ const lastReplyAt = atom({ plugin: 'buddy', key: 'lastReplyAt' } as const, 0)
 
 const CARD = 'card'
 const NO_BUDDY = 'No buddy yet. Run /buddy to hatch one.'
+const SAVE_FAILED = 'Could not save your buddy; it lives for this session only.'
 
 type Look = {
   sprite: string[]
@@ -57,6 +58,9 @@ type Look = {
   spriteBold: boolean
   say: string | null
 }
+
+// The part of a buddy that speaks: its seed, for the bones, and its soul.
+type Who = Pick<Buddy, 'seed' | 'soul'>
 
 const tint = (color: string | undefined) => (color ? { color } : {})
 
@@ -88,22 +92,39 @@ function later($: EngineInterface, work: () => Promise<unknown>) {
   })
 }
 
-// Make `rec` the session's buddy: into state, and the timer to match its mode.
-async function adopt($: EngineInterface, rec: BuddyRecord) {
-  await update($, record, () => rec)
-  if (rec.mode === 'off') stopTimer()
+// Make `saved` the session's buddy: into state, and the timer to match its mode.
+async function adopt($: EngineInterface, saved: Saved) {
+  await update($, record, () => saved)
+  if (saved.mode === 'off') stopTimer()
   else if (!timer) startTimer($)
 }
 
-async function save($: EngineInterface, rec: BuddyRecord): Promise<string | null> {
-  await adopt($, rec)
+// What this session builds on. The store is shared between sessions, so it is the truth,
+// unless this session's last write failed: then its own copy in state carries on until a
+// write succeeds.
+async function current($: EngineInterface): Promise<Stored> {
+  const stored = classify(await $.store.get(STORE_KEY))
+  if (stored.kind === 'damaged' || stored.kind === 'foreign') return stored
+  const mine = await read($, record)
+  if (mine && (await read($, unsaved))) return { kind: 'ok', saved: mine }
+  return stored
+}
+
+// The only writer of the store: read fresh, make one change, write (Foundation spec section 2).
+// A failed write leaves the result in state, marked unsaved, and returns the note saying so.
+async function commit($: EngineInterface, change: Change): Promise<string | null> {
+  const base = await current($)
+  if (base.kind === 'damaged' || base.kind === 'foreign') return null
+  const saved = applyChange(base.kind === 'ok' ? base.saved : null, change, await $.clock.now())
+  if (!saved) return null
+  await adopt($, saved)
   try {
-    await $.store.set(STORE_KEY, rec)
+    await $.store.set(STORE_KEY, saved)
     await update($, unsaved, () => false)
     return null
   } catch {
     await update($, unsaved, () => true)
-    return 'Could not save your buddy; it lives for this session only.'
+    return SAVE_FAILED
   }
 }
 
@@ -116,7 +137,7 @@ async function showBubble($: EngineInterface, text: string) {
 // never starts while anything is pending.
 async function ask(
   $: EngineInterface,
-  rec: BuddyRecord,
+  soul: Soul,
   bones: Bones,
   prompt: string,
   kind: 'react' | 'reply',
@@ -127,7 +148,7 @@ async function ask(
   inFlight = mine
   try {
     const result = await $.model.complete(
-      { model: 'haiku', system: personaSystem(rec.soul, bones), prompt, maxTokens: 80, timeoutMs: 8000 },
+      { model: 'haiku', system: personaSystem(soul, bones), prompt, maxTokens: 80, timeoutMs: 8000 },
       { signal: mine.controller.signal },
     )
     if (mine.controller.signal.aborted || !result.isAnswered) return null
@@ -140,22 +161,22 @@ async function ask(
 }
 
 // Talk, pet and hello: answered even when muted, at most one model call per 5 s.
-async function reply($: EngineInterface, rec: BuddyRecord, prompt: string) {
-  const bones = rollBones(rec.seed)
+async function reply($: EngineInterface, who: Who, prompt: string) {
+  const bones = rollBones(who.seed)
   const now = await $.clock.now()
   const last = await read($, lastReplyAt)
   await update($, lastReplyAt, () => now)
-  const text = now - last < REPLY_FLOOR_MS ? null : await ask($, rec, bones, prompt, 'reply')
+  const text = now - last < REPLY_FLOOR_MS ? null : await ask($, who.soul, bones, prompt, 'reply')
   await showBubble($, text ?? cannedLine(bones, cannedCount++))
 }
 
 // A finished main turn: speak only when shouldQuip says so, never muted, never while a call is pending.
 async function react($: EngineInterface, summary: TurnSummary) {
-  const rec = await read($, record)
-  if (!rec || (await read($, hatching))) return
+  const saved = await read($, record)
+  if (!saved || (await read($, hatching))) return
   const now = await $.clock.now()
   const speak = shouldQuip({
-    mode: rec.mode,
+    mode: saved.mode,
     inFlight: inFlight !== null,
     now,
     lastQuipAt: await read($, lastQuipAt),
@@ -164,11 +185,12 @@ async function react($: EngineInterface, summary: TurnSummary) {
   })
   if (!speak) return
   await update($, lastQuipAt, () => now)
-  const text = await ask($, rec, rollBones(rec.seed), reactionPrompt(summary), 'react')
+  const buddy = activeBuddy(saved)
+  const text = await ask($, buddy.soul, rollBones(buddy.seed), reactionPrompt(summary), 'react')
   if (text) await showBubble($, text)
 }
 
-async function hatch($: EngineInterface, rerolls: number): Promise<string> {
+async function hatch($: EngineInterface, kind: 'hatch' | 'reroll'): Promise<string> {
   const seed = crypto.randomUUID()
   const bones = rollBones(seed)
   await update($, hatching, () => true)
@@ -191,10 +213,10 @@ async function hatch($: EngineInterface, rerolls: number): Promise<string> {
       // Keep the fallback soul: hatching never fails.
     }
     const hatchedAt = new Date(await $.clock.now()).toISOString()
-    const rec = newRecord(seed, { ...soul, hatchedAt }, rerolls)
-    const note = await save($, rec)
+    const born: Who = { seed, soul: { ...soul, hatchedAt } }
+    const note = await commit($, { kind, ...born })
     await update($, bubble, () => null)
-    later($, () => reply($, rec, HELLO_PROMPT))
+    later($, () => reply($, born, HELLO_PROMPT))
     return note ?? `${soul.name}, ${withArticle(bones.rarity)}${bones.shiny ? ' shiny' : ''} ${bones.species}, hatched.`
   } finally {
     // The egg never stays out, whatever went wrong above.
@@ -204,61 +226,55 @@ async function hatch($: EngineInterface, rerolls: number): Promise<string> {
 
 async function runBuddy($: EngineInterface, sub: Sub): Promise<string | undefined> {
   if (sub === 'usage') return USAGE
-  const loaded = classifyRecord(await $.store.get(STORE_KEY))
-  if (loaded.kind === 'foreign') return `Saved buddy uses schema ${loaded.schema}; this mod knows 1.`
-  // The store is shared between sessions, so it is the truth, unless a write failed here: then
-  // state holds the only copy of this session's buddy and carries on until a save succeeds.
-  const mine = await read($, record)
-  let rec: BuddyRecord | null = null
-  if (mine && (await read($, unsaved))) rec = mine
-  else if (loaded.kind === 'ok') {
-    rec = loaded.record
-    if (!mine || mine.seed !== rec.seed || mine.mode !== rec.mode) await adopt($, rec)
-  }
-  if (!rec) {
-    return sub === 'show' ? hatch($, 0) : NO_BUDDY
-  }
-  const bones = rollBones(rec.seed)
-  const who = `${rec.soul.name}, ${bones.rarity} ${bones.species}`
-  const hidden = `${rec.soul.name} is hidden. Run /buddy to bring it back.`
+  const stored = await current($)
+  if (stored.kind === 'foreign') return `Saved buddy uses schema ${stored.schema}; this mod knows 1 and 2.`
+  if (stored.kind === 'damaged') return "Saved buddy is damaged; this mod won't overwrite it."
+  if (stored.kind === 'none') return sub === 'show' ? hatch($, 'hatch') : NO_BUDDY
+  const saved = stored.saved
+  // Another session may have changed the store since this one last looked.
+  await adopt($, saved)
+  const buddy = activeBuddy(saved)
+  const bones = rollBones(buddy.seed)
+  const name = buddy.soul.name
+  const who = `${name}, ${bones.rarity} ${bones.species}`
+  const hidden = `${name} is hidden. Run /buddy to bring it back.`
   switch (sub) {
     case 'show': {
-      const shown: BuddyRecord = { ...rec, mode: 'on' }
-      const note = await save($, shown)
-      later($, () => reply($, shown, HELLO_PROMPT))
+      const note = await commit($, { kind: 'mode', mode: 'on' })
+      later($, () => reply($, buddy, HELLO_PROMPT))
       return note ?? `${who}, is here.`
     }
     case 'pet': {
-      if (rec.mode === 'off') return hidden
+      if (saved.mode === 'off') return hidden
       const now = await read($, tick)
       await update($, heartsUntil, () => now + HEART_TICKS)
-      later($, () => reply($, rec, PET_PROMPT))
+      later($, () => reply($, buddy, PET_PROMPT))
       return undefined
     }
     case 'card': {
       const opened = await $.ui.open({ id: CARD, title: 'Buddy', closeOnEscape: true })
       // A surface that places no panes gets the card as text instead.
-      return opened.isPlaced ? undefined : cardLines(rec.soul, bones, rec.rerolls).join('\n')
+      return opened.isPlaced ? undefined : cardLines(buddy.soul, bones, saved.rerolls).join('\n')
     }
     case 'mute':
-      return (await save($, { ...rec, mode: 'muted' })) ?? `${rec.soul.name} will stay quiet unless spoken to.`
+      return (await commit($, { kind: 'mode', mode: 'muted' })) ?? `${name} will stay quiet unless spoken to.`
     case 'unmute':
-      return (await save($, { ...rec, mode: 'on' })) ?? `${rec.soul.name} can talk again.`
+      return (await commit($, { kind: 'mode', mode: 'on' })) ?? `${name} can talk again.`
     case 'off':
-      return (await save($, { ...rec, mode: 'off' })) ?? hidden
+      return (await commit($, { kind: 'mode', mode: 'off' })) ?? hidden
     case 'reroll':
-      return `This replaces ${who}, for good. Run /buddy reroll confirm.`
+      return `This retires ${who}. Run /buddy reroll confirm.`
     case 'reroll-confirm':
-      return hatch($, rec.rerolls + 1)
+      return hatch($, 'reroll')
     case 'debug': {
-      if (rec.mode === 'off') return hidden
+      if (saved.mode === 'off') return hidden
       const now = await read($, tick)
       await update($, tourStart, () => now)
       return `Touring all ${TOUR_STEPS} species, plain then shiny. Run /buddy debug off to stop.`
     }
     case 'debug-off':
       await update($, tourStart, () => null)
-      return rec.mode === 'off' ? hidden : `Back to ${rec.soul.name}.`
+      return saved.mode === 'off' ? hidden : `Back to ${name}.`
   }
 }
 
@@ -277,12 +293,13 @@ function eggLook(frame: Frame): Look {
 }
 
 // `withTour` false draws the real buddy whatever the band is touring (the card pane).
-async function buddyLook($: EngineInterface, rec: BuddyRecord, t: number, withTour = true): Promise<Look> {
+async function buddyLook($: EngineInterface, saved: Saved, t: number, withTour = true): Promise<Look> {
+  const buddy = activeBuddy(saved)
   // A running /buddy debug tour dresses the real buddy up; nothing saved changes.
   const started = withTour ? await read($, tourStart) : null
   const tour = started === null ? null : tourAt(t - started)
-  const bones = tour ? { ...rollBones(rec.seed), ...tour.look } : rollBones(rec.seed)
-  const name = tour ? `tour ${tour.step + 1}/${TOUR_STEPS}` : rec.soul.name
+  const bones = tour ? { ...rollBones(buddy.seed), ...tour.look } : rollBones(buddy.seed)
+  const name = tour ? `tour ${tour.step + 1}/${TOUR_STEPS}` : buddy.soul.name
   const animTick = tour ? tour.tick : t
   const { frame, blink } = frameAt(animTick)
   const eye = blink ? '-' : bones.eye
@@ -323,12 +340,11 @@ export const register: Register = on => {
     try {
       // A reload in the middle of a hatch leaves the egg flag set with nobody to clear it.
       await update($, hatching, () => false)
-      const loaded = classifyRecord(await $.store.get(STORE_KEY))
-      // A write that failed before a reload left the only copy in state: keep it.
-      const pending = (await read($, unsaved)) ? await read($, record) : null
-      const rec = pending ?? (loaded.kind === 'ok' ? loaded.record : null)
-      await update($, record, () => rec)
-      if (rec && rec.mode !== 'off') startTimer($)
+      // A write that failed before a reload left the only copy in state: current() keeps it.
+      const stored = await current($)
+      const saved = stored.kind === 'ok' ? stored.saved : null
+      await update($, record, () => saved)
+      if (saved && saved.mode !== 'off') startTimer($)
     } catch {
       // The buddy never holds up a session.
     }
@@ -374,14 +390,15 @@ export const register: Register = on => {
 
   on('prompt.submit', async ($, e, next) => {
     try {
-      const rec = await read($, record)
+      const saved = await read($, record)
+      const buddy = saved && saved.mode !== 'off' ? activeBuddy(saved) : null
       const fromPerson = e.origin.kind === 'composer' || e.origin.kind === 'bridge'
       // A prompt carrying images or files is a request for Claude, whatever it starts with.
       const bare = !e.attachments || e.attachments.length === 0
-      const message = rec && rec.mode !== 'off' && fromPerson && bare ? matchAddress(rec.soul.name, e.text) : null
-      if (rec && message !== null) {
-        later($, () => reply($, rec, talkPrompt(message)))
-        return { drop: `(to ${rec.soul.name})` }
+      const message = buddy && fromPerson && bare ? matchAddress(buddy.soul.name, e.text) : null
+      if (buddy && message !== null) {
+        later($, () => reply($, buddy, talkPrompt(message)))
+        return { drop: `(to ${buddy.soul.name})` }
       }
     } catch {
       // Fall through: the prompt goes to Claude.
@@ -449,29 +466,30 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: CARD }, async ($, e, next) => {
     try {
       const { Box, Text } = $.ui.resolve(e)
-      const rec = await read($, record)
-      if (!rec) return <Text dimColor>{NO_BUDDY}</Text>
+      const saved = await read($, record)
+      if (!saved) return <Text dimColor>{NO_BUDDY}</Text>
 
-      const bones = rollBones(rec.seed)
+      const buddy = activeBuddy(saved)
+      const bones = rollBones(buddy.seed)
       if (e.surface !== 'terminal') {
         const { Svg } = $.ui.resolve(e)
-        return <Svg source={cardSvg(rec.soul, bones, rec.rerolls)} alt={cardAlt(rec.soul, bones, rec.rerolls)} />
+        return <Svg source={cardSvg(buddy.soul, bones, saved.rerolls)} alt={cardAlt(buddy.soul, bones, saved.rerolls)} />
       }
 
-      const view = await buddyLook($, rec, await read($, tick), false)
+      const view = await buddyLook($, saved, await read($, tick), false)
       const header = (
         <Box flexDirection="column">
           <Box>
-            <Text bold>{rec.soul.name}</Text>
+            <Text bold>{buddy.soul.name}</Text>
             <Text {...tint(view.starColor)}>{'  ' + view.stars}</Text>
           </Box>
           <Text dimColor>
             {`${bones.rarity} ${bones.species}${bones.shiny ? ' (shiny)' : ''}   Hat: ${bones.hat}   Eyes: ${bones.eye}`}
           </Text>
-          <Text>{rec.soul.personality}</Text>
+          <Text>{buddy.soul.personality}</Text>
         </Box>
       )
-      const footer = <Text dimColor>{`Hatched ${rec.soul.hatchedAt.slice(0, 10)}   Rerolls: ${rec.rerolls}`}</Text>
+      const footer = <Text dimColor>{`Hatched ${buddy.soul.hatchedAt.slice(0, 10)}   Rerolls: ${saved.rerolls}`}</Text>
       const cells = Math.max(8, Math.min(30, e.props.bodyColumns - 18))
       return (
         <Box flexDirection="column">
