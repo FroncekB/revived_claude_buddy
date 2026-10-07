@@ -1,0 +1,13 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "buddy-mods",
+  "description": "A Claude Code mod that brings back the April Fools 2026 /buddy terminal pet",
+  "owner": { "name": "Brandon Froncek" },
+  "plugins": [
+    {
+      "name": "buddy",
+      "description": "A seeded ASCII companion above the prompt that hatches with a Claude-written name and personality, reacts to your turns, and answers when you talk to it by name.",
+      "source": "./buddy"
+    }
+  ]
+}
