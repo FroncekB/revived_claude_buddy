@@ -107,6 +107,15 @@ export function prevDay(day: string): string {
   return localDay(new Date(y!, m! - 1, d! - 1, 12).getTime())
 }
 
+// Calendar days from `a` to `b`, both YYYY-MM-DD. Counted on UTC dates, so daylight saving can't move it.
+export function daysBetween(a: string, b: string): number {
+  const utc = (day: string) => {
+    const [y, m, d] = day.split('-').map(Number)
+    return Date.UTC(y!, m! - 1, d!)
+  }
+  return Math.round((utc(b) - utc(a)) / 86_400_000)
+}
+
 // A new day extends the streak when it follows lastDay, and starts it over otherwise.
 // The same day returns `you` itself, so a caller can tell nothing changed.
 export function visit(you: You, today: string): You {

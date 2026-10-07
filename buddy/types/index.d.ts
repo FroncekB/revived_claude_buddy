@@ -32,11 +32,23 @@ export type You = {
   days: number
 }
 
+// A buddy's mood (Alive spec section 2): failures push the meter toward anxious, long clean
+// turns toward smug, and days away leave a sulk. `at` is the time decay is measured from.
+export type Mood = {
+  meter: number
+  sulk: number
+  at: string
+}
+
+export type MoodEvent = 'fail' | 'clean' | 'longClean' | 'soothe'
+
 export type Buddy = {
   seed: string
   soul: Soul
   retiredAt: string | null
   counts: Counts
+  // Missing reads as neutral.
+  mood?: Mood
 }
 
 // The `$.store` key `buddy` (Foundation spec section 1).
