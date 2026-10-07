@@ -4,10 +4,10 @@ import type { Mode, Soul, You } from '../types'
 import { STATS, rngFor } from './roll'
 import type { Bones, StatName } from './roll'
 
+// The shortest quip cooldown: PATIENCE only ever lengthens it (Alive spec section 3).
 export const QUIP_COOLDOWN_MS = 180_000
 export const REPLY_FLOOR_MS = 5_000
 export const LONG_TURN_MS = 120_000
-export const QUIP_CHANCE = 0.25
 // The length the model is asked for, and the most cleanup keeps: models overshoot a
 // length they are asked for, and the bubble pages whatever it cannot fit at once.
 export const SAY_GOAL = 90
@@ -32,6 +32,18 @@ export function isNotable(s: TurnSummary): boolean {
   return s.failed.length > 0 || s.reason === 'error' || s.reason === 'aborted' || s.durationMs > LONG_TURN_MS
 }
 
+type Stats = Readonly<Record<StatName, number>>
+
+// CHAOS 1 to 100 gives a chance from 0.1525 to 0.40 that an ordinary turn gets a quip.
+export function quipChance(stats: Stats): number {
+  return 0.15 + (0.25 * stats.CHAOS) / 100
+}
+
+// PATIENCE 1 to 100 stretches the cooldown from 3 minutes to 6, so reactions stay at 20 an hour at most.
+export function quipCooldownMs(stats: Stats): number {
+  return QUIP_COOLDOWN_MS + 1_800 * stats.PATIENCE
+}
+
 export function shouldQuip(o: {
   mode: Mode
   inFlight: boolean
@@ -39,10 +51,17 @@ export function shouldQuip(o: {
   lastQuipAt: number
   summary: TurnSummary
   roll: number
+  stats: Stats
 }): boolean {
   if (o.mode !== 'on' || o.inFlight) return false
-  if (o.now - o.lastQuipAt < QUIP_COOLDOWN_MS) return false
-  return isNotable(o.summary) || o.roll < QUIP_CHANCE
+  if (o.now - o.lastQuipAt < quipCooldownMs(o.stats)) return false
+  return isNotable(o.summary) || o.roll < quipChance(o.stats)
+}
+
+// A failed tool call said out loud at once, with no model call: never over a bubble, at most
+// once a turn, and as often as DEBUGGING says.
+export function shouldFlag(o: { mode: Mode; bubbleUp: boolean; flagged: boolean; roll: number; stats: Stats }): boolean {
+  return o.mode === 'on' && !o.bubbleUp && !o.flagged && o.roll < o.stats.DEBUGGING / 100
 }
 
 // "a common", "an uncommon": the article agrees with the word it goes before.
@@ -84,11 +103,13 @@ function statLine(b: Bones): string {
   return STATS.map(s => `${s} ${b.stats[s]}`).join(', ')
 }
 
-export function personaSystem(soul: Soul, b: Bones): string {
+// `extra` carries the moment: the mood and holiday lines (Alive spec sections 2 and 5).
+export function personaSystem(soul: Soul, b: Bones, extra: readonly string[] = []): string {
   return [
     `You are ${soul.name}, ${withArticle(b.rarity)}${b.shiny ? ' shiny' : ''} ${b.species} who lives in a developer's terminal, above their prompt.`,
     `Personality: ${soul.personality}`,
     `Stats: ${statLine(b)}.`,
+    ...extra,
     `Reply with one line of at most ${SAY_GOAL} characters, in character. No markdown, no emoji, no quotation marks.`,
   ].join('\n')
 }
@@ -173,9 +194,31 @@ const CANNED: Record<StatName, readonly string[]> = {
   SNARK: ['Bold of you to call that a variable name.', 'I would have done it faster. Probably.', 'Oh good, more TODOs.'],
 }
 
-export function cannedLine(b: Bones, n: number): string {
-  const pool = CANNED[b.peak]
+function nth(pool: readonly string[], n: number): string {
   return pool[((n % pool.length) + pool.length) % pool.length]!
+}
+
+// A talk or pet fallback: the SNARK pool when the roll comes in under SNARK, else the peak stat's.
+export function cannedLine(b: Bones, n: number, roll: number): string {
+  return nth(CANNED[roll < b.stats.SNARK / 100 ? 'SNARK' : b.peak], n)
+}
+
+export const FAIL_PLAIN: readonly string[] = [
+  "That one didn't take.",
+  'A tool just failed. Noted.',
+  'Error spotted. Worth a look at the trace.',
+  'That call came back red.',
+]
+export const FAIL_SNARKY: readonly string[] = [
+  'Red text. Bold choice.',
+  'Ah, the error path. Classic.',
+  'That went great, for the error.',
+  'Failed. I am not saying anything. Much.',
+]
+
+// Said the moment a tool fails (shouldFlag): snarky when the roll comes in under SNARK.
+export function failLine(b: Bones, n: number, roll: number): string {
+  return nth(roll < b.stats.SNARK / 100 ? FAIL_SNARKY : FAIL_PLAIN, n)
 }
 
 const STREAK_LINES: readonly string[] = [

@@ -255,13 +255,15 @@ async function reply($: EngineInterface, who: Who, prompt: string) {
   const last = await read($, lastReplyAt)
   await update($, lastReplyAt, () => now)
   const text = now - last < REPLY_FLOOR_MS ? null : await ask($, who.soul, bones, prompt, 'reply')
-  await showBubble($, text ?? cannedLine(bones, cannedCount++))
+  await showBubble($, text ?? cannedLine(bones, cannedCount++, Math.random()))
 }
 
 // A finished main turn: speak only when shouldQuip says so, never muted, never while a call is pending.
 async function react($: EngineInterface, summary: TurnSummary) {
   const saved = await read($, record)
   if (!saved || (await read($, hatching))) return
+  const buddy = activeBuddy(saved)
+  const bones = rollBones(buddy.seed)
   const now = await $.clock.now()
   const speak = shouldQuip({
     mode: saved.mode,
@@ -270,11 +272,11 @@ async function react($: EngineInterface, summary: TurnSummary) {
     lastQuipAt: await read($, lastQuipAt),
     summary,
     roll: Math.random(),
+    stats: bones.stats,
   })
   if (!speak) return
   await update($, lastQuipAt, () => now)
-  const buddy = activeBuddy(saved)
-  const text = await ask($, buddy.soul, rollBones(buddy.seed), reactionPrompt(summary), 'react')
+  const text = await ask($, buddy.soul, bones, reactionPrompt(summary), 'react')
   if (text) await showBubble($, text)
 }
 
