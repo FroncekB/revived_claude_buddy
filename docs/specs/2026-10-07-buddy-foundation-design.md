@@ -102,7 +102,7 @@ Buddies replaced under schema 1 are already gone, so the list starts with the cu
 
 `commit($, change)` in `register.tsx` is the only code that writes the store. It replaces `save`.
 
-1. Read the store and classify it. When nothing is stored, `hatch` and `reroll` both build a new record (a reroll has nothing stored to retire). `mode` changes only `$.state`, as an unsaved change does today. `flush` and `visit` stop there.
+1. Read the store and classify it. While this session's last write has failed (`unsaved`), its own copy in `$.state` is the base instead, as in the base build: that copy carries on until a write succeeds. With nothing stored and no such copy, only `hatch` and `reroll` build a record; any other change writes nothing.
 2. Stop if the record is damaged or foreign.
 3. Apply the change with the pure `applyChange(saved, change, now)` from `record.ts`.
 4. Write the store.
@@ -112,21 +112,21 @@ Buddies replaced under schema 1 are already gone, so the list starts with the cu
 
 | Change | Effect |
 |-|-|
-| `hatch(seed, soul)` | Nothing stored yet: a new `Saved` with this buddy active, mode `on`, `rerolls` 0, then today's visit |
+| `hatch(seed, soul)` | Nothing stored yet: a new `Saved` with this buddy active, mode `on`, `rerolls` 0, then today's visit. A record already stored (another session hatched first): appended as a reroll is, without counting one |
 | `reroll(seed, soul)` | The buddy active in the store gets `retiredAt = now`; the new one is appended and made active; `rerolls + 1`; mode `on` |
 | `mode(m)` | Sets `mode` |
 | `flush(pending)` | Adds each seed's pending counts to the entry with that seed; drops counts for a seed the store has no entry for; then today's visit |
 | `visit(today)` | The streak rule in section 3 |
 
-**Pending counts** live in `$.state` under a new key `pending: Record<string, Counts>`, keyed by seed, so a hot reload keeps them. A count goes under the seed of the buddy that is active when the event happens. `pending` is cleared only after its flush is written.
+**Pending counts** live in `$.state` under a new key `pending: Record<string, Counts>`, keyed by seed, so a hot reload keeps them. A count goes under the seed of the buddy that is active when the event happens. A flush takes `pending` and clears it. If its commit fails before the result reaches `$.state` (a failed store read or state write), the counts go back into `pending`.
 
 **Flush points:** a main-conversation `turn.complete`, after a pet, and after a talk. An empty `pending` with no new day writes nothing.
 
 **Other sessions.** Each commit starts from a fresh read, so another session's mode change, reroll or counts are kept. Two sessions committing in the same few milliseconds can lose one of the writes. For a toy that's accepted (the counts at stake are one turn's worth).
 
-**A failed write:**
-- `flush`: `pending` is kept and goes out with the next flush.
-- `hatch`, `reroll` and `mode`: the base build's `unsaved` behavior. The result lives in `$.state` for this session and the command text says so. A buddy hatched while writes fail is never in the store, so its counts are dropped at the next successful flush.
+**A failed store write:**
+- The result still goes into `$.state`, with `unsaved` set: the base build's behavior. That copy, counts included, is the base of the next commit, so nothing is counted twice and nothing is lost when a later write succeeds.
+- `hatch`, `reroll` and `mode` say so in the command text: `Could not save your buddy; it lives for this session only.`
 
 ## 3. Counting and the streak
 
@@ -153,7 +153,7 @@ The `session.start` visit is its own commit, and only runs when mode is not `off
 
 ## 4. What changes on screen
 
-- **Card** (`cardLines`): one line after `Hatched …`: `Streak 12 days (best 30) · 340 turns · 2,104 tool calls`. Thousands take commas. Turns and tool calls are the active buddy's. That brings the card to 10 lines.
+- **Card** (`cardLines`): one line after `Hatched …`: `Streak 12 days (best 30) · 340 turns · 2,104 tool calls`. Thousands take commas, and a count of 1 is singular (`1 day`, `1 turn`, `1 tool call`). Turns and tool calls are the active buddy's. That brings the card to 10 lines.
 - **Greeting:** when the `session.start` visit lands on a new day, the streak is 2 or more, and mode is `on`, the bubble shows a canned line for the usual 24 ticks. There's no model call. The pool in `voice.ts`, picked by `streak % 4`:
   - `Day {n} together.`
   - `{n} days in a row. Not that I'm counting.`
@@ -178,7 +178,7 @@ The `session.start` visit is its own commit, and only runs when mode is not `off
 ## 6. Failure handling
 
 As base section 9:
-- `commit` catches its own errors and never throws into a hook.
+- `commit` turns a failed store write into the note above. A failed store read or state write throws to the hook, whose own `try`/`catch` keeps the event going.
 - `tool.call` returns `next`'s result unchanged, even when counting throws.
 - A turn, prompt or tool call never waits on a store write that fails.
 
@@ -202,9 +202,9 @@ All with the desktop app's bundled `claude plugin test` (base section 11).
 - `layout.test.ts`: the card is at most 12 lines and carries the streak line with commas.
 
 **Mod-level** (`buddy.test.tsx`):
-- A turn with two tool calls, one failed, saves `turns 1`, the right group counts and `failedCalls 1` at `turn.complete`.
+- A turn with a failed Bash call, a failed Read call and a denied call saves `turns 1`, `shell 1`, `read 1` and `failedCalls 2` at `turn.complete`. The denied call isn't counted.
 - Another session sets mode `muted` and adds counts in the store mid-turn. The flush keeps both and adds this turn's counts.
-- A failed write keeps `pending`, and the next flush writes both turns.
+- A failed write keeps the turn's counts in this session's copy, and the next flush writes both turns.
 - A stored v1 record is upgraded to v2 by the first commit.
 - A schema 3 record and a damaged record are unchanged after turns and commands.
 - `/buddy reroll confirm` leaves two entries, the first retired.
