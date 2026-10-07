@@ -153,7 +153,10 @@ The `session.start` visit is its own commit, and only runs when mode is not `off
 
 ## 4. What changes on screen
 
-- **Card** (`cardLines`): one line after `Hatched …`: `Streak 12 days (best 30) · 340 turns · 2,104 tool calls`. Thousands take commas, and a count of 1 is singular (`1 day`, `1 turn`, `1 tool call`). Turns and tool calls are the active buddy's. That brings the card to 10 lines.
+- **Card.** `/buddy card` opens the card pane (base section 4), so the streak goes into each of its three forms. The line is `Streak 12 days (best 30) · 340 turns · 2,104 tool calls`. Thousands take commas, a count of 1 is singular (`1 day`, `1 turn`, `1 tool call`), and turns and tool calls are the active buddy's, unsaved counts included.
+  - Terminal pane: the line goes under the `Hatched … Rerolls: …` footer.
+  - SVG card (desktop, VS Code, mobile): a second footer row, 20 px lower, with `Streak 12 days (best 30)` on the left and `340 turns · 2,104 tool calls` on the right. The card grows 20 px. The alt text ends with the same line as a sentence.
+  - Text fallback (`cardLines`, where no pane is placed): the line goes after `Hatched …`, which brings it to 10 lines.
 - **Greeting:** when the `session.start` visit lands on a new day, the streak is 2 or more, and mode is `on`, the bubble shows a canned line for the usual 24 ticks. There's no model call. The pool in `voice.ts`, picked by `streak % 4`:
   - `Day {n} together.`
   - `{n} days in a row. Not that I'm counting.`
@@ -161,6 +164,7 @@ The `session.start` visit is its own commit, and only runs when mode is not `off
   - `{n}-day streak. Don't make it weird.`
 - **Reroll warning:** `This retires <name>, <rarity> <species>. Run /buddy reroll confirm.`
 - **Usage, `/buddy`, pet, talk, mute, off:** unchanged, but read and written through `commit`.
+- **`/buddy debug` and `debug off`:** unchanged. The tour still writes nothing, and counting goes on underneath it for the real buddy.
 
 ## 5. Files
 
@@ -168,7 +172,8 @@ The `session.start` visit is its own commit, and only runs when mode is not `off
 |-|-|
 | `record.ts` | `SavedV1`/`Saved` handling, `classify`, `migrate`, `applyChange`; `parseSub` unchanged |
 | `ledger.ts` (new, pure) | `toolGroup(name)`, `zeroCounts()`, `addCounts(a, b)`, `localDay(ms)`, `prevDay(day)`, `visit(you, today)` |
-| `layout.ts` | the card's streak line |
+| `layout.ts` | the streak line and its two halves |
+| `card.ts` | the SVG card's streak row and alt sentence |
 | `voice.ts` | the greeting pool |
 | `register.tsx` | `commit`, the `pending` value, counting in the existing `tool.call` / `turn.complete` / pet / talk hooks, the visit at `session.start` |
 | `types/index.d.ts` | `Saved`, `SavedV1`, `Buddy`, `You`, `Counts`, `ToolGroup`; `pending` in `PluginState` |
@@ -199,7 +204,8 @@ All with the desktop app's bundled `claude plugin test` (base section 11).
     - keeps unknown fields at the top level, in `you` and in each `buddies` entry
     - `reroll` retires the stored active buddy and appends the new one
     - `flush` drops counts for an unknown seed
-- `layout.test.ts`: the card is at most 12 lines and carries the streak line with commas.
+- `layout.test.ts`: the streak line takes commas and singulars, and the text card with it is at most 12 lines.
+- `card.test.ts`: given the history, the SVG card carries the streak row and is 20 px taller, and the alt text ends with the streak sentence.
 
 **Mod-level** (`buddy.test.tsx`):
 - A turn with a failed Bash call, a failed Read call and a denied call saves `turns 1`, `shell 1`, `read 1` and `failedCalls 2` at `turn.complete`. The denied call isn't counted.
@@ -210,5 +216,7 @@ All with the desktop app's bundled `claude plugin test` (base section 11).
 - `/buddy reroll confirm` leaves two entries, the first retired.
 - The greeting shows at the first `session.start` of a new day with a streak of 2 or more, and not at a second start the same day.
 - Mode `off` saves no counts and no visit.
+- The card shows the streak line on the terminal pane, in the SVG card's alt text, and in the text fallback.
+- The debug tour adds no writes beyond the session's visit.
 
 **Checks before done:** `claude plugin validate`, `tsc`, then a live look at the card and greeting in the terminal and the Desktop Code tab.
