@@ -33,11 +33,11 @@ export const RARITY: Record<Rarity, RarityInfo> = {
   common: { weight: 60, stars: 1, floor: 5, hats: ['none'], color: undefined },
   uncommon: { weight: 25, stars: 2, floor: 15, hats: ['none', 'crown', 'tophat', 'propeller'], color: 'green' },
   rare: { weight: 10, stars: 3, floor: 25, hats: ['none', 'crown', 'tophat', 'propeller', 'halo', 'wizard'], color: 'blue' },
-  epic: { weight: 4, stars: 4, floor: 35, hats: ['none', 'crown', 'tophat', 'propeller', 'halo', 'wizard', 'beanie'], color: 'magenta' },
+  epic: { weight: 4, stars: 4, floor: 35, hats: ['none', 'crown', 'tophat', 'propeller', 'halo', 'wizard', 'beanie'], color: 'yellow' },
   legendary: {
     weight: 1, stars: 5, floor: 50,
     hats: ['none', 'crown', 'tophat', 'propeller', 'halo', 'wizard', 'beanie', 'tinyduck'],
-    color: 'yellow',
+    color: 'magenta',
   },
 }
 

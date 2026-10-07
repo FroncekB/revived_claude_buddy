@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { bandRows, bubbleRows, cardLines, compactLine, isCompact, nameLine, wrap } from './layout'
+import { SHIMMER, bandRows, bubbleRows, cardLines, compactLine, isCompact, nameLine, spriteTint, wrap } from './layout'
 import { rollBones } from './roll'
 
 const SPRITE = ['a', 'b', 'c', 'd', 'e'].map(s => s.padEnd(12))
@@ -62,4 +62,20 @@ test('wrap returns nothing for a degenerate width or line count', () => {
   expect(wrap('hello', 0, 3)).toEqual([])
   expect(wrap('hello', -5, 3)).toEqual([])
   expect(wrap('hello', 10, 0)).toEqual([])
+})
+
+test('the sprite takes its rarity color, and a common keeps the text color', () => {
+  const at = (rarity: 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary') => spriteTint({ rarity, shiny: false }, 0)
+  expect(at('common')).toEqual({ color: undefined, bold: false })
+  expect(at('uncommon')).toEqual({ color: 'green', bold: false })
+  expect(at('rare')).toEqual({ color: 'blue', bold: false })
+  expect(at('epic')).toEqual({ color: 'yellow', bold: false })
+  expect(at('legendary')).toEqual({ color: 'magenta', bold: false })
+})
+
+test('a shiny sprite is bold and shimmers through every color, one per tick', () => {
+  const tints = SHIMMER.map((_, tick) => spriteTint({ rarity: 'legendary', shiny: true }, tick))
+  expect(tints.map(t => t.color)).toEqual([...SHIMMER])
+  expect(tints.every(t => t.bold)).toBe(true)
+  expect(spriteTint({ rarity: 'common', shiny: true }, SHIMMER.length)).toEqual(tints[0])
 })

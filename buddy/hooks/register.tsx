@@ -3,13 +3,15 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { BuddyRecord } from '../types'
 import { cardAlt, cardSvg, meter } from './card'
-import { bandRows, cardLines, compactLine, isCompact, nameLine } from './layout'
+import { bandRows, cardLines, compactLine, isCompact, nameLine, spriteTint } from './layout'
 import { STORE_KEY, USAGE, classifyRecord, newRecord, parseSub } from './record'
 import type { Sub } from './record'
 import { RARITY, STATS, rollBones } from './roll'
 import type { Bones } from './roll'
 import { eggRows, faceFor, frameAt, spriteRows, topRow } from './sprites'
 import type { Frame } from './sprites'
+import { bandSvg } from './svg'
+import { TOUR_STEPS, tourAt } from './tour'
 import {
   BUBBLE_TICKS,
   HEART_TICKS,
@@ -37,6 +39,7 @@ const hatching = atom({ plugin: 'buddy', key: 'hatching' } as const, false)
 const tick = atom({ plugin: 'buddy', key: 'tick' } as const, 0)
 const bubble = atom({ plugin: 'buddy', key: 'bubble' } as const, null)
 const heartsUntil = atom({ plugin: 'buddy', key: 'heartsUntilTick' } as const, 0)
+const tourStart = atom({ plugin: 'buddy', key: 'tourStartTick' } as const, null)
 const lastQuipAt = atom({ plugin: 'buddy', key: 'lastQuipAt' } as const, 0)
 const lastReplyAt = atom({ plugin: 'buddy', key: 'lastReplyAt' } as const, 0)
 
@@ -51,6 +54,7 @@ type Look = {
   stars: string
   starColor: string | undefined
   spriteColor: string | undefined
+  spriteBold: boolean
   say: string | null
 }
 
@@ -169,6 +173,8 @@ async function hatch($: EngineInterface, rerolls: number): Promise<string> {
   const bones = rollBones(seed)
   await update($, hatching, () => true)
   try {
+    // A new buddy is shown as itself, not mid-tour.
+    await update($, tourStart, () => null)
     if (!timer) startTimer($)
     let soul = fallbackSoul(seed, bones)
     try {
@@ -244,6 +250,15 @@ async function runBuddy($: EngineInterface, sub: Sub): Promise<string | undefine
       return `This replaces ${who}, for good. Run /buddy reroll confirm.`
     case 'reroll-confirm':
       return hatch($, rec.rerolls + 1)
+    case 'debug': {
+      if (rec.mode === 'off') return hidden
+      const now = await read($, tick)
+      await update($, tourStart, () => now)
+      return `Touring all ${TOUR_STEPS} species, plain then shiny. Run /buddy debug off to stop.`
+    }
+    case 'debug-off':
+      await update($, tourStart, () => null)
+      return rec.mode === 'off' ? hidden : `Back to ${rec.soul.name}.`
   }
 }
 
@@ -256,30 +271,38 @@ function eggLook(frame: Frame): Look {
     stars: '',
     starColor: undefined,
     spriteColor: undefined,
+    spriteBold: false,
     say: null,
   }
 }
 
 async function buddyLook($: EngineInterface, rec: BuddyRecord, t: number): Promise<Look> {
-  const bones = rollBones(rec.seed)
-  const { frame, blink } = frameAt(t)
+  // A running /buddy debug tour dresses the real buddy up; nothing saved changes.
+  const started = await read($, tourStart)
+  const tour = started === null ? null : tourAt(t - started)
+  const bones = tour ? { ...rollBones(rec.seed), ...tour.look } : rollBones(rec.seed)
+  const name = tour ? `tour ${tour.step + 1}/${TOUR_STEPS}` : rec.soul.name
+  const animTick = tour ? tour.tick : t
+  const { frame, blink } = frameAt(animTick)
   const eye = blink ? '-' : bones.eye
   const heartsUntilTick = await read($, heartsUntil)
   const top = topRow({
     hat: bones.hat,
     heartsFrame: t < heartsUntilTick ? t : null,
-    sparkle: bones.shiny ? t : null,
+    sparkle: bones.shiny ? animTick : null,
   })
   const said = await read($, bubble)
-  const { label, stars } = nameLine(rec.soul.name, bones)
+  const { label, stars } = nameLine(name, bones)
+  const sprite = spriteTint(bones, animTick)
   return {
     sprite: spriteRows({ species: bones.species, eye, frame, top }),
     face: faceFor(bones.species, eye),
-    name: rec.soul.name,
+    name,
     label,
     stars,
     starColor: RARITY[bones.rarity].color,
-    spriteColor: bones.shiny ? 'yellow' : undefined,
+    spriteColor: sprite.color,
+    spriteBold: sprite.bold,
     say: said && t < said.untilTick ? said.text : null,
   }
 }
@@ -371,7 +394,7 @@ export const register: Register = on => {
       const isHatching = await read($, hatching)
       if (e.props.hasSurvey || (!isHatching && (!rec || rec.mode === 'off'))) return next(e)
 
-      const { Box, Code, Text } = $.ui.resolve(e)
+      const { Box, Text } = $.ui.resolve(e)
       const t = await read($, tick)
       const view = isHatching || !rec ? eggLook(frameAt(t).frame) : await buddyLook($, rec, t)
 
@@ -387,11 +410,18 @@ export const register: Register = on => {
         </Box>
       )
 
+      // The desktop's Text is proportional, so its art is monospace SVG text instead.
       if (e.surface === 'desktop') {
-        const source = rows.sprite.map((row, i) => (row + ' ' + (rows.bubble[i] ?? '')).trimEnd()).join('\n')
+        const { Svg } = $.ui.resolve(e)
+        const art = bandSvg({ ...rows, color: view.spriteColor, bold: view.spriteBold })
         return (
           <Box flexDirection="column">
-            <Code source={source} />
+            <Svg
+              source={art.source}
+              alt={view.say ? `${view.name}: ${view.say}` : view.name}
+              width={art.width}
+              height={art.height}
+            />
             {nameRow}
           </Box>
         )
@@ -401,7 +431,7 @@ export const register: Register = on => {
         <Box flexDirection="column">
           {rows.sprite.map((row, i) => (
             <Box>
-              <Text {...tint(view.spriteColor)} bold={view.spriteColor !== undefined}>
+              <Text {...tint(view.spriteColor)} bold={view.spriteBold}>
                 {row}
               </Text>
               <Text>{' ' + (rows.bubble[i] ?? '')}</Text>
