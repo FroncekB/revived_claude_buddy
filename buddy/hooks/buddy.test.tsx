@@ -830,3 +830,74 @@ test('a buddy that is off counts nothing and records no visit', async ($, on) =>
   await clock.settle()
   expect(shared.writes).toBe(0)
 })
+
+// A shared store whose reads can be held back after they have read, so a save that is slow to
+// finish writes from what it saw before another save wrote: the overlap two sessions would have.
+function heldStore(on: On, row: unknown) {
+  const shared = { row, held: false }
+  const parked: (() => void)[] = []
+  on('store.get', async () => {
+    const value = shared.row
+    if (shared.held) await new Promise<void>(resolve => parked.push(resolve))
+    return { value }
+  })
+  on('store.set', async (_$, e) => {
+    shared.row = e.value
+    return { value: undefined }
+  })
+  return {
+    shared,
+    release: () => {
+      shared.held = false
+      for (const resolve of parked.splice(0)) resolve()
+    },
+  }
+}
+
+// Long enough for every save that can start to have reached the store.
+async function idle() {
+  for (let i = 0; i < 100; i++) await Promise.resolve()
+}
+
+test('saves in one session run one at a time: a mute is not lost to a turn-end save', async ($, on) => {
+  const store = heldStore(on, RECORD)
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  // The turn's save reads the store and is held there; the mute starts meanwhile.
+  store.shared.held = true
+  await $.turn.complete(TURN)
+  await clock.settle()
+  await idle()
+  store.shared.held = false
+  const muted = runner($)('mute')
+  await idle()
+  store.release()
+  await Promise.all([muted, clock.settle()])
+  expect(store.shared.row).toMatchObject({ mode: 'muted' })
+  expect(activeOf(store.shared.row)?.counts).toMatchObject({ turns: 1, failedCalls: 1 })
+})
+
+test('saves in one session run one at a time: two turns in a row both keep their counts', async ($, on) => {
+  const store = heldStore(on, RECORD)
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  store.shared.held = true
+  await $.turn.complete(TURN)
+  await clock.settle()
+  await idle()
+  store.shared.held = false
+  await $.turn.complete({ ...TURN, turnId: 't2' })
+  await clock.settle()
+  await idle()
+  store.release()
+  await clock.settle()
+  await idle()
+  expect(activeOf(store.shared.row)?.counts.turns).toBe(2)
+})
