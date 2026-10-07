@@ -1,6 +1,6 @@
 # `buddy` Foundation — Design Spec
 
-**Status:** designed 2026-10-07; not built.
+**Status:** built 2026-10-07; live check pending. Plan: [`2026-10-07-buddy-foundation-plan.md`](2026-10-07-buddy-foundation-plan.md); its "Deliberate deviations" section lists three small departures from this spec.
 **Author:** Brandon Froncek + Claude
 **Date:** 2026-10-07
 **Builds on:** [`2026-10-07-buddy-mod-design.md`](2026-10-07-buddy-mod-design.md) (the base spec). Section numbers below that start with "base" point there.
