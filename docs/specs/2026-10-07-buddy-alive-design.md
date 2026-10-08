@@ -1,6 +1,6 @@
 # `buddy` Alive — Design Spec
 
-**Status:** built 2026-10-07; live check pending. Plan: [`2026-10-07-buddy-alive-plan.md`](2026-10-07-buddy-alive-plan.md); its "Deliberate deviations" section lists ten small departures from this spec.
+**Status:** built 2026-10-07; live-checked 2026-10-08. Plan: [`2026-10-07-buddy-alive-plan.md`](2026-10-07-buddy-alive-plan.md); its "Deliberate deviations" section lists ten small departures from this spec.
 **Author:** Brandon Froncek + Claude
 **Date:** 2026-10-07
 **Builds on:** [`2026-10-07-buddy-mod-design.md`](2026-10-07-buddy-mod-design.md) (the base spec) and [`2026-10-07-buddy-foundation-design.md`](2026-10-07-buddy-foundation-design.md) (Foundation). Section numbers below that start with "base" or "Foundation" point there.
