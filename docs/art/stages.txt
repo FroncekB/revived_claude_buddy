@@ -149,7 +149,13 @@ rest          fidget A      fidget B      flinch        celebrate     sleep
  //|||||\ |     //|||||\ |   \\|||||/ |   /// ||\\  |     /||||\      ~~|||||~~ |
 
 == owl ==
--- hatchling: not drawn yet
+-- hatchling
+rest          fidget A      fidget B      flinch        celebrate     sleep
+
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+  .~~~~.         .~~~~.       .~~~~.       .~~~~. !      \.~~~~./
+ ((·)(·))       ((·)(·))     ((·)(-))     ((O)(O))       ((^)(^))      .(-)(-).
+  '-\/-'         '-\/-'       '-\/-'      /'-<>-'\        '-\/-'       (__\/__)
 
 -- adult
 rest          fidget A      fidget B      flinch        celebrate     sleep
@@ -159,10 +165,22 @@ rest          fidget A      fidget B      flinch        celebrate     sleep
  (   \/   )     (   \/   )   (   \/   )    (   <>   )    (   \/   )    ( (-)(-) )
   '------'       '------'     '------'     /'------'\     '------'     (___\/___)
 
--- elder: not drawn yet
+-- elder
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+~~/\___/\~~    ~~/\___/\~~  ~~/\___/\~~    ~/\___/\~ !  ~~/\___/\~~
+ ((·)-(·))      ((·)-(·))    ((·)-(-))     ((O)-(O))    \((^)-(^))/   ~~/\___/\~~
+ ( \\v// )      ( \\v// )    ( \\v// )     ( \\o// )     ( \\v// )     ((-)-(-))
+  '-\|/-'        '-\|/-'      '-\|/-'      /'-\|/-'\      '-\|/-'      (_\\v//_)
 
 == penguin ==
--- hatchling: not drawn yet
+-- hatchling
+rest          fidget A      fidget B      flinch        celebrate     sleep
+
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+   (·v·)          (·v·)        (·v·)        (OoO) !       \(^v^)/
+  /(:::)\        /(:::)\      \(:::)/      -(:::)-         (:::)         (-v-)
+    ^ ^            ^ ^          ^ ^          ^ ^           ^   ^        _(:::)_
 
 -- adult
 rest          fidget A      fidget B      flinch        celebrate     sleep
@@ -172,10 +190,22 @@ rest          fidget A      fidget B      flinch        celebrate     sleep
  /(    )\       /(    )\     \(    )/      -(    )-        (    )       (- v -)
    ^  ^           ^  ^         ^  ^          ^  ^         ^    ^       _(____)_
 
--- elder: not drawn yet
+-- elder
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+   .-~-.          .-~-.        .~-~.         .-~-.  !      .-~-.
+ .(· v ·)       .(· v ·)     .(· v ·)      .(O o O)      \(^ v ^)        .-~-.
+( (    )\|     ( (    )\|   ( (    )_|    ( (    )-|      (    )\|     .(- v -)|
+  ^  ^   |       ^  ^   |     ^ ^    |      ^  ^   |      ^  ^   |    ( (____)_|
 
 == turtle ==
--- hatchling: not drawn yet
+-- hatchling
+rest          fidget A      fidget B      flinch        celebrate     sleep
+
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+   .==.           .==.         .==.         .==. !         .==.
+  (/\/\)         (/\/\)       (/\/\)       (/OO\)        \(/\/\)/        .==.
+  '(··)'         '(··)'      ' (··) '      '    '         '(^^)'        (/--\)
 
 -- adult
 rest          fidget A      fidget B      flinch        celebrate     sleep
@@ -185,10 +215,22 @@ rest          fidget A      fidget B      flinch        celebrate     sleep
  /[_/\/\_]\     /[_/\/\_]\   /[_/\/\_]\     [_/\/\_]     /[_/\/\_]\     [_/--\_]
   ''    ''       ''    ''    ''      ''      ''  ''       ''    ''      ''    ''
 
--- elder: not drawn yet
+-- elder
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+   .~""~.         .~""~.       .~""~.        .~""~. !      .~""~.
+  ( ·  · )       ( ·  · )     ( ·  · )      ( O  O )     \( ^  ^ )/      .~""~.
+ /[_\||/_]\     /[_\||/_]\   /[_\||/_]\     [_\||/_]     /[_\||/_]\     [_/--\_]
+ (__)\/(__)     (__)\/(__)  (__) \/ (__)    (_)\/(_)     (__)\/(__)    (__)\/(__)
 
 == snail ==
--- hatchling: not drawn yet
+-- hatchling
+rest          fidget A      fidget B      flinch        celebrate     sleep
+
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+ · ·  .-.       · ·  .-.     ·  · .-.       !   .-.     ^   ^ .-.
+ \_\__(e)       \_\__(e)     |_/__(e)      OO___(e)      \_/__(e)           .-.
+  ~~~~~~         ~~~~~~       ~~~~~~        ~~~~~~        ~~~~~~        _--_(e)
 
 -- adult
 rest          fidget A      fidget B      flinch        celebrate     sleep
@@ -198,10 +240,22 @@ rest          fidget A      fidget B      flinch        celebrate     sleep
   \_\_)__/       \_\_)__/     \_\_)__/      \_\_)__/      \_\_)__/      -- ( @ )
    ~~~~~~         ~~~~~~       ~~~~~~        ~~~~~~        ~~~~~~       \__)__/
 
--- elder: not drawn yet
+-- elder
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+,_ ,_.~~~~.    ,_ ,_.~~~~.  ·  ,_.~~~~.     !  .~~~~.   ^  ^ .~~~~.
+·\ ·\( e  )    ·\ ·\( e  )   \ ·\( e  )     OO ( e  )    \  \( e  )        .~~~~.
+  \__\)___/      \__\)___/    \__\)___/     \___)___/     \__\)___/     -- ( e  )
+   ~~~~~~~~       ~~~~~~~~     ~~~~~~~~      ~~~~~~~~      ~~~~~~~~     \___)___/
 
 == ghost ==
--- hatchling: not drawn yet
+-- hatchling
+rest          fidget A      fidget B      flinch        celebrate     sleep
+
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+   .-'-.          .-'-.        .-'-.        .-'-. !       \.-'-./
+  / · · \        / · · \      / ·o· \      / O O \        / ^ ^ \       / - - \
+  '~~~~~'        '~~~~~'      '~~~~~'      '~~~~~'        '~~~~~'       '-----'
 
 -- adult
 rest          fidget A      fidget B      flinch        celebrate     sleep
@@ -211,10 +265,22 @@ rest          fidget A      fidget B      flinch        celebrate     sleep
   |   o  |       |   o  |     |   O  |     |   O   |      |   v  |      / -  - \
   |/\/\/\|       |/\/\/\|     |\/\/\/|     |\/\/\/\|      |/\/\/\|      '~~~~~~'
 
--- elder: not drawn yet
+-- elder
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+   .-''-.         .-''-.       .-''-.       .-''-.  !      .-''-.
+  /==  ==\       /==  ==\     /==  ==\     /==  ==\     \ /==  ==\ /     .-''-.
+  | ·  · |       | ·  · |     | ·  · |     | O  O |       | ^  ^ |      /=-  -=\
+  |/\ /\/\~      |/\ /\/\~    |\/ \/\/~    |/\ /\/\~      |/\ /\/\~     '~,~~,~'~
 
 == axolotl ==
--- hatchling: not drawn yet
+-- hatchling
+rest          fidget A      fidget B      flinch        celebrate     sleep
+
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+   ,---,          ,---,        ,---,        ,---, !        ,---,
+  }(·.·){        }(·.·){      {(·.·)}     }}(O.O){{       }(^.^){       }(-.-){
+   (___)~         (___)~       (___)~       (_o_)~        \(___)/       ~(___)~
 
 -- adult
 rest          fidget A      fidget B      flinch        celebrate     sleep
@@ -224,7 +290,13 @@ rest          fidget A      fidget B      flinch        celebrate     sleep
   ( '--' )~      ( '--' )~    ( '--' )~     ( 'oo' )~    \( '--' )/   }( - . - ){
    ^    ^         ^    ^       ^    ^        ^    ^        ^    ^      ~( ____ )~
 
--- elder: not drawn yet
+-- elder
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+  ,-----,        ,-----,      ,-----,      },-----,{ !    ,-----,
+}( · . · ){    }( · . · ){  {( · . · )}   }( O . O ){   }( ^ . ^ ){     ,-----,
+}}('~~~'){{    }}('~~~'){{  {{('~~~')}}    }('ooo'){    }\('~~~')/{   }( - . - ){
+}  ^   ^  {    }  ^   ^  {  {  ^   ^  }     ^     ^     }  ^   ^  {   }}('___'){{
 
 == capybara ==
 -- hatchling: not drawn yet
