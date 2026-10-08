@@ -2,7 +2,7 @@
 import type { Counts, Soul, You } from '../types'
 import { RARITY, STATS } from './roll'
 import type { Bones } from './roll'
-import { totalCalls } from './ledger'
+import { totalCalls, withCommas } from './ledger'
 import { PAINT } from './sprites'
 import type { Prop } from './sprites'
 
@@ -154,7 +154,6 @@ export function cardLines(soul: Soul, bones: Bones, rerolls: number): string[] {
   ]
 }
 
-const withCommas = (n: number) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 const howMany = (n: number, noun: string) => `${withCommas(n)} ${noun}${n === 1 ? '' : 's'}`
 
 // The person's streak: the first half of the card's streak line.
