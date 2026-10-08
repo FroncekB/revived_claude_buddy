@@ -1,6 +1,8 @@
 import { expect, test } from 'claude-code/testing'
 
+import { ACHIEVEMENTS } from './achievements'
 import { cardAlt, cardSvg, journalAlt, journalSvg, meter, radarPoint, statAlt } from './card'
+import type { CardProgress } from './layout'
 import { zeroCounts } from './ledger'
 import type { Bones } from './roll'
 
@@ -155,4 +157,46 @@ test("the journal is drawn in the card's frame, a row per moment, growing with t
     "Nib's journal. Yesterday: a clean turn after 4 rough ones. 2 weeks ago: Claude failed <18> shell commands in a row.",
   )
   expect(journalAlt('Nib', [])).toBe("Nothing in Nib's journal yet.")
+})
+
+const PROGRESS: CardProgress = { level: 12, stage: 'adult', xp: 13_250, earned: ['Marathon', 'Shell regular'], retiredAt: null }
+const heightOf = (svg: string) => Number(/height="(\d+)"/.exec(svg)?.[1])
+
+test('given its progress, the card shows the level, an XP bar part full, and the achievements', () => {
+  const svg = cardSvg(SOUL, BONES, 0, undefined, PROGRESS)
+  expect(svg).toContain('>Lv 12 adult</text>')
+  expect(svg).toContain('>13,250 / 14,400 xp</text>')
+  // 13,250 is 1,150 of the 2,300 XP from level 12 to 13: half of the 372 px bar.
+  expect(svg).toContain('width="186.0" height="6"')
+  expect(svg).toContain('>Achievements 2 of 17</text>')
+  expect(svg.indexOf('>Marathon</text>')).toBeLessThan(svg.indexOf('>Shell regular</text>'))
+  expect(cardAlt(SOUL, BONES, 0, undefined, PROGRESS)).toBe(
+    'Nib, uncommon mushroom, 2 stars. "Speaks rarely, mostly in proverbs." Propeller hat, ✦ eyes. ' +
+      `${statAlt(BONES)}. Level 12, adult, 13,250 of 14,400 XP. 2 of 17 achievements: Marathon, Shell regular. ` +
+      'Hatched Oct 7, 2026. Rerolls 0.',
+  )
+})
+
+test('the XP bar is empty at the start of a level, and full at 99 with no next level', () => {
+  expect(cardSvg(SOUL, BONES, 0, undefined, { ...PROGRESS, xp: 12_100 })).toContain('width="0.0" height="6"')
+  const top = { ...PROGRESS, level: 99, stage: 'elder' as const, xp: 1_034_500, earned: [] }
+  const svg = cardSvg(SOUL, BONES, 0, undefined, top)
+  expect(svg).toContain('>1,034,500 xp</text>')
+  expect(svg).toContain('width="372.0" height="6"')
+  expect(cardAlt(SOUL, BONES, 0, undefined, top)).toContain('Level 99, elder, 1,034,500 XP. 0 of 17 achievements. Hatched')
+})
+
+test('a retired buddy says when it retired, and achievement titles are escaped', () => {
+  const retired = { ...PROGRESS, earned: ['<b>'], retiredAt: '2026-10-09T08:00:00.000Z' }
+  const svg = cardSvg(SOUL, BONES, 0, undefined, retired)
+  expect(svg).toContain('>Retired Oct 9, 2026</text>')
+  expect(svg).toContain('>&lt;b&gt;</text>')
+  expect(cardAlt(SOUL, BONES, 0, undefined, retired)).toContain('Hatched Oct 7, 2026. Retired Oct 9, 2026. Rerolls 0.')
+})
+
+test('the card grows with its chips, and progress adds 70 px under the last row', () => {
+  const none = cardSvg(SOUL, BONES, 0, undefined, { ...PROGRESS, earned: [] })
+  const all = cardSvg(SOUL, BONES, 0, undefined, { ...PROGRESS, earned: ACHIEVEMENTS.map(a => a.title) })
+  expect(heightOf(all)).toBeGreaterThan(heightOf(none) + 60)
+  expect(heightOf(none)).toBe(heightOf(cardSvg(SOUL, BONES, 0)) + 70)
 })

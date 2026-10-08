@@ -9,8 +9,8 @@ import {
   MAX_QUEUED_TURNS, addCall, isRough, memoryLine, momentKey, noCalls, recall, talkMemories, turnFacts,
 } from './journal'
 import {
-  bandRows, cardLines, compactLine, emptyJournal, isCompact, journalHeader, journalLines, journalRows, nameLine, rightRuns,
-  spriteTint, streakLine,
+  achievementsText, bandRows, cardLines, cardProgress, compactLine, emptyJournal, isCompact, journalHeader, journalLines,
+  journalRows, levelText, nameLine, rightRuns, spriteTint, streakLine,
 } from './layout'
 import { addCounts, countEvent, mergePending, toolGroup, zeroCounts } from './ledger'
 import type { CountEvent } from './ledger'
@@ -545,7 +545,12 @@ async function runBuddy($: EngineInterface, sub: Sub): Promise<string | undefine
       const opened = await $.ui.open({ id: CARD, title: 'Buddy', closeOnEscape: true })
       // A surface that places no panes gets the card as text instead.
       if (opened.isPlaced) return undefined
-      return [...cardLines(buddy.soul, bones, saved.rerolls), streakLine(saved.you, await countsOf($, buddy))].join('\n')
+      const progress = cardProgress(saved, buddy)
+      return [
+        ...cardLines(buddy.soul, bones, saved.rerolls, progress),
+        streakLine(saved.you, await countsOf($, buddy)),
+        achievementsText(progress.earned.length),
+      ].join('\n')
     }
     case 'journal': {
       const opened = await $.ui.open({ id: JOURNAL, title: 'Journal', closeOnEscape: true })
@@ -839,13 +844,14 @@ export const register: Register = on => {
 
       const buddy = activeBuddy(saved)
       const bones = bonesFor(buddy)
+      const progress = cardProgress(saved, buddy)
       const history = { you: saved.you, counts: await countsOf($, buddy) }
       if (e.surface !== 'terminal') {
         const { Svg } = $.ui.resolve(e)
         return (
           <Svg
-            source={cardSvg(buddy.soul, bones, saved.rerolls, history)}
-            alt={cardAlt(buddy.soul, bones, saved.rerolls, history)}
+            source={cardSvg(buddy.soul, bones, saved.rerolls, history, progress)}
+            alt={cardAlt(buddy.soul, bones, saved.rerolls, history, progress)}
           />
         )
       }
@@ -861,13 +867,17 @@ export const register: Register = on => {
             <Text bold>{buddy.soul.name}</Text>
             <Text {...tint(starColor)}>{'  ' + stars}</Text>
           </Box>
+          <Text>{levelText(progress)}</Text>
           <Text dimColor>
             {`${bones.rarity} ${bones.species}${bones.shiny ? ' (shiny)' : ''}   Hat: ${bones.hat}   Eyes: ${bones.eye}`}
           </Text>
           <Text>{buddy.soul.personality}</Text>
         </Box>
       )
-      const footer = <Text dimColor>{`Hatched ${buddy.soul.hatchedAt.slice(0, 10)}   Rerolls: ${saved.rerolls}`}</Text>
+      const retired = progress.retiredAt ? `   Retired ${progress.retiredAt.slice(0, 10)}` : ''
+      const footer = (
+        <Text dimColor>{`Hatched ${buddy.soul.hatchedAt.slice(0, 10)}   Rerolls: ${saved.rerolls}${retired}`}</Text>
+      )
       const cells = Math.max(8, Math.min(30, e.props.bodyColumns - 18))
       return (
         <Box flexDirection="column">
@@ -890,6 +900,8 @@ export const register: Register = on => {
           <Text> </Text>
           {footer}
           <Text dimColor>{streakLine(history.you, history.counts)}</Text>
+          <Text dimColor>{achievementsText(progress.earned.length)}</Text>
+          {progress.earned.length > 0 ? [<Text>{progress.earned.join(' · ')}</Text>] : []}
         </Box>
       )
     } catch {

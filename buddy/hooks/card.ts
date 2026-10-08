@@ -2,8 +2,11 @@
 // solid stat meters on the terminal.
 
 import type { Counts, Soul, You } from '../types'
+import { ACHIEVEMENTS } from './achievements'
 import { countsText, emptyJournal, journalHeader, streakLine, streakText, wrap } from './layout'
-import type { JournalRow } from './layout'
+import type { CardProgress, JournalRow } from './layout'
+import { withCommas } from './ledger'
+import { MAX_LEVEL, xpForLevel } from './progress'
 import { RARITY, STATS } from './roll'
 import type { Bones, Hat, Rarity } from './roll'
 import { spriteRows, topRow } from './sprites'
@@ -116,7 +119,7 @@ function chips(bones: Bones): string[] {
 }
 
 // The whole card, top to bottom: name and stars, kind, portrait, quote, chips, radar, history.
-export function cardSvg(soul: Soul, bones: Bones, rerolls: number, history?: CardHistory): string {
+export function cardSvg(soul: Soul, bones: Bones, rerolls: number, history?: CardHistory, progress?: CardProgress): string {
   const color = FILL[bones.rarity]
   const marks: string[] = [
     `<text x="${PAD}" y="44" font-size="22" font-weight="700" fill="${color}">${esc(soul.name)}</text>`,
@@ -172,7 +175,52 @@ export function cardSvg(soul: Soul, bones: Bones, rerolls: number, history?: Car
     )
   }
 
-  return framed(color, foot + (history ? 58 : 38), marks)
+  if (progress?.retiredAt) {
+    marks.push(
+      `<text x="${MID}" y="${foot + 22}" text-anchor="middle" font-size="12" fill="${INK}">Retired ${hatchDay(progress.retiredAt)}</text>`,
+    )
+  }
+
+  const last = foot + (history ? 42 : 22)
+  return framed(color, (progress ? growthMarks(marks, color, progress, last) : last) + 16, marks)
+}
+
+// The level, its XP bar and your achievements under the card's last row, whose baseline is at
+// `last` (Progression spec section 6). Pushes onto `marks` and returns the new last baseline.
+function growthMarks(marks: string[], color: string, p: CardProgress, last: number): number {
+  const span = W - 2 * PAD
+  const levelY = last + 30
+  const barY = levelY + 10
+  const from = xpForLevel(p.level)
+  const to = p.level < MAX_LEVEL ? xpForLevel(p.level + 1) : from
+  const filled = to > from ? Math.min(1, Math.max(0, (p.xp - from) / (to - from))) : 1
+  const label = p.level < MAX_LEVEL ? `${withCommas(p.xp)} / ${withCommas(to)} xp` : `${withCommas(p.xp)} xp`
+  marks.push(
+    `<text x="${PAD}" y="${levelY}" font-size="13" font-weight="700" fill="${color}">Lv ${p.level} ${p.stage}</text>`,
+    `<text x="${W - PAD}" y="${levelY}" text-anchor="end" font-size="12" fill="${INK}">${label}</text>`,
+    `<rect x="${PAD}" y="${barY}" width="${span}" height="6" rx="3" fill="${color}" fill-opacity="0.15"/>`,
+    `<rect x="${PAD}" y="${barY}" width="${(span * filled).toFixed(1)}" height="6" rx="3" fill="${color}"/>`,
+  )
+  const headY = barY + 30
+  marks.push(
+    `<text x="${PAD}" y="${headY}" font-size="12" fill="${INK}">Achievements ${p.earned.length} of ${ACHIEVEMENTS.length}</text>`,
+  )
+  // The earned ones as chips, newest first, wrapping at the right pad.
+  let x = PAD
+  let top = headY + 10
+  for (const title of p.earned) {
+    const w = title.length * 7 + 20
+    if (x > PAD && x + w > W - PAD) {
+      x = PAD
+      top += 30
+    }
+    marks.push(
+      `<rect x="${x}" y="${top}" width="${w}" height="22" rx="11" fill="${color}" fill-opacity="0.15"/>`,
+      `<text x="${x + w / 2}" y="${top + 15}" text-anchor="middle" font-size="12" fill="${color}">${esc(title)}</text>`,
+    )
+    x += w + 8
+  }
+  return p.earned.length > 0 ? top + 22 : headY
 }
 
 // The card's frame around `marks`: a rounded border in the rarity color, `h` px tall.
@@ -211,14 +259,25 @@ export function journalAlt(name: string, rows: readonly JournalRow[]): string {
   return `${journalHeader(name)}. ${rows.map(r => `${capital(r.age.trim())}: ${r.text}.`).join(' ')}`
 }
 
-export function cardAlt(soul: Soul, bones: Bones, rerolls: number, history?: CardHistory): string {
+export function cardAlt(soul: Soul, bones: Bones, rerolls: number, history?: CardHistory, progress?: CardProgress): string {
   const stars = RARITY[bones.rarity].stars
   return (
     `${soul.name}, ${bones.rarity} ${bones.species}, ${stars} star${stars === 1 ? '' : 's'}. ` +
     `"${soul.personality}" ${chips(bones).join(', ')}. ${statAlt(bones)}. ` +
-    `Hatched ${hatchDay(soul.hatchedAt)}. Rerolls ${rerolls}.` +
+    (progress ? `${growthAlt(progress)} ` : '') +
+    `Hatched ${hatchDay(soul.hatchedAt)}.` +
+    (progress?.retiredAt ? ` Retired ${hatchDay(progress.retiredAt)}.` : '') +
+    ` Rerolls ${rerolls}.` +
     (history ? ` ${streakLine(history.you, history.counts)}.` : '')
   )
+}
+
+// "Level 12, adult, 13,250 of 14,400 XP. 2 of 17 achievements: Marathon, Shell regular."
+function growthAlt(p: CardProgress): string {
+  const xp =
+    p.level < MAX_LEVEL ? `${withCommas(p.xp)} of ${withCommas(xpForLevel(p.level + 1))} XP` : `${withCommas(p.xp)} XP`
+  const earned = `${p.earned.length} of ${ACHIEVEMENTS.length} achievements${p.earned.length > 0 ? `: ${p.earned.join(', ')}` : ''}`
+  return `Level ${p.level}, ${p.stage}, ${xp}. ${earned}.`
 }
 
 export function statAlt(bones: Bones): string {

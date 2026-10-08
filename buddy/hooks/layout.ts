@@ -1,9 +1,11 @@
 // The band's text layout: bubble wrapping, full and compact rows, and the card.
-import type { Counts, Moment, Soul, You } from '../types'
+import type { Buddy, Counts, Moment, Saved, Soul, Stage, You } from '../types'
+import { ACHIEVEMENTS, earnedOf, knownEarned } from './achievements'
 import { ageText, momentText, readable } from './journal'
 import { RARITY, STATS } from './roll'
 import type { Bones } from './roll'
 import { totalCalls, withCommas } from './ledger'
+import { MAX_LEVEL, levelOf, stageOf, xpForLevel, xpOf } from './progress'
 import { PAINT } from './sprites'
 import type { Prop } from './sprites'
 
@@ -149,14 +151,48 @@ export function compactLine(face: string, name: string, say: string | null, colu
   return `${head}: ${lines[page]}${page < lines.length - 1 ? ' …' : ''}`
 }
 
-export function cardLines(soul: Soul, bones: Bones, rerolls: number): string[] {
+// The shown buddy's growth and your achievements, for the card (Progression spec section 6).
+export type CardProgress = {
+  level: number
+  stage: Stage
+  xp: number
+  // Earned achievement titles, newest first.
+  earned: readonly string[]
+  // When the shown buddy was retired; null for the active one.
+  retiredAt: string | null
+}
+
+export function cardProgress(saved: Saved, buddy: Buddy): CardProgress {
+  const level = levelOf(buddy.counts)
+  const had = earnedOf(saved.you)
+  const when = (id: string) => String(had[id])
+  // Newest first; the sort is stable, so two earned together keep table order.
+  const earned = knownEarned(saved.you)
+    .sort((a, b) => (when(b.id) > when(a.id) ? 1 : when(b.id) < when(a.id) ? -1 : 0))
+    .map(a => a.title)
+  return { level, stage: stageOf(level), xp: xpOf(buddy.counts), earned, retiredAt: buddy.retiredAt }
+}
+
+// "Lv 12 adult · 12,345 / 14,400 xp": the XP so far over the XP for the next level.
+export function levelText(p: Pick<CardProgress, 'level' | 'stage' | 'xp'>): string {
+  const next = p.level < MAX_LEVEL ? ` / ${withCommas(xpForLevel(p.level + 1))}` : ''
+  return `Lv ${p.level} ${p.stage} · ${withCommas(p.xp)}${next} xp`
+}
+
+export function achievementsText(earned: number): string {
+  return `Achievements: ${earned} of ${ACHIEVEMENTS.length}`
+}
+
+export function cardLines(soul: Soul, bones: Bones, rerolls: number, progress?: CardProgress): string[] {
   const bar = (v: number) => '#'.repeat(Math.round(v / 5)).padEnd(20, '-')
+  const retired = progress?.retiredAt ? `   Retired ${progress.retiredAt.slice(0, 10)}` : ''
   return [
     `${soul.name}, ${bones.rarity} ${bones.species} ${'★'.repeat(RARITY[bones.rarity].stars)}${bones.shiny ? ' (shiny)' : ''}`,
+    ...(progress ? [levelText(progress)] : []),
     `Hat: ${bones.hat}   Eyes: ${bones.eye}`,
     soul.personality,
     ...STATS.map(s => `${s.padEnd(10)} ${bar(bones.stats[s])} ${String(bones.stats[s]).padStart(3)}`),
-    `Hatched ${soul.hatchedAt.slice(0, 10)}   Rerolls: ${rerolls}`,
+    `Hatched ${soul.hatchedAt.slice(0, 10)}   Rerolls: ${rerolls}${retired}`,
   ]
 }
 

@@ -1,9 +1,10 @@
 import { expect, test } from 'claude-code/testing'
 
-import type { Moment } from '../types'
+import type { Moment, Saved } from '../types'
 import {
-  MAX_BUBBLE_W, MIN_FULL_COLS, SHIMMER, bandRows, bubbleRows, bubbleWidth, cardLines, compactLine, isCompact,
-  journalLines, journalRows, nameLine, pageAt, paintRuns, rightRuns, spriteTint, streakLine, wrap,
+  MAX_BUBBLE_W, MIN_FULL_COLS, SHIMMER, achievementsText, bandRows, bubbleRows, bubbleWidth, cardLines, cardProgress,
+  compactLine, isCompact, journalLines, journalRows, levelText, nameLine, pageAt, paintRuns, rightRuns, spriteTint,
+  streakLine, wrap,
 } from './layout'
 import { zeroCounts } from './ledger'
 import { rollBones } from './roll'
@@ -236,4 +237,47 @@ test('the journal reads newest first with ages padded, and its text form keeps t
   const text = journalLines('Pip', full, noon)
   expect(text).toHaveLength(11)
   expect(text[1]).toBe('yesterday   19 turns together')
+})
+
+test('the level reads with the XP for the next one, and the text card keeps to 12 lines with it', () => {
+  expect(levelText({ level: 12, stage: 'adult', xp: 13_250 })).toBe('Lv 12 adult · 13,250 / 14,400 xp')
+  expect(levelText({ level: 99, stage: 'elder', xp: 1_034_500 })).toBe('Lv 99 elder · 1,034,500 xp')
+  expect(achievementsText(7)).toBe('Achievements: 7 of 17')
+  const progress = { level: 12, stage: 'adult' as const, xp: 13_250, earned: [], retiredAt: '2026-10-09T08:00:00.000Z' }
+  const you = { lastDay: '2026-10-07', streak: 1, bestStreak: 1, days: 1 }
+  const card = [...cardLines(SOUL, rollBones('layout-seed'), 2, progress), streakLine(you, zeroCounts()), achievementsText(0)]
+  expect(card).toHaveLength(12)
+  expect(card[1]).toBe('Lv 12 adult · 13,250 / 14,400 xp')
+  expect(card[9]).toBe('Hatched 2026-10-07   Rerolls: 2   Retired 2026-10-09')
+})
+
+test("a card's progress: the level from the buddy's own counts, and your achievements newest first", () => {
+  const buddy = { seed: 'layout-seed', soul: SOUL, retiredAt: null, counts: { ...zeroCounts(), turns: 1_210 } }
+  const saved: Saved = {
+    schema: 2,
+    mode: 'on',
+    rerolls: 0,
+    active: 'layout-seed',
+    buddies: [buddy],
+    you: {
+      lastDay: '2026-10-07',
+      streak: 1,
+      bestStreak: 1,
+      days: 1,
+      earned: {
+        marathon: '2026-10-05T12:00:00.000Z',
+        survivor: '2026-10-06T12:00:00.000Z',
+        shell: '2026-10-06T12:00:00.000Z',
+        party: '2026-10-07T12:00:00.000Z',
+      },
+    },
+  }
+  // Two earned the same day keep table order; a newer build's id is left out.
+  expect(cardProgress(saved, buddy)).toEqual({
+    level: 12,
+    stage: 'adult',
+    xp: 12_100,
+    earned: ['Shell regular', 'Survivor', 'Marathon'],
+    retiredAt: null,
+  })
 })

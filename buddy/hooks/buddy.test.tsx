@@ -256,7 +256,7 @@ test('card opens a pane with the name, personality, rerolls and streak, and prin
   expect(card).toMatch(/^Pip\b/m)
   expect(card).toMatch(/Counts semicolons\./)
   expect(card).toMatch(/Rerolls: 0/)
-  expect(card).toMatch(/Streak 1 day \(best 1\) · 0 turns · 0 tool calls$/)
+  expect(card).toMatch(/^Streak 1 day \(best 1\) · 0 turns · 0 tool calls\nAchievements: 0 of 17$/m)
 })
 
 test('the card pane is one drawn card on desktop and meters on the terminal', async ($, on) => {
@@ -284,7 +284,7 @@ test('where no pane can be placed, card prints the text card with the streak', a
   expect(card).toMatch(/^Pip, /)
   expect(card).toMatch(/DEBUGGING/)
   expect(card).toMatch(/Rerolls: 0/)
-  expect(card).toMatch(/\nStreak 1 day \(best 1\) · 0 turns · 0 tool calls$/)
+  expect(card).toMatch(/\nStreak 1 day \(best 1\) · 0 turns · 0 tool calls\nAchievements: 0 of 17$/)
 })
 
 test('reroll asks first, then replaces the buddy and counts the reroll', async ($, on) => {
@@ -1758,4 +1758,23 @@ test('a visit that earns something says so in place of the streak greeting', asy
   await clock.settle()
   const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
   expect(await bubbleOf(ui)).toBe('Earned Regular.')
+})
+
+test('the card shows the level, the XP to the next one, and your achievements, on every surface', async ($, on) => {
+  // 500 turns and 7,100 MCP calls are 12,100 XP, level 12, with no turn or call achievement.
+  const grown: Saved = {
+    ...SAVED,
+    buddies: [{ ...SAVED.buddies[0]!, counts: { ...zeroCounts(), turns: 500, calls: { ...zeroCounts().calls, mcp: 7_100 } } }],
+    you: { ...SAVED.you, earned: { grownUp: '2026-10-04T12:00:00.000Z', marathon: '2026-10-05T12:00:00.000Z' } },
+  }
+  const clock = world(on, { buddy: grown })
+  await $.session.start(START)
+  await clock.settle()
+  const text = await cardText($)
+  expect(text).toContain('\nLv 12 adult · 12,100 / 14,400 xp\n')
+  expect(text).toMatch(/\nAchievements: 2 of 17\nMarathon · Grown up$/)
+  const desktop = await $.ui.mount({ plugin: 'buddy', surface: 'desktop', ...pane() })
+  const svg = await desktop.find({ type: 'Svg' })
+  expect(svg?.props.alt).toContain('. Level 12, adult, 12,100 of 14,400 XP. 2 of 17 achievements: Marathon, Grown up. Hatched')
+  expect(String(svg?.props.source)).toContain('>Lv 12 adult</text>')
 })
