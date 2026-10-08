@@ -229,3 +229,34 @@ test('a new day after three or more missed days writes "away" on the buddy left 
   const weekend: Saved = { ...away, you: { ...away.you, lastDay: '2026-10-04' } }
   expect(activeBuddy(applyChange(weekend, { kind: 'visit' }, NOON)!).journal).toBeUndefined()
 })
+
+// V1's buddy one turn short of level 10.
+function nearly(): Saved {
+  const base = migrate(V1)
+  return { ...base, buddies: [{ ...base.buddies[0]!, counts: { ...zeroCounts(), turns: 809 } }] }
+}
+const ONE_TURN = countEvent(zeroCounts(), { kind: 'turn', reason: 'answer', durationMs: 1_000 })
+
+test('a flush that carries a buddy to level 10 logs that it grew and earns Grown up, once', () => {
+  const saved = applyChange(nearly(), { kind: 'flush', pending: { s: ONE_TURN } }, NOON)!
+  expect(activeBuddy(saved).journal).toEqual([{ at: AT, kind: 'grew', n: 1 }])
+  expect(saved.you.earned).toEqual({ grownUp: AT })
+  const again = applyChange(saved, { kind: 'flush', pending: { s: ONE_TURN } }, NOON + 1_000)!
+  expect(activeBuddy(again).journal).toHaveLength(1)
+  expect(again.you.earned).toEqual({ grownUp: AT })
+})
+
+test('a visit earns the streak achievements and keeps what was earned before', () => {
+  const base = migrate(V1)
+  const six = { ...base, you: { lastDay: '2026-10-06', streak: 6, bestStreak: 6, days: 6, earned: { marathon: 'before' } } }
+  const saved = applyChange(six, { kind: 'visit' }, NOON)!
+  expect(saved.you.earned).toEqual({ marathon: 'before', regular: AT })
+  expect(applyChange(saved, { kind: 'visit' }, NOON)).toBeNull()
+})
+
+test('an earned field that is not an object is replaced when something is earned, and none is added for nothing', () => {
+  const base = migrate(V1)
+  const damaged = { ...base, you: { lastDay: '2026-10-06', streak: 6, bestStreak: 6, days: 6, earned: 'lots' } } as unknown as Saved
+  expect(applyChange(damaged, { kind: 'visit' }, NOON)?.you.earned).toEqual({ regular: AT })
+  expect('earned' in applyChange(base, { kind: 'visit' }, NOON)!.you).toBe(false)
+})

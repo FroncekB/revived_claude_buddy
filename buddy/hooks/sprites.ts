@@ -529,6 +529,27 @@ export const HAT_ART: Record<Hat, string> = {
   tinyduck: "     <(')",
 }
 
+// Hats an achievement unlocks (Progression spec section 3). No roll gives one, so a tinyduck
+// still means legendary. Wearing one is E's /buddy hat.
+export const EARNED_HATS = ['hardhat', 'nightcap', 'flowercrown', 'headphones', 'mortarboard', 'laurel'] as const
+export type EarnedHat = (typeof EARNED_HATS)[number]
+export const EARNED_HAT_ART: Record<EarnedHat, string> = {
+  hardhat: '   _/==\\_',
+  nightcap: '    __.-*',
+  flowercrown: '   @*@*@',
+  headphones: '  [=----=]',
+  mortarboard: '   _[==]_',
+  laurel: '   ~v~v~v~',
+}
+
+// A hat a buddy can wear: one it rolled, or one you earned.
+export type Wearable = Hat | EarnedHat
+const WEARABLE_ART: Record<Wearable, string> = { ...HAT_ART, ...EARNED_HAT_ART }
+
+export function hatArt(hat: Wearable): string {
+  return WEARABLE_ART[hat]
+}
+
 export const HEARTS: readonly string[] = ['   ♥    ♥', '  ♥   ♥  ♥', ' ♥  ♥   ♥']
 
 // Confetti over a celebration: two patterns that alternate each tick.
@@ -652,7 +673,7 @@ export function spriteRows(o: { species: Species; eye: string; frame: Frame | Po
 
 // The hat row, the first that applies: hearts, confetti, zZ, a holiday hat, the rolled hat, the sparkle.
 export function topRow(o: {
-  hat: Hat | 'none'
+  hat: Wearable | 'none'
   heartsFrame: number | null
   sparkle: number | null
   confetti?: number | null
@@ -665,7 +686,7 @@ export function topRow(o: {
   if (confetti !== null) return fit(CONFETTI[confetti % CONFETTI.length]!)
   if (zzz !== null) return fit(ZZZ[Math.floor(zzz / 2) % ZZZ.length]!)
   if (o.holidayHat) return fit(o.holidayHat)
-  if (o.hat !== 'none') return fit(HAT_ART[o.hat])
+  if (o.hat !== 'none') return fit(hatArt(o.hat))
   if (o.sparkle !== null) return fit(o.sparkle % 2 === 0 ? '*' : ' '.repeat(SPRITE_W - 1) + '*')
   return BLANK
 }

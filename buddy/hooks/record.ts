@@ -1,8 +1,10 @@
 // The saved record and the /buddy subcommands. Pure: no $.
 import type { Buddy, Counts, Mode, MoodEvent, Saved, SavedV1, Soul, TurnFacts } from '../types'
+import { earn } from './achievements'
 import { addMoments, awayMoment, bestsOf, milestones, noticeTurns } from './journal'
 import { addCounts, localDay, visit, zeroCounts } from './ledger'
 import { applyMood, sulkFor, withSulk } from './mood'
+import { grewMoments } from './progress'
 
 export const STORE_KEY = 'buddy'
 export const USAGE = 'Usage: /buddy [pet | card | journal | mute | unmute | off | reroll [confirm]]'
@@ -127,7 +129,7 @@ export function applyChange(saved: Saved | null, change: Change, now: number): S
         // Records are judged against what is stored, before this save's counts are added.
         const counts = more ? addCounts(b.counts, more) : b.counts
         const noticed = noticeTurns(facts, bestsOf(b), b.counts.longestTurnMs, now)
-        const moments = [...noticed.moments, ...milestones(b.counts, counts, now)]
+        const moments = [...noticed.moments, ...milestones(b.counts, counts, now), ...grewMoments(b.counts, counts, now)]
         return {
           ...b,
           ...(more ? { counts } : {}),
@@ -136,12 +138,13 @@ export function applyChange(saved: Saved | null, change: Change, now: number): S
           ...(moments.length > 0 ? { journal: addMoments(b.journal, moments) } : {}),
         }
       })
-      return added || arrived !== saved ? { ...arrived, buddies } : null
+      // Achievements are judged last, on every buddy's new totals (Progression spec section 4).
+      return added || arrived !== saved ? earn({ ...arrived, buddies }, now) : null
     }
     case 'visit': {
       if (!saved) return null
       const arrived = arrive(saved, now)
-      return arrived !== saved ? arrived : null
+      return arrived !== saved ? earn(arrived, now) : null
     }
   }
 }

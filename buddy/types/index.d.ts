@@ -33,6 +33,8 @@ export type You = {
   streak: number
   bestStreak: number
   days: number
+  // Achievement id to the ISO time it was earned (Progression spec section 3). Missing reads as none.
+  earned?: Record<string, string>
 }
 
 // A buddy's mood (Alive spec section 2): failures push the meter toward anxious, long clean
@@ -47,13 +49,14 @@ export type MoodEvent = 'fail' | 'clean' | 'longClean' | 'soothe'
 
 // A notable moment in a buddy's life (Memory spec section 2), kept as data: its words are made
 // when it is shown, so they can change without touching saves.
-export type MomentKind = 'failRun' | 'longTurn' | 'busyTurn' | 'turns' | 'calls' | 'comeback' | 'away'
+export type MomentKind = 'failRun' | 'longTurn' | 'busyTurn' | 'turns' | 'calls' | 'comeback' | 'away' | 'grew'
 
 export type Moment = {
   // When the save or visit that wrote it happened.
   at: string
   kind: MomentKind
-  // What the kind counts: the run, the minutes, the calls, the mark, the rough turns, the days.
+  // What the kind counts: the run, the minutes, the calls, the mark, the rough turns, the days,
+  // the stage grown into (1 adult, 2 elder).
   n: number
   // failRun only, when the whole run was in one group.
   group?: ToolGroup

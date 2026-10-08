@@ -3,7 +3,8 @@ import { expect, test } from 'claude-code/testing'
 import type { Counts } from '../types'
 import { zeroCounts } from './ledger'
 import {
-  ADULT_LEVEL, ELDER_LEVEL, MAX_LEVEL, bonesFor, floorAt, grow, levelOf, safeCounts, stageOf, xpForLevel, xpOf,
+  ADULT_LEVEL, ELDER_LEVEL, MAX_LEVEL, bonesFor, floorAt, grewMoments, grow, levelOf, safeCounts, stageOf, xpForLevel,
+  xpOf,
 } from './progress'
 import { RARITIES, RARITY, rollBones } from './roll'
 import type { Bones } from './roll'
@@ -101,4 +102,17 @@ test("a buddy's bones are its seed's, grown by its saved counts", () => {
     WISDOM: 59,
     SNARK: 34,
   })
+})
+
+const NOON = new Date(2026, 9, 7, 12).getTime()
+const AT = new Date(NOON).toISOString()
+
+test('a save logs one grew moment for each stage it carries a buddy into', () => {
+  expect(grewMoments(worth(8_099), worth(8_100), NOON)).toEqual([{ at: AT, kind: 'grew', n: 1 }])
+  expect(grewMoments(worth(8_100), worth(8_200), NOON)).toEqual([])
+  expect(grewMoments(worth(84_099), worth(84_100), NOON)).toEqual([{ at: AT, kind: 'grew', n: 2 }])
+  expect(grewMoments(worth(0), worth(84_100), NOON)).toEqual([
+    { at: AT, kind: 'grew', n: 1 },
+    { at: AT, kind: 'grew', n: 2 },
+  ])
 })

@@ -1,6 +1,6 @@
 // Growing up (Progression spec section 2): XP, levels, stages and the stat floors, worked out
 // from a buddy's saved counts whenever they are needed and never saved. Pure: no $.
-import type { Counts, Stage } from '../types'
+import type { Counts, Moment, Stage } from '../types'
 import { TOOL_GROUPS, totalCalls } from './ledger'
 import { RARITY, STATS, rollBones } from './roll'
 import type { Bones, Rarity } from './roll'
@@ -73,4 +73,12 @@ export function grow(bones: Bones, level: number): Bones {
 // A buddy's bones as they are now: rolled from its seed, grown by its saved counts.
 export function bonesFor(b: { seed: string; counts?: unknown }): Bones {
   return grow(rollBones(b.seed), levelOf(b.counts))
+}
+
+// A `grew` moment for each stage a save's counts carry a buddy into: 1 for adult, 2 for elder.
+export function grewMoments(before: unknown, after: unknown, now: number): Moment[] {
+  const from = STAGES.indexOf(stageOf(levelOf(before)))
+  const to = STAGES.indexOf(stageOf(levelOf(after)))
+  const at = new Date(now).toISOString()
+  return Array.from({ length: Math.max(0, to - from) }, (_, i) => ({ at, kind: 'grew' as const, n: from + 1 + i }))
 }

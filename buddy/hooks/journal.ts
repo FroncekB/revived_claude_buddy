@@ -41,6 +41,7 @@ const KINDS = {
   calls: true,
   comeback: true,
   away: true,
+  grew: true,
 } satisfies Record<MomentKind, true>
 
 const NOUN: Record<ToolGroup, string> = {
@@ -196,6 +197,8 @@ export function momentText(m: Moment): string {
       return `a clean turn after ${n} rough ones`
     case 'away':
       return `back after ${n} days away`
+    case 'grew':
+      return m.n >= 2 ? 'grew into an elder' : 'grew into an adult'
   }
 }
 

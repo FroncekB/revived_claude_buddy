@@ -2,8 +2,8 @@ import { expect, test } from 'claude-code/testing'
 
 import { EYES, HATS, SPECIES } from './roll'
 import {
-  BLANK, CONFETTI, HAT_ART, HEARTS, HOLIDAY_HATS, POSES, POSE_EYE, PROPS, PROP_ROWS, PROP_W, SPRITE_W, ZZZ, bodyRows,
-  eggRows, faceFor, fillEyes, frameAt, spriteRows, topRow,
+  BLANK, CONFETTI, EARNED_HATS, EARNED_HAT_ART, HAT_ART, HEARTS, HOLIDAY_HATS, POSES, POSE_EYE, PROPS, PROP_ROWS, PROP_W,
+  SPRITE_W, ZZZ, bodyRows, eggRows, faceFor, fillEyes, frameAt, hatArt, spriteRows, topRow,
 } from './sprites'
 import type { Prop } from './sprites'
 
@@ -37,6 +37,7 @@ test('a drawn sprite is exactly 5 rows of 12 columns with the hat row on top', (
 
 test('hats, hearts and egg frames fit the same 12-column box', () => {
   for (const hat of HATS) expect(HAT_ART[hat].length).toBeLessThanOrEqual(SPRITE_W)
+  for (const hat of EARNED_HATS) expect(EARNED_HAT_ART[hat].length).toBeLessThanOrEqual(SPRITE_W)
   for (const row of HEARTS) expect(row.length).toBeLessThanOrEqual(SPRITE_W)
   for (const frame of [0, 1, 2] as const) {
     const egg = eggRows(frame)
@@ -129,4 +130,10 @@ test('confetti alternates each tick and the z rises every 2 ticks', () => {
   expect(CONFETTI.every(row => row.length === SPRITE_W)).toBe(true)
   const z = (t: number) => topRow({ hat: 'none', heartsFrame: null, sparkle: null, zzz: t }).trim()
   expect([0, 1, 2, 3, 4, 5, 6].map(z)).toEqual(['z', 'z', 'zZ', 'zZ', 'zZz', 'zZz', 'z'])
+})
+
+test('an earned hat is worn on the hat row like a rolled one, and no roll gives one', () => {
+  expect(topRow({ hat: 'hardhat', heartsFrame: null, sparkle: null })).toBe(EARNED_HAT_ART.hardhat.padEnd(SPRITE_W))
+  expect(hatArt('crown')).toBe(HAT_ART.crown)
+  for (const hat of EARNED_HATS) expect(HATS as readonly string[]).not.toContain(hat)
 })
