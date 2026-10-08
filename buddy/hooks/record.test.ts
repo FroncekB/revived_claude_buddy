@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import type { Saved } from '../types'
+import type { Bests, Saved, TurnFacts } from '../types'
 import { countEvent, zeroCounts } from './ledger'
 import { USAGE, activeBuddy, applyChange, classify, migrate, parseSub } from './record'
 import type { Change } from './record'
@@ -9,11 +9,16 @@ const SOUL = { name: 'Pip', personality: 'x', hatchedAt: '2026-10-07T00:00:00.00
 const V1 = { schema: 1 as const, seed: 's', soul: SOUL, mode: 'muted' as const, rerolls: 3 }
 // Local noon, so the local date is 2026-10-07 in any time zone.
 const NOON = new Date(2026, 9, 7, 12).getTime()
+const AT = new Date(NOON).toISOString()
+const FACTS: TurnFacts = { reason: 'answer', durationMs: 4_000, calls: 3, failRun: 0, failRunGroup: null, afterRough: 0 }
 
 test('subcommands', () => {
   expect(parseSub('')).toBe('show')
   expect(parseSub('  pet ')).toBe('pet')
   expect(parseSub('CARD')).toBe('card')
+  expect(parseSub('journal')).toBe('journal')
+  expect(parseSub('journal all')).toBe('usage')
+  expect(USAGE).toBe('Usage: /buddy [pet | card | journal | mute | unmute | off | reroll [confirm]]')
   expect(parseSub('mute')).toBe('mute')
   expect(parseSub('unmute')).toBe('unmute')
   expect(parseSub('off')).toBe('off')
@@ -111,6 +116,7 @@ test('fields this build does not know survive every change', () => {
     { kind: 'mode', mode: 'off' },
     { kind: 'flush', pending: { s: countEvent(zeroCounts(), { kind: 'pet' }) } },
     { kind: 'flush', pending: {}, mood: { s: ['fail'] } },
+    { kind: 'flush', pending: {}, turns: { s: [{ ...FACTS, failRun: 6 }] } },
     { kind: 'visit' },
     { kind: 'reroll', seed: 'n', soul: SOUL },
   ]
@@ -164,4 +170,62 @@ test('a pet in the flush that sets the sulk still eases it by one step', () => {
   const away: Saved = { ...migrate(V1), you: { lastDay: '2026-10-02', streak: 4, bestStreak: 4, days: 9 } }
   const saved = applyChange(away, { kind: 'flush', pending: {}, mood: { s: ['soothe'] } }, NOON)!
   expect(activeBuddy(saved).mood).toMatchObject({ sulk: 2 })
+})
+
+test('a flush notices turns against the stored bests, saves the bests, and drops an unknown seed', () => {
+  const run: TurnFacts = { ...FACTS, failRun: 6, failRunGroup: 'shell' }
+  const saved = applyChange(migrate(V1), { kind: 'flush', pending: {}, turns: { s: [run], gone: [run] } }, NOON)!
+  expect(saved.buddies).toHaveLength(1)
+  expect(activeBuddy(saved).journal).toEqual([{ at: AT, kind: 'failRun', n: 6, group: 'shell' }])
+  expect(activeBuddy(saved).bests).toEqual({ failRun: 6, calls: 3, rough: 0 })
+  // The same turn again sets no new record.
+  const again = applyChange(saved, { kind: 'flush', pending: {}, turns: { s: [run] } }, NOON)!
+  expect(activeBuddy(again).journal).toHaveLength(1)
+})
+
+test('a comeback is judged against the stored rough best, across flushes', () => {
+  const clean = (afterRough: number): TurnFacts => ({ ...FACTS, afterRough })
+  const flush = (saved: Saved, afterRough: number) =>
+    applyChange(saved, { kind: 'flush', pending: {}, turns: { s: [clean(afterRough)] } }, NOON)!
+  const first = flush(migrate(V1), 4)
+  expect(activeBuddy(first).journal).toEqual([{ at: AT, kind: 'comeback', n: 4 }])
+  expect(activeBuddy(first).bests).toEqual({ failRun: 0, calls: 3, rough: 4 })
+  // The same number again is no record; a longer run is.
+  expect(activeBuddy(flush(first, 4)).journal).toHaveLength(1)
+  expect(activeBuddy(flush(first, 5)).journal?.map(m => m.n)).toEqual([4, 5])
+})
+
+test('bests fields a newer build wrote survive a flush', () => {
+  const base = migrate(V1)
+  const future = {
+    ...base,
+    buddies: base.buddies.map(b => ({ ...b, bests: { failRun: 1, calls: 1, rough: 1, slowest: 2 } })),
+  } as Saved
+  const saved = applyChange(future, { kind: 'flush', pending: {}, turns: { s: [FACTS] } }, NOON)!
+  expect(activeBuddy(saved).bests).toEqual({ failRun: 1, calls: 3, rough: 1, slowest: 2 } as Bests)
+})
+
+test('a flush that reaches turn 100 logs the milestone after the turn moments', () => {
+  const base = migrate(V1)
+  const near: Saved = { ...base, buddies: base.buddies.map(b => ({ ...b, counts: { ...b.counts, turns: 99 } })) }
+  const long = countEvent(zeroCounts(), { kind: 'turn', reason: 'answer', durationMs: 700_000 })
+  const change: Change = { kind: 'flush', pending: { s: long }, turns: { s: [{ ...FACTS, durationMs: 700_000 }] } }
+  expect(activeBuddy(applyChange(near, change, NOON)!).journal).toEqual([
+    { at: AT, kind: 'longTurn', n: 11 },
+    { at: AT, kind: 'turns', n: 100 },
+  ])
+})
+
+test('a new day after three or more missed days writes "away" on the buddy left alone', () => {
+  // 2026-10-02 to 2026-10-07 is 5 days.
+  const away: Saved = { ...migrate(V1), you: { lastDay: '2026-10-02', streak: 4, bestStreak: 4, days: 9 } }
+  const moment = [{ at: AT, kind: 'away', n: 5 }]
+  expect(activeBuddy(applyChange(away, { kind: 'visit' }, NOON)!).journal).toEqual(moment)
+  expect(activeBuddy(applyChange(away, { kind: 'flush', pending: {} }, NOON)!).journal).toEqual(moment)
+  const rerolled = applyChange(away, { kind: 'reroll', seed: 'n', soul: SOUL }, NOON)!
+  expect(rerolled.buddies[0]?.journal).toEqual(moment)
+  expect(activeBuddy(rerolled).journal).toBeUndefined()
+  // Two missed days leave a sulk but no moment.
+  const weekend: Saved = { ...away, you: { ...away.you, lastDay: '2026-10-04' } }
+  expect(activeBuddy(applyChange(weekend, { kind: 'visit' }, NOON)!).journal).toBeUndefined()
 })

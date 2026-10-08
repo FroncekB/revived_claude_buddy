@@ -40,6 +40,11 @@ export function totalCalls(c: Counts): number {
   return TOOL_GROUPS.reduce((sum, g) => sum + c.calls[g], 0)
 }
 
+// 1234567 as "1,234,567".
+export function withCommas(n: number): string {
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+}
+
 export type CountEvent =
   | { kind: 'call'; tool: string; failed: boolean }
   | { kind: 'turn'; reason: string; durationMs: number }

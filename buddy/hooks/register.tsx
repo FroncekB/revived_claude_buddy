@@ -1,16 +1,23 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Buddy, Counts, MoodEvent, Saved } from '../types'
+import type { Buddy, Counts, Moment, MoodEvent, Saved, TurnFacts } from '../types'
 import { dayInfo } from './calendar'
-import { cardAlt, cardSvg, meter } from './card'
-import { bandRows, cardLines, compactLine, isCompact, nameLine, rightRuns, spriteTint, streakLine } from './layout'
-import { addCounts, countEvent, mergePending, zeroCounts } from './ledger'
+import { cardAlt, cardSvg, journalAlt, journalSvg, meter } from './card'
+import {
+  MAX_QUEUED_TURNS, addCall, isRough, memoryLine, momentKey, noCalls, recall, talkMemories, turnFacts,
+} from './journal'
+import {
+  bandRows, cardLines, compactLine, emptyJournal, isCompact, journalHeader, journalLines, journalRows, nameLine, rightRuns,
+  spriteTint, streakLine,
+} from './layout'
+import { addCounts, countEvent, mergePending, toolGroup, zeroCounts } from './ledger'
 import type { CountEvent } from './ledger'
 import { CELEBRATE_TICKS, FLINCH_TICKS, draw, portrait } from './look'
 import type { Scene } from './look'
-import { applyMood, mergeMood, moodLine, moodOf, queueMood, turnMood } from './mood'
+import { MAX_QUEUED_MOOD, applyMood, moodLine, moodOf, turnMood } from './mood'
 import type { MoodName } from './mood'
+import { mergeQueues, queueNewest } from './queue'
 import { STORE_KEY, USAGE, activeBuddy, applyChange, classify, parseSub } from './record'
 import type { Change, Stored, Sub } from './record'
 import { RARITY, STATS, rollBones } from './roll'
@@ -57,8 +64,10 @@ const pending = atom({ plugin: 'buddy', key: 'pending' } as const, {})
 const posing = atom({ plugin: 'buddy', key: 'pose' } as const, null)
 const lastActive = atom({ plugin: 'buddy', key: 'lastActiveTick' } as const, 0)
 const pendingMood = atom({ plugin: 'buddy', key: 'pendingMood' } as const, {})
+const pendingTurns = atom({ plugin: 'buddy', key: 'pendingTurns' } as const, {})
 
 const CARD = 'card'
+const JOURNAL = 'journal'
 const NO_BUDDY = 'No buddy yet. Run /buddy to hatch one.'
 const SAVE_FAILED = 'Could not save your buddy; it lives for this session only.'
 
@@ -92,6 +101,13 @@ let cannedCount = 0
 // The current main turn's tool tally; reset when that turn completes.
 let tally: Record<string, number> = {}
 let failedTools: string[] = []
+// The current main turn's calls for the journal, and the rough turns in a row before it (Memory
+// spec section 3).
+let turnCalls = noCalls()
+let roughTurns = 0
+// When each journal memory was last recalled in a quip, by moment key (Memory spec section 4).
+// Lost on a reload, which is acceptable: at worst a memory comes back sooner.
+let recalled: Record<string, number> = {}
 // Main turns completed in this module's life, and the last one the DEBUGGING line spoke in: a
 // failed call's line can run after its turn has ended, so it carries its turn's number.
 let turnNo = 0
@@ -119,9 +135,13 @@ function later($: EngineInterface, work: () => Promise<unknown>) {
   })
 }
 
-// Make `saved` the session's buddy: into state, and the timer to match its mode.
+// Make `saved` the session's buddy: into state, and the timer to match its mode. A run of rough
+// turns never crosses "off" or a new buddy, whichever session made the change (Memory spec
+// section 3).
 async function adopt($: EngineInterface, saved: Saved) {
+  const before = await read($, record)
   await update($, record, () => saved)
+  if (saved.mode === 'off' || saved.active !== before?.active) roughTurns = 0
   if (saved.mode === 'off') stopTimer()
   else if (!timer) startTimer($)
 }
@@ -181,22 +201,27 @@ async function commitNow($: EngineInterface, change: Change): Promise<string | n
   }
 }
 
-// Adds one event to this session's unsaved counts for the active buddy. Nothing is counted
-// with no buddy, while the egg is out, or while the buddy is off.
-async function count($: EngineInterface, event: CountEvent) {
+// The active buddy's seed while events count; null with no buddy, while the egg is out, or while
+// the buddy is off.
+async function countedSeed($: EngineInterface): Promise<string | null> {
   const saved = await read($, record)
-  if (!saved || saved.mode === 'off' || (await read($, hatching))) return
-  const seed = saved.active
+  if (!saved || saved.mode === 'off' || (await read($, hatching))) return null
+  return saved.active
+}
+
+// Adds one event to this session's unsaved counts for the active buddy.
+async function count($: EngineInterface, event: CountEvent) {
+  const seed = await countedSeed($)
+  if (seed === null) return
   await update($, pending, p => ({ ...p, [seed]: countEvent(p[seed] ?? zeroCounts(), event) }))
 }
 
 // Queues mood events for the active buddy and strikes a pose, under the rules for counting
 // (Alive spec sections 2 and 4). A celebration never cuts a flinch short.
 async function feel($: EngineInterface, events: readonly MoodEvent[], kind: 'flinch' | 'celebrate' | null) {
-  const saved = await read($, record)
-  if (!saved || saved.mode === 'off' || (await read($, hatching))) return
-  const seed = saved.active
-  if (events.length > 0) await update($, pendingMood, p => ({ ...p, [seed]: queueMood(p[seed], events) }))
+  const seed = await countedSeed($)
+  if (seed === null) return
+  if (events.length > 0) await update($, pendingMood, p => ({ ...p, [seed]: queueNewest(p[seed], events, MAX_QUEUED_MOOD) }))
   if (kind === null) return
   const now = await read($, tick)
   const untilTick = now + (kind === 'flinch' ? FLINCH_TICKS : CELEBRATE_TICKS)
@@ -205,15 +230,27 @@ async function feel($: EngineInterface, events: readonly MoodEvent[], kind: 'fli
   )
 }
 
-// Saves the unsaved counts and mood events with today's visit. A failed store write has already
-// taken them into this session's copy (commit adopts before it writes), so they go back only
-// when the commit failed before that.
+// Queues a finished main turn for the journal, under the rules for counting (Memory spec section 3).
+async function queueTurn($: EngineInterface, facts: TurnFacts) {
+  const seed = await countedSeed($)
+  if (seed === null) {
+    // A turn nobody is counting breaks the run of rough ones.
+    roughTurns = 0
+    return
+  }
+  await update($, pendingTurns, p => ({ ...p, [seed]: queueNewest(p[seed], [facts], MAX_QUEUED_TURNS) }))
+}
+
+// Saves the unsaved counts, mood events and turns with today's visit. A failed store write has
+// already taken them into this session's copy (commit adopts before it writes), so they go back
+// only when the commit failed before that.
 async function flush($: EngineInterface) {
   const saved = await read($, record)
   if (!saved || saved.mode === 'off') return
   // Each taken and cleared in one update, so an event landing in between is never erased.
   let taken: Record<string, Counts> = {}
   let felt: Record<string, MoodEvent[]> = {}
+  let turns: Record<string, TurnFacts[]> = {}
   await update($, pending, p => {
     taken = p
     return {}
@@ -222,11 +259,16 @@ async function flush($: EngineInterface) {
     felt = p
     return {}
   })
+  await update($, pendingTurns, p => {
+    turns = p
+    return {}
+  })
   try {
-    await commit($, { kind: 'flush', pending: taken, mood: felt })
+    await commit($, { kind: 'flush', pending: taken, mood: felt, turns })
   } catch {
     await update($, pending, p => mergePending(taken, p))
-    await update($, pendingMood, p => mergeMood(felt, p))
+    await update($, pendingMood, p => mergeQueues(felt, p, MAX_QUEUED_MOOD))
+    await update($, pendingTurns, p => mergeQueues(turns, p, MAX_QUEUED_TURNS))
   }
 }
 
@@ -235,7 +277,11 @@ async function countAndFlush(
   event: CountEvent,
   events: readonly MoodEvent[] = [],
   kind: 'flinch' | 'celebrate' | null = null,
+  facts: TurnFacts | null = null,
 ) {
+  // Queued before the counts: a flush landing between the two awaits would otherwise save this
+  // turn's longestTurnMs without its facts, and the next flush would lose the long-turn moment.
+  if (facts) await queueTurn($, facts)
   await count($, event)
   await feel($, events, kind)
   await flush($)
@@ -269,8 +315,8 @@ async function moodNow($: EngineInterface, who: Who, now: number): Promise<MoodN
   return moodOf(applyMood(saved ? saved.mood : who.mood, queued, now), now)
 }
 
-// The moment, for the persona prompt: the mood with this session's unsaved events, and the day.
-async function momentLines($: EngineInterface, who: Who): Promise<string[]> {
+// The persona prompt's context: the mood with this session's unsaved events, and the day.
+async function contextLines($: EngineInterface, who: Who): Promise<string[]> {
   const now = await $.clock.now()
   const mood = moodLine(await moodNow($, who, now))
   const holiday = dayInfo(now, who.soul.hatchedAt).holiday
@@ -320,8 +366,8 @@ async function ask(
   const mine = { controller: new AbortController(), kind }
   inFlight = mine
   try {
-    const system = personaSystem(who.soul, bones, await momentLines($, who))
-    // A reply may have aborted this call while the moment lines were read.
+    const system = personaSystem(who.soul, bones, await contextLines($, who))
+    // A reply may have aborted this call while the context lines were read.
     if (mine.controller.signal.aborted) return null
     const result = await $.model.complete(
       { model: 'haiku', system, prompt, maxTokens: 80, timeoutMs: 8000 },
@@ -356,8 +402,31 @@ async function soothe($: EngineInterface, event: CountEvent, who: Who, prompt: s
   }
 }
 
-// A finished main turn: speak only when shouldQuip says so, never muted, never while a call is pending.
-async function react($: EngineInterface, summary: TurnSummary) {
+// The journal line a quip carries, if any (Memory spec section 4), noted in `recalled` so the
+// same memory isn't carried again within the hour. A throw costs the memory, never the quip.
+function quipMemory(journal: readonly Moment[] | undefined, facts: TurnFacts, now: number, bones: Bones): string | null {
+  try {
+    const m = recall({ journal, facts, now, stats: bones.stats, roll: Math.random(), pick: Math.random(), recalled })
+    if (!m) return null
+    recalled = { ...recalled, [momentKey(m)]: now }
+    return memoryLine(m, now)
+  } catch {
+    return null
+  }
+}
+
+// The journal lines a talk carries (Memory spec section 4). A throw costs the memories, never the reply.
+async function talkMemoryLines($: EngineInterface, journal: readonly Moment[] | undefined): Promise<string[]> {
+  try {
+    return talkMemories(journal, await $.clock.now())
+  } catch {
+    return []
+  }
+}
+
+// A finished main turn: speak only when shouldQuip says so, never muted, never while a call is
+// pending. A quip may call back to a journal moment.
+async function react($: EngineInterface, summary: TurnSummary, facts: TurnFacts) {
   const saved = await read($, record)
   if (!saved || (await read($, hatching))) return
   const buddy = activeBuddy(saved)
@@ -374,7 +443,8 @@ async function react($: EngineInterface, summary: TurnSummary) {
   })
   if (!speak) return
   await update($, lastQuipAt, () => now)
-  const text = await ask($, buddy, bones, reactionPrompt(summary), 'react')
+  const memory = quipMemory(buddy.journal, facts, now, bones)
+  const text = await ask($, buddy, bones, reactionPrompt(summary, memory), 'react')
   if (text) await showBubble($, text)
 }
 
@@ -383,7 +453,7 @@ async function hatch($: EngineInterface, kind: 'hatch' | 'reroll'): Promise<stri
   const bones = rollBones(seed)
   await update($, hatching, () => true)
   try {
-    // A new buddy is shown as itself, not mid-tour.
+    // A new buddy is shown as itself, not mid-tour. Adopting it clears the rough turns.
     await update($, tourStart, () => null)
     if (!timer) startTimer($)
     let soul = fallbackSoul(seed, bones)
@@ -445,6 +515,12 @@ async function runBuddy($: EngineInterface, sub: Sub): Promise<string | undefine
       // A surface that places no panes gets the card as text instead.
       if (opened.isPlaced) return undefined
       return [...cardLines(buddy.soul, bones, saved.rerolls), streakLine(saved.you, await countsOf($, buddy))].join('\n')
+    }
+    case 'journal': {
+      const opened = await $.ui.open({ id: JOURNAL, title: 'Journal', closeOnEscape: true })
+      // A surface that places no panes gets the newest ten as text instead.
+      if (opened.isPlaced) return undefined
+      return journalLines(name, buddy.journal, await $.clock.now()).join('\n')
     }
     case 'mute':
       return (await commit($, { kind: 'mode', mode: 'muted' })) ?? `${name} will stay quiet unless spoken to.`
@@ -559,7 +635,7 @@ export const register: Register = on => {
       await $.command.register({
         name: 'buddy',
         description: 'Hatch, pet, or manage your terminal buddy',
-        argumentHint: '[pet | card | mute | unmute | off | reroll [confirm]]',
+        argumentHint: '[pet | card | journal | mute | unmute | off | reroll [confirm]]',
         immediate: true,
       })
     } catch {
@@ -603,8 +679,11 @@ export const register: Register = on => {
         tally[e.tool] = (tally[e.tool] ?? 0) + 1
         const failed = ran.deny === undefined && ran.isError === true
         if (failed) failedTools.push(e.tool)
-        // A denied call never ran, so it isn't counted.
-        if (ran.deny === undefined) later($, () => count($, { kind: 'call', tool: e.tool, failed }))
+        // A denied call never ran, so it isn't counted, and it neither extends nor ends a run.
+        if (ran.deny === undefined) {
+          turnCalls = addCall(turnCalls, toolGroup(e.tool), failed)
+          later($, () => count($, { kind: 'call', tool: e.tool, failed }))
+        }
         if (failed) {
           const turn = turnNo
           later($, () => feel($, ['fail'], 'flinch'))
@@ -623,14 +702,17 @@ export const register: Register = on => {
       later($, () => stir($))
       if (e.agentId === undefined) {
         const summary: TurnSummary = { reason: e.reason, durationMs: e.durationMs, tools: tally, failed: failedTools }
+        const facts = turnFacts(e.reason, e.durationMs, turnCalls, roughTurns)
         tally = {}
         failedTools = []
+        turnCalls = noCalls()
+        roughTurns = isRough(facts) ? roughTurns + 1 : 0
         turnNo++
         const turn: CountEvent = { kind: 'turn', reason: e.reason, durationMs: e.durationMs }
         const felt = turnMood(e.reason, e.durationMs, summary.failed.length)
         const kind = e.reason === 'error' ? 'flinch' : felt === 'longClean' ? 'celebrate' : null
-        later($, () => countAndFlush($, turn, felt ? [felt] : [], kind))
-        later($, () => react($, summary))
+        later($, () => countAndFlush($, turn, felt ? [felt] : [], kind, facts))
+        later($, () => react($, summary, facts))
       }
     } catch {
       // A reaction is never worth breaking a turn over.
@@ -648,7 +730,7 @@ export const register: Register = on => {
       const bare = !e.attachments || e.attachments.length === 0
       const message = buddy && fromPerson && bare ? matchAddress(buddy.soul.name, e.text) : null
       if (buddy && message !== null) {
-        later($, () => soothe($, { kind: 'talk' }, buddy, talkPrompt(message)))
+        later($, async () => soothe($, { kind: 'talk' }, buddy, talkPrompt(message, await talkMemoryLines($, buddy.journal))))
         return { drop: `(to ${buddy.soul.name})` }
       }
     } catch {
@@ -776,6 +858,39 @@ export const register: Register = on => {
           <Text> </Text>
           {footer}
           <Text dimColor>{streakLine(history.you, history.counts)}</Text>
+        </Box>
+      )
+    } catch {
+      return next(e)
+    }
+  })
+
+  // The journal pane (Memory spec section 5): the active buddy's saved moments, newest first.
+  on('ui.render', { component: 'Pane', requestId: JOURNAL }, async ($, e, next) => {
+    try {
+      const { Box, Text } = $.ui.resolve(e)
+      const saved = await read($, record)
+      if (!saved) return <Text dimColor>{NO_BUDDY}</Text>
+
+      const buddy = activeBuddy(saved)
+      const name = buddy.soul.name
+      const rows = journalRows(buddy.journal, await $.clock.now())
+      if (e.surface !== 'terminal') {
+        const { Svg } = $.ui.resolve(e)
+        return <Svg source={journalSvg(name, rollBones(buddy.seed), rows)} alt={journalAlt(name, rows)} />
+      }
+
+      return (
+        <Box flexDirection="column">
+          <Text bold>{journalHeader(name)}</Text>
+          {rows.length === 0
+            ? [<Text dimColor>{emptyJournal(name)}</Text>]
+            : rows.map(row => (
+                <Box>
+                  <Text dimColor>{row.age + '   '}</Text>
+                  <Text>{row.text}</Text>
+                </Box>
+              ))}
         </Box>
       )
     } catch {

@@ -1,8 +1,9 @@
 import { expect, test } from 'claude-code/testing'
 
+import type { Moment } from '../types'
 import {
-  MAX_BUBBLE_W, MIN_FULL_COLS, SHIMMER, bandRows, bubbleRows, bubbleWidth, cardLines, compactLine, isCompact, nameLine,
-  pageAt, paintRuns, rightRuns, spriteTint, streakLine, wrap,
+  MAX_BUBBLE_W, MIN_FULL_COLS, SHIMMER, bandRows, bubbleRows, bubbleWidth, cardLines, compactLine, isCompact,
+  journalLines, journalRows, nameLine, pageAt, paintRuns, rightRuns, spriteTint, streakLine, wrap,
 } from './layout'
 import { zeroCounts } from './ledger'
 import { rollBones } from './roll'
@@ -207,4 +208,30 @@ test('the right-hand column: the bubble when there is one, else the prop after a
     talking.bubble.map(row => ' ' + row),
   )
   expect(rightRuns(['', '', '', '', ''], null)).toEqual(Array.from({ length: 5 }, () => [{ text: ' ' }]))
+})
+
+test('the journal reads newest first with ages padded, and its text form keeps to 11 lines', () => {
+  const noon = new Date(2026, 9, 7, 12).getTime()
+  const daysAgo = (d: number) => new Date(2026, 9, 7 - d, 12).toISOString()
+  const journal: Moment[] = [
+    { at: daysAgo(120), kind: 'away', n: 9 },
+    { at: daysAgo(15), kind: 'failRun', n: 18, group: 'shell' },
+    { at: daysAgo(1), kind: 'comeback', n: 4 },
+  ]
+  expect(journalRows(journal, noon)).toEqual([
+    { age: 'yesterday   ', text: 'a clean turn after 4 rough ones' },
+    { age: '2 weeks ago ', text: 'Claude failed 18 shell commands in a row' },
+    { age: '4 months ago', text: 'back after 9 days away' },
+  ])
+  expect(journalLines('Pip', journal, noon)).toEqual([
+    "Pip's journal",
+    'yesterday      a clean turn after 4 rough ones',
+    '2 weeks ago    Claude failed 18 shell commands in a row',
+    '4 months ago   back after 9 days away',
+  ])
+  expect(journalLines('Pip', undefined, noon)).toEqual(["Pip's journal", "Nothing in Pip's journal yet."])
+  const full: Moment[] = Array.from({ length: 20 }, (_, i) => ({ at: daysAgo(1), kind: 'turns' as const, n: i }))
+  const text = journalLines('Pip', full, noon)
+  expect(text).toHaveLength(11)
+  expect(text[1]).toBe('yesterday   19 turns together')
 })

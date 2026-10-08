@@ -42,6 +42,45 @@ export type Mood = {
 
 export type MoodEvent = 'fail' | 'clean' | 'longClean' | 'soothe'
 
+// A notable moment in a buddy's life (Memory spec section 2), kept as data: its words are made
+// when it is shown, so they can change without touching saves.
+export type MomentKind = 'failRun' | 'longTurn' | 'busyTurn' | 'turns' | 'calls' | 'comeback' | 'away'
+
+export type Moment = {
+  // When the save or visit that wrote it happened.
+  at: string
+  kind: MomentKind
+  // What the kind counts: the run, the minutes, the calls, the mark, the rough turns, the days.
+  n: number
+  // failRun only, when the whole run was in one group.
+  group?: ToolGroup
+}
+
+// Records past the ones `counts` keeps: the longest run of failed calls in one turn, the most
+// calls in one turn, and the longest run of rough turns a clean turn has ended. They track the
+// largest seen, whether or not it was logged.
+export type Bests = {
+  failRun: number
+  calls: number
+  rough: number
+}
+
+// Why a main turn ended.
+export type TurnReason = 'answer' | 'aborted' | 'refusal' | 'error'
+
+// One finished main turn, as the journal reads it (Memory spec section 3).
+export type TurnFacts = {
+  reason: TurnReason
+  durationMs: number
+  // Tool calls that ran: a denied call never did.
+  calls: number
+  // The turn's longest run of consecutive failed calls, and its group; null when it spanned groups.
+  failRun: number
+  failRunGroup: ToolGroup | null
+  // Rough turns in a row just before this one, in this session.
+  afterRough: number
+}
+
 export type Buddy = {
   seed: string
   soul: Soul
@@ -49,6 +88,10 @@ export type Buddy = {
   counts: Counts
   // Missing reads as neutral.
   mood?: Mood
+  // Oldest first, at most 20. Missing reads as empty.
+  journal?: Moment[]
+  // Missing reads as zeros.
+  bests?: Bests
 }
 
 // The `$.store` key `buddy` (Foundation spec section 1).
@@ -84,6 +127,8 @@ declare module 'claude-code' {
       lastActiveTick: number
       // Mood events not yet saved, by buddy seed (Alive spec section 2).
       pendingMood: Record<string, MoodEvent[]>
+      // Finished main turns not yet saved, by buddy seed (Memory spec section 3).
+      pendingTurns: Record<string, TurnFacts[]>
     }
   }
 }

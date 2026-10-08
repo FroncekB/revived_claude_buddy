@@ -1,9 +1,8 @@
 // The buddy's mood (Alive spec section 2): a meter that failures push toward anxious and long
 // clean turns push toward smug, a sulk left by days away, and how both fade. Pure: no $.
-import type { Mood, MoodEvent } from '../types'
+import type { Mood, MoodEvent, TurnReason } from '../types'
 import { daysBetween } from './ledger'
 import { LONG_TURN_MS } from './voice'
-import type { TurnReason } from './voice'
 
 export type MoodName = 'neutral' | 'anxious' | 'smug' | 'sulky'
 
@@ -100,23 +99,6 @@ export function turnMood(reason: TurnReason, durationMs: number, failedCalls: nu
   if (reason === 'error' || reason === 'aborted') return 'fail'
   if (reason !== 'answer' || failedCalls > 0) return null
   return durationMs > LONG_TURN_MS ? 'longClean' : 'clean'
-}
-
-// Adds `events` to a queue, keeping the newest MAX_QUEUED_MOOD.
-export function queueMood(queue: readonly MoodEvent[] | undefined, events: readonly MoodEvent[]): MoodEvent[] {
-  return [...(queue ?? []), ...events].slice(-MAX_QUEUED_MOOD)
-}
-
-// Puts `older` back in front of anything queued since, seed by seed.
-export function mergeMood(
-  older: Readonly<Record<string, readonly MoodEvent[]>>,
-  newer: Readonly<Record<string, readonly MoodEvent[]>>,
-): Record<string, MoodEvent[]> {
-  const merged: Record<string, MoodEvent[]> = {}
-  for (const seed of new Set([...Object.keys(older), ...Object.keys(newer)])) {
-    merged[seed] = queueMood(older[seed], newer[seed] ?? [])
-  }
-  return merged
 }
 
 const LINES: Record<Exclude<MoodName, 'neutral'>, string> = {

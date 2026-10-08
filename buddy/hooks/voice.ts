@@ -1,8 +1,8 @@
 // What the buddy says and when: prompts for Haiku, the speak-or-not rule,
 // reply cleanup, and fallbacks for when the model doesn't answer.
-import type { Mode, Soul, You } from '../types'
+import type { Mode, Soul, TurnReason, You } from '../types'
 import { STATS, rngFor } from './roll'
-import type { Bones, StatName } from './roll'
+import type { Bones, StatName, Stats } from './roll'
 
 // The shortest quip cooldown: PATIENCE only ever lengthens it (Alive spec section 3).
 export const QUIP_COOLDOWN_MS = 180_000
@@ -20,7 +20,6 @@ export const HEART_TICKS = 5
 export const PET_PROMPT = 'The developer just petted you. React in one line.'
 export const HELLO_PROMPT = 'The developer just called you over. Say hello in one line.'
 
-export type TurnReason = 'answer' | 'aborted' | 'refusal' | 'error'
 export type TurnSummary = {
   reason: TurnReason
   durationMs: number
@@ -31,8 +30,6 @@ export type TurnSummary = {
 export function isNotable(s: TurnSummary): boolean {
   return s.failed.length > 0 || s.reason === 'error' || s.reason === 'aborted' || s.durationMs > LONG_TURN_MS
 }
-
-type Stats = Readonly<Record<StatName, number>>
 
 // CHAOS 1 to 100 gives a chance from 0.1525 to 0.40 that an ordinary turn gets a quip.
 export function quipChance(stats: Stats): number {
@@ -114,19 +111,22 @@ export function personaSystem(soul: Soul, b: Bones, extra: readonly string[] = [
   ].join('\n')
 }
 
-export function reactionPrompt(s: TurnSummary): string {
+// `memory` is a journal line the quip may call back to (Memory spec section 4).
+export function reactionPrompt(s: TurnSummary, memory: string | null = null): string {
   const tools = Object.entries(s.tools).map(([tool, n]) => `${tool} x${n}`).join(', ') || 'none'
   return [
     'Claude just finished a turn for the developer.',
     `Outcome: ${s.reason}. Took ${Math.round(s.durationMs / 1000)}s.`,
     `Tools used: ${tools}.`,
     `Failed tools: ${s.failed.length ? s.failed.join(', ') : 'none'}.`,
+    ...(memory ? [memory] : []),
     'React in one line.',
   ].join('\n')
 }
 
-export function talkPrompt(message: string): string {
-  return `The developer says to you: ${message.slice(0, 500)}\nReply in one line.`
+// `memories` are the journal lines a talk may draw on (Memory spec section 4).
+export function talkPrompt(message: string, memories: readonly string[] = []): string {
+  return [`The developer says to you: ${message.slice(0, 500)}`, ...memories, 'Reply in one line.'].join('\n')
 }
 
 export function hatchRequest(b: Bones): { system: string; prompt: string } {

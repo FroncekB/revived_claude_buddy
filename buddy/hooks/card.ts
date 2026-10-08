@@ -2,7 +2,8 @@
 // solid stat meters on the terminal.
 
 import type { Counts, Soul, You } from '../types'
-import { countsText, streakLine, streakText, wrap } from './layout'
+import { countsText, emptyJournal, journalHeader, streakLine, streakText, wrap } from './layout'
+import type { JournalRow } from './layout'
 import { RARITY, STATS } from './roll'
 import type { Bones, Hat, Rarity } from './roll'
 import { spriteRows, topRow } from './sprites'
@@ -23,6 +24,10 @@ const W = 420
 const MID = W / 2
 const PAD = 24
 const QUOTE_WIDTH = 44
+// The journal's rows: the age at the left pad, the words 100 px in, 22 px apart.
+const JOURNAL_TOP = 76
+const JOURNAL_ROW = 22
+const JOURNAL_WORDS_X = PAD + 100
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const HAT_LABEL: Record<Hat, string> = {
   crown: 'Crown',
@@ -167,7 +172,11 @@ export function cardSvg(soul: Soul, bones: Bones, rerolls: number, history?: Car
     )
   }
 
-  const h = foot + (history ? 58 : 38)
+  return framed(color, foot + (history ? 58 : 38), marks)
+}
+
+// The card's frame around `marks`: a rounded border in the rarity color, `h` px tall.
+function framed(color: string, h: number, marks: readonly string[]): string {
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${h}" width="${W}" height="${h}" ` +
     `font-family="ui-sans-serif, system-ui, sans-serif">` +
@@ -175,6 +184,31 @@ export function cardSvg(soul: Soul, bones: Bones, rerolls: number, history?: Car
     marks.join('') +
     `</svg>`
   )
+}
+
+// The journal pane as one SVG in the card's frame (Memory spec section 5): the header in the
+// rarity color, then a row per moment, newest first.
+export function journalSvg(name: string, bones: Bones, rows: readonly JournalRow[]): string {
+  const color = FILL[bones.rarity]
+  const marks = [
+    `<text x="${PAD}" y="44" font-size="22" font-weight="700" fill="${color}">${esc(journalHeader(name))}</text>`,
+  ]
+  if (rows.length === 0) {
+    marks.push(`<text x="${PAD}" y="${JOURNAL_TOP}" font-size="12" fill="${INK}">${esc(emptyJournal(name))}</text>`)
+  }
+  rows.forEach((row, i) => {
+    const y = JOURNAL_TOP + i * JOURNAL_ROW
+    marks.push(
+      `<text x="${PAD}" y="${y}" font-size="12" fill="${INK}" fill-opacity="0.7">${esc(row.age.trim())}</text>`,
+      `<text x="${JOURNAL_WORDS_X}" y="${y}" font-size="12" fill="${INK}">${esc(row.text)}</text>`,
+    )
+  })
+  return framed(color, JOURNAL_TOP + (Math.max(1, rows.length) - 1) * JOURNAL_ROW + 24, marks)
+}
+
+export function journalAlt(name: string, rows: readonly JournalRow[]): string {
+  if (rows.length === 0) return emptyJournal(name)
+  return `${journalHeader(name)}. ${rows.map(r => `${capital(r.age.trim())}: ${r.text}.`).join(' ')}`
 }
 
 export function cardAlt(soul: Soul, bones: Bones, rerolls: number, history?: CardHistory): string {

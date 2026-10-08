@@ -1,10 +1,11 @@
 // The saved record and the /buddy subcommands. Pure: no $.
-import type { Buddy, Counts, Mode, MoodEvent, Saved, SavedV1, Soul } from '../types'
+import type { Buddy, Counts, Mode, MoodEvent, Saved, SavedV1, Soul, TurnFacts } from '../types'
+import { addMoments, awayMoment, bestsOf, milestones, noticeTurns } from './journal'
 import { addCounts, localDay, visit, zeroCounts } from './ledger'
 import { applyMood, sulkFor, withSulk } from './mood'
 
 export const STORE_KEY = 'buddy'
-export const USAGE = 'Usage: /buddy [pet | card | mute | unmute | off | reroll [confirm]]'
+export const USAGE = 'Usage: /buddy [pet | card | journal | mute | unmute | off | reroll [confirm]]'
 
 // What the store holds, as this build reads it (Foundation spec section 1).
 export type Stored =
@@ -53,19 +54,31 @@ export type Change =
       pending: Readonly<Record<string, Counts>>
       // Mood events by seed, replayed in order (Alive spec section 2).
       mood?: Readonly<Record<string, readonly MoodEvent[]>>
+      // Finished main turns by seed, for the journal (Memory spec section 3).
+      turns?: Readonly<Record<string, readonly TurnFacts[]>>
     }
   | { kind: 'visit' }
 
 // Today's visit (Foundation spec section 3). A new day after two or more missed ones leaves the
-// active buddy sulking (Alive spec section 2). Returns `saved` itself when the day is not new.
+// active buddy sulking (Alive spec section 2), and after three or more it goes in that buddy's
+// journal (Memory spec section 3). Returns `saved` itself when the day is not new.
 function arrive(saved: Saved, now: number): Saved {
   const today = localDay(now)
   const you = visit(saved.you, today)
   if (you === saved.you) return saved
   const sulk = sulkFor(saved.you.lastDay, today)
+  const away = awayMoment(saved.you.lastDay, today, now)
   const buddies =
-    sulk > 0
-      ? saved.buddies.map(b => (b.seed === saved.active ? { ...b, mood: withSulk(b.mood, sulk, now) } : b))
+    sulk > 0 || away
+      ? saved.buddies.map(b =>
+          b.seed === saved.active
+            ? {
+                ...b,
+                ...(sulk > 0 ? { mood: withSulk(b.mood, sulk, now) } : {}),
+                ...(away ? { journal: addMoments(b.journal, [away]) } : {}),
+              }
+            : b,
+        )
       : saved.buddies
   return { ...saved, you, buddies }
 }
@@ -108,12 +121,19 @@ export function applyChange(saved: Saved | null, change: Change, now: number): S
       const buddies = arrived.buddies.map(b => {
         const more = change.pending[b.seed]
         const felt = change.mood?.[b.seed] ?? []
-        if (!more && felt.length === 0) return b
+        const facts = change.turns?.[b.seed] ?? []
+        if (!more && felt.length === 0 && facts.length === 0) return b
         added = true
+        // Records are judged against what is stored, before this save's counts are added.
+        const counts = more ? addCounts(b.counts, more) : b.counts
+        const noticed = noticeTurns(facts, bestsOf(b), b.counts.longestTurnMs, now)
+        const moments = [...noticed.moments, ...milestones(b.counts, counts, now)]
         return {
           ...b,
-          ...(more ? { counts: addCounts(b.counts, more) } : {}),
+          ...(more ? { counts } : {}),
           ...(felt.length > 0 ? { mood: applyMood(b.mood, felt, now) } : {}),
+          ...(facts.length > 0 ? { bests: { ...b.bests, ...noticed.bests } } : {}),
+          ...(moments.length > 0 ? { journal: addMoments(b.journal, moments) } : {}),
         }
       })
       return added || arrived !== saved ? { ...arrived, buddies } : null
@@ -127,9 +147,10 @@ export function applyChange(saved: Saved | null, change: Change, now: number): S
 }
 
 export type Sub =
-  | 'show' | 'pet' | 'card' | 'mute' | 'unmute' | 'off' | 'reroll' | 'reroll-confirm' | 'debug' | 'debug-off' | 'usage'
+  | 'show' | 'pet' | 'card' | 'journal' | 'mute' | 'unmute' | 'off' | 'reroll' | 'reroll-confirm' | 'debug' | 'debug-off'
+  | 'usage'
 
-const SIMPLE: readonly string[] = ['pet', 'card', 'mute', 'unmute', 'off']
+const SIMPLE: readonly string[] = ['pet', 'card', 'journal', 'mute', 'unmute', 'off']
 
 export function parseSub(args: string): Sub {
   const words = args.trim().toLowerCase().split(/\s+/).filter(Boolean)

@@ -1,8 +1,9 @@
 // The band's text layout: bubble wrapping, full and compact rows, and the card.
-import type { Counts, Soul, You } from '../types'
+import type { Counts, Moment, Soul, You } from '../types'
+import { ageText, momentText, readable } from './journal'
 import { RARITY, STATS } from './roll'
 import type { Bones } from './roll'
-import { totalCalls } from './ledger'
+import { totalCalls, withCommas } from './ledger'
 import { PAINT } from './sprites'
 import type { Prop } from './sprites'
 
@@ -154,7 +155,6 @@ export function cardLines(soul: Soul, bones: Bones, rerolls: number): string[] {
   ]
 }
 
-const withCommas = (n: number) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 const howMany = (n: number, noun: string) => `${withCommas(n)} ${noun}${n === 1 ? '' : 's'}`
 
 // The person's streak: the first half of the card's streak line.
@@ -169,4 +169,27 @@ export function countsText(counts: Counts): string {
 
 export function streakLine(you: You, counts: Counts): string {
   return `${streakText(you)} · ${countsText(counts)}`
+}
+
+// One journal row: how long ago, padded to the widest, and what happened.
+export type JournalRow = { age: string; text: string }
+
+export const journalHeader = (name: string) => `${name}'s journal`
+export const emptyJournal = (name: string) => `Nothing in ${name}'s journal yet.`
+
+// A journal's moments newest first, with their ages padded to the widest (Memory spec section 5).
+export function journalRows(journal: readonly Moment[] | undefined, now: number): JournalRow[] {
+  const rows = readable(journal)
+    .reverse()
+    .map(m => ({ age: ageText(m.at, now), text: momentText(m) }))
+  const width = Math.max(0, ...rows.map(r => r.age.length))
+  return rows.map(r => ({ ...r, age: r.age.padEnd(width) }))
+}
+
+// The journal as text, where no pane is placed: the header and the newest `limit` moments, inside
+// the 12 lines the card's text keeps to.
+export function journalLines(name: string, journal: readonly Moment[] | undefined, now: number, limit = 10): string[] {
+  const rows = journalRows(journal, now).slice(0, limit)
+  if (rows.length === 0) return [journalHeader(name), emptyJournal(name)]
+  return [journalHeader(name), ...rows.map(r => `${r.age}   ${r.text}`)]
 }
