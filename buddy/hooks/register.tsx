@@ -262,9 +262,11 @@ async function speakUp($: EngineInterface, turn: number) {
 }
 
 // The mood a buddy shows now: its saved mood with this session's unsaved events, decayed to now.
+// The saved mood is read afresh, since a save may have moved it after `who` was read.
 async function moodNow($: EngineInterface, who: Who, now: number): Promise<MoodName> {
+  const saved = (await read($, record))?.buddies.find(b => b.seed === who.seed)
   const queued = (await read($, pendingMood))[who.seed] ?? []
-  return moodOf(applyMood(who.mood, queued, now), now)
+  return moodOf(applyMood(saved ? saved.mood : who.mood, queued, now), now)
 }
 
 // The moment, for the persona prompt: the mood with this session's unsaved events, and the day.
@@ -342,6 +344,16 @@ async function reply($: EngineInterface, who: Who, prompt: string) {
   await update($, lastReplyAt, () => now)
   const text = now - last < REPLY_FLOOR_MS ? null : await ask($, who, bones, prompt, 'reply')
   await showBubble($, text ?? cannedLine(bones, cannedCount++, Math.random()))
+}
+
+// A pet or a talk: counted and saved before the reply is asked for. A save in progress holds the
+// soothe in neither the queue nor the record, so a reply asked for meanwhile would hear the old mood.
+async function soothe($: EngineInterface, event: CountEvent, who: Who, prompt: string) {
+  try {
+    await countAndFlush($, event, ['soothe'])
+  } finally {
+    await reply($, who, prompt)
+  }
 }
 
 // A finished main turn: speak only when shouldQuip says so, never muted, never while a call is pending.
@@ -425,8 +437,7 @@ async function runBuddy($: EngineInterface, sub: Sub): Promise<string | undefine
       if (saved.mode === 'off') return hidden
       const now = await read($, tick)
       await update($, heartsUntil, () => now + HEART_TICKS)
-      later($, () => countAndFlush($, { kind: 'pet' }, ['soothe']))
-      later($, () => reply($, buddy, PET_PROMPT))
+      later($, () => soothe($, { kind: 'pet' }, buddy, PET_PROMPT))
       return undefined
     }
     case 'card': {
@@ -637,8 +648,7 @@ export const register: Register = on => {
       const bare = !e.attachments || e.attachments.length === 0
       const message = buddy && fromPerson && bare ? matchAddress(buddy.soul.name, e.text) : null
       if (buddy && message !== null) {
-        later($, () => countAndFlush($, { kind: 'talk' }, ['soothe']))
-        later($, () => reply($, buddy, talkPrompt(message)))
+        later($, () => soothe($, { kind: 'talk' }, buddy, talkPrompt(message)))
         return { drop: `(to ${buddy.soul.name})` }
       }
     } catch {

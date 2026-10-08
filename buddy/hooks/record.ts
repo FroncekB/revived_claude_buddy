@@ -82,14 +82,17 @@ export function applyChange(saved: Saved | null, change: Change, now: number): S
         const born = fresh(change.seed, change.soul, counted)
         return { ...born, you: visit(born.you, today) }
       }
+      // The visit comes first, so a sulk from days away lands on the buddy that was left alone,
+      // never on the new one (Alive spec section 2).
+      const arrived = arrive(saved, now)
       const retiredAt = new Date(now).toISOString()
       return {
-        ...saved,
+        ...arrived,
         mode: 'on',
-        rerolls: saved.rerolls + counted,
+        rerolls: arrived.rerolls + counted,
         active: change.seed,
         buddies: [
-          ...saved.buddies.map(b => (b.seed === saved.active ? { ...b, retiredAt } : b)),
+          ...arrived.buddies.map(b => (b.seed === arrived.active ? { ...b, retiredAt } : b)),
           { seed: change.seed, soul: change.soul, retiredAt: null, counts: zeroCounts() },
         ],
       }

@@ -1189,3 +1189,69 @@ test("the persona hears the buddy's mood and the day", async ($, on) => {
   expect(pet).toContain('Mood: anxious, after a run of failures. Let it color the line.')
   expect(pet).toContain('Today is Independence Day.')
 })
+
+// A pet and a talk each take one step off the sulk before the buddy answers.
+const SOOTHERS: [string, ($: Engine) => Promise<unknown>][] = [
+  ['a pet', $ => runner($)('pet')],
+  ['a talk', $ => $.prompt.submit({ text: 'Pip, sorry I was away.', wait: false, origin: { kind: 'composer' } })],
+]
+
+for (const [what, soothe] of SOOTHERS) {
+  test(`the answer to ${what} hears the sulk it eased, even while its save is slow`, async ($, on) => {
+    // 2026-10-04 to 2026-10-07 misses two days: sulk 1, which one soothe takes away.
+    const store = heldStore(on, { ...SAVED, you: { ...SAVED.you, lastDay: '2026-10-04' } })
+    const clock = world(on, null)
+    engineBelow(on)
+    const systems: string[] = []
+    on('model.complete', async (_$, e) => {
+      systems.push(e.system ?? '')
+      return { value: ok('Fine.') }
+    })
+    await $.session.start(START)
+    await clock.settle()
+    await soothe($)
+    // The save the soothe starts is held at the store, as a slow disk would hold it.
+    store.shared.held = true
+    await clock.settle()
+    await idle()
+    store.release()
+    await clock.settle()
+    await idle()
+    expect(activeOf(store.shared.row)?.mood?.sulk).toBe(0)
+    expect(systems).toHaveLength(1)
+    expect(systems[0]).not.toContain('Mood: sulky')
+  })
+}
+
+test('a reply cancels a reaction still waiting on the model, and the reaction never shows', async ($, on) => {
+  const clock = world(on, { buddy: RECORD })
+  engineBelow(on)
+  // Reactions wait for the test; replies answer at once.
+  let release!: () => void
+  const gate = new Promise<void>(resolve => {
+    release = resolve
+  })
+  const prompts: string[] = []
+  on('model.complete', async (_$, e) => {
+    prompts.push(e.prompt)
+    if (!e.prompt.startsWith('Claude just finished a turn')) return { value: ok('Hello there.') }
+    await gate
+    return { value: ok('Ouch.') }
+  })
+  await $.session.start(START)
+  await clock.settle()
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  await $.turn.complete(TURN)
+  await clock.advance(10)
+  for (let i = 0; i < 100 && prompts.length === 0; i++) await Promise.resolve()
+  expect(prompts).toHaveLength(1)
+  await $.prompt.submit({ text: 'Pip, how are you?', wait: false, origin: { kind: 'composer' } })
+  await clock.advance(10)
+  for (let i = 0; i < 100 && prompts.length === 1; i++) await Promise.resolve()
+  release()
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await ui.find({ text: /Hello there\./ })).toBeDefined()
+  expect(await ui.find({ text: /Ouch\./ })).toBeUndefined()
+  expect(prompts.filter(p => p.startsWith('Claude just finished a turn'))).toHaveLength(1)
+})

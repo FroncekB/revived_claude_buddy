@@ -150,6 +150,16 @@ test('a new day after two or more missed ones leaves the active buddy sulking', 
   expect(applyChange(visited, { kind: 'visit' }, NOON)).toBeNull()
 })
 
+test("a reroll after days away leaves the sulk with the buddy left alone, and the new one starts neutral", () => {
+  const away: Saved = { ...migrate(V1), you: { lastDay: '2026-10-02', streak: 4, bestStreak: 4, days: 9 } }
+  const rerolled = applyChange(away, { kind: 'reroll', seed: 'n', soul: SOUL }, NOON)!
+  // The first save after it finds the visit already made, so it moves no mood.
+  const flushed = applyChange(rerolled, { kind: 'flush', pending: {}, mood: { n: ['longClean'] } }, NOON)!
+  expect(flushed.buddies[0]?.mood).toMatchObject({ sulk: 3 })
+  expect(activeBuddy(flushed).mood).toMatchObject({ meter: 1, sulk: 0 })
+  expect(flushed.you.lastDay).toBe('2026-10-07')
+})
+
 test('a pet in the flush that sets the sulk still eases it by one step', () => {
   const away: Saved = { ...migrate(V1), you: { lastDay: '2026-10-02', streak: 4, bestStreak: 4, days: 9 } }
   const saved = applyChange(away, { kind: 'flush', pending: {}, mood: { s: ['soothe'] } }, NOON)!
