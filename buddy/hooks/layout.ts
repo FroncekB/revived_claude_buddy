@@ -5,8 +5,8 @@ import { ageText, momentText, readable } from './journal'
 import { RARITY, STATS } from './roll'
 import type { Bones } from './roll'
 import { totalCalls, withCommas } from './ledger'
-import { MAX_LEVEL, levelOf, stageOf, xpForLevel, xpOf } from './progress'
-import { PAINT } from './sprites'
+import { MAX_LEVEL, bonesFor, levelOf, stageOf, xpForLevel, xpOf } from './progress'
+import { PAINT, faceFor } from './sprites'
 import type { Prop } from './sprites'
 
 // A stretch of one row in one color; no color is the text color.
@@ -233,4 +233,79 @@ export function journalLines(name: string, journal: readonly Moment[] | undefine
   const rows = journalRows(journal, now).slice(0, limit)
   if (rows.length === 0) return [journalHeader(name), emptyJournal(name)]
   return [journalHeader(name), ...rows.map(r => `${r.age}   ${r.text}`)]
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+// "2026-10-07T12:00:00.000Z" as "Oct 7, 2026", read off the string so no time zone moves the day.
+export function longDate(iso: string): string {
+  const [year, month, day] = iso.slice(0, 10).split('-').map(Number)
+  return `${MONTHS[(month ?? 1) - 1]} ${day}, ${year}`
+}
+
+// "Oct 7", with its year only when that isn't `year`.
+export function shortDate(iso: string, year: number): string {
+  const [y, month, day] = iso.slice(0, 10).split('-').map(Number)
+  return `${MONTHS[(month ?? 1) - 1]} ${day}${y === year ? '' : `, ${y}`}`
+}
+
+// One buddy in the dex (Progression spec section 6).
+export type DexRow = {
+  // Its place in `buddies`, from 1. `buddies` only grows, so the number never changes.
+  number: number
+  name: string
+  // Grown, for the portrait, the face, the rarity and the species.
+  bones: Bones
+  level: number
+  stage: Stage
+  // "Oct 7 – Nov 2", or "Oct 7 – now" for the active buddy.
+  dates: string
+  active: boolean
+}
+
+export const DEX_TEXT_ROWS = 10
+
+export function dexRows(saved: Saved, now: number): DexRow[] {
+  const year = new Date(now).getFullYear()
+  return saved.buddies.map((b, i) => {
+    const level = levelOf(b.counts)
+    const active = b.seed === saved.active
+    const end = active || b.retiredAt === null ? 'now' : shortDate(b.retiredAt, year)
+    return {
+      number: i + 1,
+      name: b.soul.name,
+      bones: bonesFor(b),
+      level,
+      stage: stageOf(level),
+      dates: `${shortDate(b.soul.hatchedAt, year)} – ${end}`,
+      active,
+    }
+  })
+}
+
+// One dex row as text, its number padded to `numberWidth`:
+// "#1  (×vv×)  Pip           Lv 30 elder common dragon ★  Oct 7 – Nov 2".
+export function dexText(row: DexRow, numberWidth: number): string {
+  const b = row.bones
+  return [
+    `#${row.number}`.padEnd(numberWidth),
+    faceFor(b.species, b.eye).padEnd(6),
+    row.name.padEnd(12),
+    `Lv ${row.level} ${row.stage} ${b.rarity} ${b.species} ${'★'.repeat(RARITY[b.rarity].stars)}`,
+    row.dates,
+  ].join('  ')
+}
+
+// The dex as text, where no pane is placed: the count, a note of any older ones, then the newest
+// ten in dex order, inside the 12 lines the card's text keeps to.
+export function dexLines(saved: Saved, now: number): string[] {
+  const rows = dexRows(saved, now)
+  const width = `#${rows.length}`.length
+  const shown = rows.slice(-DEX_TEXT_ROWS)
+  const earlier = rows.length - shown.length
+  return [
+    `Buddydex: ${rows.length} ${rows.length === 1 ? 'buddy' : 'buddies'}`,
+    ...(earlier > 0 ? [`…${earlier} earlier`] : []),
+    ...shown.map(row => dexText(row, width)),
+  ]
 }

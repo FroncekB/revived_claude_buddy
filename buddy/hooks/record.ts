@@ -7,7 +7,7 @@ import { applyMood, sulkFor, withSulk } from './mood'
 import { grewMoments } from './progress'
 
 export const STORE_KEY = 'buddy'
-export const USAGE = 'Usage: /buddy [pet | card | journal | mute | unmute | off | reroll [confirm]]'
+export const USAGE = 'Usage: /buddy [pet | card | journal | dex | mute | unmute | off | reroll [confirm]]'
 
 // What the store holds, as this build reads it (Foundation spec section 1).
 export type Stored =
@@ -150,23 +150,28 @@ export function applyChange(saved: Saved | null, change: Change, now: number): S
 }
 
 export type Sub =
-  | 'show' | 'pet' | 'card' | 'journal' | 'mute' | 'unmute' | 'off' | 'reroll' | 'reroll-confirm' | 'debug' | 'debug-off'
-  | 'usage'
+  | 'show' | 'pet' | 'card' | 'journal' | 'dex' | 'mute' | 'unmute' | 'off' | 'reroll' | 'reroll-confirm' | 'debug'
+  | 'debug-off' | 'usage'
 
-const SIMPLE: readonly string[] = ['pet', 'card', 'journal', 'mute', 'unmute', 'off']
+// A /buddy command as parsed: the subcommand, and what it was given (Progression spec section 7).
+export type Parsed = { sub: Sub }
 
-export function parseSub(args: string): Sub {
-  const words = args.trim().toLowerCase().split(/\s+/).filter(Boolean)
-  const [first, second] = words
-  if (first === undefined) return 'show'
+const SIMPLE: readonly string[] = ['pet', 'card', 'journal', 'dex', 'mute', 'unmute', 'off']
+
+// Subcommand words match in any case; anything after them keeps the case it was typed in.
+export function parseSub(args: string): Parsed {
+  const words = args.trim().split(/\s+/).filter(Boolean)
+  const first = words[0]?.toLowerCase()
+  const second = words[1]?.toLowerCase()
+  if (first === undefined) return { sub: 'show' }
   if (first === 'reroll') {
-    if (words.length === 1) return 'reroll'
-    return words.length === 2 && second === 'confirm' ? 'reroll-confirm' : 'usage'
+    if (words.length === 1) return { sub: 'reroll' }
+    return { sub: words.length === 2 && second === 'confirm' ? 'reroll-confirm' : 'usage' }
   }
   // Hidden: left out of USAGE, the argument hint and the README on purpose.
   if (first === 'debug') {
-    if (words.length === 1) return 'debug'
-    return words.length === 2 && second === 'off' ? 'debug-off' : 'usage'
+    if (words.length === 1) return { sub: 'debug' }
+    return { sub: words.length === 2 && second === 'off' ? 'debug-off' : 'usage' }
   }
-  return words.length === 1 && SIMPLE.includes(first) ? (first as Sub) : 'usage'
+  return { sub: words.length === 1 && SIMPLE.includes(first) ? (first as Sub) : 'usage' }
 }

@@ -1778,3 +1778,67 @@ test('the card shows the level, the XP to the next one, and your achievements, o
   expect(svg?.props.alt).toContain('. Level 12, adult, 12,100 of 14,400 XP. 2 of 17 achievements: Marathon, Grown up. Hatched')
   expect(String(svg?.props.source)).toContain('>Lv 12 adult</text>')
 })
+
+// Pip, a common dragon ('swap-1') retired two days ago, and Mochi, a common axolotl ('swap-2'), here now.
+const TWO: Saved = {
+  ...SAVED,
+  rerolls: 1,
+  active: 'swap-2',
+  buddies: [
+    {
+      seed: 'swap-1',
+      soul: { ...RECORD.soul, hatchedAt: '2026-10-01T12:00:00.000Z' },
+      retiredAt: '2026-10-05T12:00:00.000Z',
+      counts: zeroCounts(),
+    },
+    {
+      seed: 'swap-2',
+      soul: { ...RECORD.soul, name: 'Mochi', hatchedAt: '2026-10-05T12:00:00.000Z' },
+      retiredAt: null,
+      counts: zeroCounts(),
+    },
+  ],
+}
+const dexPane = () => ({ ...pane(), requestId: 'dex', props: { ...pane().props, title: 'Buddydex' } })
+
+test('dex opens a pane listing every buddy oldest first, the active one in bold, even while off', async ($, on) => {
+  const clock = world(on, { buddy: { ...TWO, mode: 'off' } })
+  await $.session.start(START)
+  await clock.settle()
+  expect(await runner($)('dex')).toBeUndefined()
+  const terminal = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...dexPane() })
+  const texts = await terminal.findAll({ type: 'Text' })
+  expect(texts.map(t => t.text)).toEqual([
+    'Buddydex',
+    `#1  (×vv×)  ${'Pip'.padEnd(12)}  Lv 1 hatchling common dragon ★  Oct 1 – Oct 5`,
+    `#2  }◉.◉{   ${'Mochi'.padEnd(12)}  Lv 1 hatchling common axolotl ★  Oct 5 – now`,
+  ])
+  expect(texts.map(t => t.props.bold)).toEqual([true, false, true])
+  const desktop = await $.ui.mount({ plugin: 'buddy', surface: 'desktop', ...dexPane() })
+  const svgs = await desktop.findAll({ type: 'Svg' })
+  expect(svgs).toHaveLength(1)
+  expect(svgs[0]?.props.alt).toBe(
+    'Buddydex, 2 buddies. Number 1, Pip, level 1 hatchling common dragon, Oct 1 to Oct 5. ' +
+      'Number 2, Mochi, level 1 hatchling common axolotl, Oct 5 to now.',
+  )
+})
+
+test('where no pane can be placed, dex prints a count and the newest ten', async ($, on) => {
+  const many: Saved = {
+    ...SAVED,
+    active: 'b13',
+    buddies: Array.from({ length: 14 }, (_, i) => ({
+      ...SAVED.buddies[0]!,
+      seed: `b${i}`,
+      retiredAt: i === 13 ? null : '2026-10-06T12:00:00.000Z',
+    })),
+  }
+  const clock = world(on, { buddy: many }, false)
+  await $.session.start(START)
+  await clock.settle()
+  const lines = ((await runner($)('dex')) ?? '').split('\n')
+  expect(lines).toHaveLength(12)
+  expect(lines.slice(0, 2)).toEqual(['Buddydex: 14 buddies', '…4 earlier'])
+  expect(lines[2]).toMatch(/^#5 /)
+  expect(lines[11]).toMatch(/^#14 .* – now$/)
+})

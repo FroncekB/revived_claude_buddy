@@ -4,13 +4,13 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { Buddy, Counts, Moment, MoodEvent, Saved, TurnFacts } from '../types'
 import { newsOf } from './achievements'
 import { dayInfo } from './calendar'
-import { cardAlt, cardSvg, journalAlt, journalSvg, meter } from './card'
+import { cardAlt, cardSvg, dexAlt, dexSvg, journalAlt, journalSvg, meter } from './card'
 import {
   MAX_QUEUED_TURNS, addCall, isRough, memoryLine, momentKey, noCalls, recall, talkMemories, turnFacts,
 } from './journal'
 import {
-  achievementsText, bandRows, cardLines, cardProgress, compactLine, emptyJournal, isCompact, journalHeader, journalLines,
-  journalRows, levelText, nameLine, rightRuns, spriteTint, streakLine,
+  achievementsText, bandRows, cardLines, cardProgress, compactLine, dexLines, dexRows, dexText, emptyJournal, isCompact,
+  journalHeader, journalLines, journalRows, levelText, nameLine, rightRuns, spriteTint, streakLine,
 } from './layout'
 import { addCounts, countEvent, mergePending, toolGroup, zeroCounts } from './ledger'
 import type { CountEvent } from './ledger'
@@ -21,7 +21,7 @@ import type { MoodName } from './mood'
 import { bonesFor, levelOf } from './progress'
 import { mergeQueues, queueNewest } from './queue'
 import { STORE_KEY, USAGE, activeBuddy, applyChange, classify, parseSub } from './record'
-import type { Change, Stored, Sub } from './record'
+import type { Change, Parsed, Stored } from './record'
 import { RARITY, STATS, rollBones } from './roll'
 import type { Bones } from './roll'
 import { eggRows, frameAt } from './sprites'
@@ -71,6 +71,7 @@ const pendingTurns = atom({ plugin: 'buddy', key: 'pendingTurns' } as const, {})
 
 const CARD = 'card'
 const JOURNAL = 'journal'
+const DEX = 'dex'
 const NO_BUDDY = 'No buddy yet. Run /buddy to hatch one.'
 const SAVE_FAILED = 'Could not save your buddy; it lives for this session only.'
 
@@ -515,7 +516,8 @@ async function hatch($: EngineInterface, kind: 'hatch' | 'reroll'): Promise<stri
   }
 }
 
-async function runBuddy($: EngineInterface, sub: Sub): Promise<string | undefined> {
+async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | undefined> {
+  const { sub } = parsed
   if (sub === 'usage') return USAGE
   const stored = await current($)
   if (stored.kind === 'none') return sub === 'show' ? hatch($, 'hatch') : NO_BUDDY
@@ -557,6 +559,12 @@ async function runBuddy($: EngineInterface, sub: Sub): Promise<string | undefine
       // A surface that places no panes gets the newest ten as text instead.
       if (opened.isPlaced) return undefined
       return journalLines(name, buddy.journal, await $.clock.now()).join('\n')
+    }
+    case 'dex': {
+      const opened = await $.ui.open({ id: DEX, title: 'Buddydex', closeOnEscape: true })
+      // A surface that places no panes gets the count and the newest ten as text instead.
+      if (opened.isPlaced) return undefined
+      return dexLines(saved, await $.clock.now()).join('\n')
     }
     case 'mute':
       return (await commit($, { kind: 'mode', mode: 'muted' })) ?? `${name} will stay quiet unless spoken to.`
@@ -672,7 +680,7 @@ export const register: Register = on => {
       await $.command.register({
         name: 'buddy',
         description: 'Hatch, pet, or manage your terminal buddy',
-        argumentHint: '[pet | card | journal | mute | unmute | off | reroll [confirm]]',
+        argumentHint: '[pet | card | journal | dex | mute | unmute | off | reroll [confirm]]',
         immediate: true,
       })
     } catch {
@@ -935,6 +943,33 @@ export const register: Register = on => {
                   <Text>{row.text}</Text>
                 </Box>
               ))}
+        </Box>
+      )
+    } catch {
+      return next(e)
+    }
+  })
+
+  // The dex pane (Progression spec section 6): every buddy you've had, oldest first.
+  on('ui.render', { component: 'Pane', requestId: DEX }, async ($, e, next) => {
+    try {
+      const { Box, Text } = $.ui.resolve(e)
+      const saved = await read($, record)
+      if (!saved) return <Text dimColor>{NO_BUDDY}</Text>
+
+      const rows = dexRows(saved, await $.clock.now())
+      if (e.surface !== 'terminal') {
+        const { Svg } = $.ui.resolve(e)
+        return <Svg source={dexSvg(rows)} alt={dexAlt(rows)} />
+      }
+
+      const width = `#${rows.length}`.length
+      return (
+        <Box flexDirection="column">
+          <Text bold>Buddydex</Text>
+          {rows.map(row => (
+            <Text bold={row.active}>{dexText(row, width)}</Text>
+          ))}
         </Box>
       )
     } catch {

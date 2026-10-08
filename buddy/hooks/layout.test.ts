@@ -3,8 +3,8 @@ import { expect, test } from 'claude-code/testing'
 import type { Moment, Saved } from '../types'
 import {
   MAX_BUBBLE_W, MIN_FULL_COLS, SHIMMER, achievementsText, bandRows, bubbleRows, bubbleWidth, cardLines, cardProgress,
-  compactLine, isCompact, journalLines, journalRows, levelText, nameLine, pageAt, paintRuns, rightRuns, spriteTint,
-  streakLine, wrap,
+  compactLine, dexLines, dexRows, dexText, isCompact, journalLines, journalRows, levelText, longDate, nameLine, pageAt,
+  paintRuns, rightRuns, shortDate, spriteTint, streakLine, wrap,
 } from './layout'
 import { zeroCounts } from './ledger'
 import { rollBones } from './roll'
@@ -280,4 +280,55 @@ test("a card's progress: the level from the buddy's own counts, and your achieve
     earned: ['Shell regular', 'Survivor', 'Marathon'],
     retiredAt: null,
   })
+})
+
+// Pip, a common dragon ('swap-1') retired on Nov 2 at level 30, and Mochi, a common axolotl
+// ('swap-2') here now at level 12.
+const DEX_RECORD: Saved = {
+  schema: 2,
+  mode: 'on',
+  rerolls: 1,
+  active: 'swap-2',
+  buddies: [
+    { seed: 'swap-1', soul: SOUL, retiredAt: '2026-11-02T12:00:00.000Z', counts: { ...zeroCounts(), turns: 8_410 } },
+    {
+      seed: 'swap-2',
+      soul: { ...SOUL, name: 'Mochi', hatchedAt: '2026-11-02T12:00:00.000Z' },
+      retiredAt: null,
+      counts: { ...zeroCounts(), turns: 1_210 },
+    },
+  ],
+  you: { lastDay: '2026-11-03', streak: 1, bestStreak: 1, days: 1 },
+}
+const NOV3 = new Date(2026, 10, 3, 12).getTime()
+
+test('dates read off the string, with the year only when it is not this one', () => {
+  expect(longDate('2026-10-07T23:30:00.000Z')).toBe('Oct 7, 2026')
+  expect(shortDate('2026-10-07T23:30:00.000Z', 2026)).toBe('Oct 7')
+  expect(shortDate('2025-12-31T09:00:00.000Z', 2026)).toBe('Dec 31, 2025')
+})
+
+test('the dex lists every buddy in the order you had them, each at its own level and stage', () => {
+  const rows = dexRows(DEX_RECORD, NOV3)
+  expect(rows.map(r => [r.number, r.name, r.level, r.stage, r.dates, r.active])).toEqual([
+    [1, 'Pip', 30, 'elder', 'Oct 7 – Nov 2', false],
+    [2, 'Mochi', 12, 'adult', 'Nov 2 – now', true],
+  ])
+  expect(dexText(rows[0]!, 2)).toBe(`#1  (×vv×)  ${'Pip'.padEnd(12)}  Lv 30 elder common dragon ★  Oct 7 – Nov 2`)
+  expect(dexText(rows[1]!, 3)).toBe(`#2   }◉.◉{   ${'Mochi'.padEnd(12)}  Lv 12 adult common axolotl ★  Nov 2 – now`)
+})
+
+test('the text dex is a count, a note of any older ones, then at most the newest ten', () => {
+  const many = (count: number): Saved => ({
+    ...DEX_RECORD,
+    active: `b${count - 1}`,
+    buddies: Array.from({ length: count }, (_, i) => ({ ...DEX_RECORD.buddies[1]!, seed: `b${i}` })),
+  })
+  expect(dexLines(many(1), NOV3)[0]).toBe('Buddydex: 1 buddy')
+  expect(dexLines(many(10), NOV3)).toHaveLength(11)
+  const lines = dexLines(many(14), NOV3)
+  expect(lines).toHaveLength(12)
+  expect(lines.slice(0, 2)).toEqual(['Buddydex: 14 buddies', '…4 earlier'])
+  expect(lines[2]).toMatch(/^#5 {3}/)
+  expect(lines[11]).toMatch(/^#14 {2}.* – now$/)
 })

@@ -1,7 +1,9 @@
 import { expect, test } from 'claude-code/testing'
 
 import { ACHIEVEMENTS } from './achievements'
-import { cardAlt, cardSvg, journalAlt, journalSvg, meter, radarPoint, statAlt } from './card'
+import type { Saved } from '../types'
+import { cardAlt, cardSvg, dexAlt, dexSvg, journalAlt, journalSvg, meter, radarPoint, statAlt } from './card'
+import { dexRows } from './layout'
 import type { CardProgress } from './layout'
 import { zeroCounts } from './ledger'
 import type { Bones } from './roll'
@@ -199,4 +201,47 @@ test('the card grows with its chips, and progress adds 70 px under the last row'
   const all = cardSvg(SOUL, BONES, 0, undefined, { ...PROGRESS, earned: ACHIEVEMENTS.map(a => a.title) })
   expect(heightOf(all)).toBeGreaterThan(heightOf(none) + 60)
   expect(heightOf(none)).toBe(heightOf(cardSvg(SOUL, BONES, 0)) + 70)
+})
+
+// Pip, a common dragon retired on Nov 2 at level 30, and Mochi, a common axolotl here now at level 12.
+const DEX_RECORD: Saved = {
+  schema: 2,
+  mode: 'on',
+  rerolls: 1,
+  active: 'swap-2',
+  buddies: [
+    {
+      seed: 'swap-1',
+      soul: { ...SOUL, name: 'Pip' },
+      retiredAt: '2026-11-02T12:00:00.000Z',
+      counts: { ...zeroCounts(), turns: 8_410 },
+    },
+    {
+      seed: 'swap-2',
+      soul: { ...SOUL, name: 'Mochi', hatchedAt: '2026-11-02T12:00:00.000Z' },
+      retiredAt: null,
+      counts: { ...zeroCounts(), turns: 1_210 },
+    },
+  ],
+  you: { lastDay: '2026-11-03', streak: 1, bestStreak: 1, days: 1 },
+}
+const NOV3 = new Date(2026, 10, 3, 12).getTime()
+
+test('the dex is a tile per buddy, three across, the active one outlined; its alt reads them out', () => {
+  const rows = dexRows(DEX_RECORD, NOV3)
+  const svg = dexSvg(rows)
+  expect(svg).toContain('>Buddydex</text>')
+  expect(svg).toContain('>#1 Pip</text>')
+  expect(svg).toContain('>elder dragon</text>')
+  expect(svg).toContain('>Oct 7 – Nov 2</text>')
+  expect(svg).toContain('>#2 Mochi</text>')
+  // The frame and the active tile are the only outlines.
+  expect(svg.match(/stroke-width="2"/g)).toHaveLength(2)
+  // A fourth buddy starts a second row of tiles, 146 px down.
+  expect(heightOf(dexSvg([...rows, ...rows]))).toBe(heightOf(svg) + 146)
+  expect(dexSvg([{ ...rows[0]!, name: '<Pip>' }])).toContain('>#1 &lt;Pip&gt;</text>')
+  expect(dexAlt(rows)).toBe(
+    'Buddydex, 2 buddies. Number 1, Pip, level 30 elder common dragon, Oct 7 to Nov 2. ' +
+      'Number 2, Mochi, level 12 adult common axolotl, Nov 2 to now.',
+  )
 })
