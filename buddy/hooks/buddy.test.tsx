@@ -1300,9 +1300,11 @@ test('a denied call leaves a run of failures going, a success ends it, and a sub
   const fail = () => $.tool.call({ tool: 'Bash', command: 'false' })
   // ToolCallReserved omits agentId, so a fresh literal fails the excess-property check; a hoisted const does not.
   const fromSubagent = { tool: 'Bash', command: 'false', agentId: 'a1' } as const
-  // Three failures, a success, then three more with a subagent's failure among them: no run of five.
+  // Three failures, a success, then four more with a subagent's failure among them: the main
+  // conversation's run is four, and reaches five only if the subagent's failure counted.
   for (let i = 0; i < 3; i++) await fail()
   await $.tool.call({ tool: 'Read', file_path: '/x' })
+  await fail()
   await fail()
   await $.tool.call(fromSubagent)
   await fail()
