@@ -177,20 +177,32 @@ test('a flush notices turns against the stored bests, saves the bests, and drops
   const saved = applyChange(migrate(V1), { kind: 'flush', pending: {}, turns: { s: [run], gone: [run] } }, NOON)!
   expect(saved.buddies).toHaveLength(1)
   expect(activeBuddy(saved).journal).toEqual([{ at: AT, kind: 'failRun', n: 6, group: 'shell' }])
-  expect(activeBuddy(saved).bests).toEqual({ failRun: 6, calls: 3 })
+  expect(activeBuddy(saved).bests).toEqual({ failRun: 6, calls: 3, rough: 0 })
   // The same turn again sets no new record.
   const again = applyChange(saved, { kind: 'flush', pending: {}, turns: { s: [run] } }, NOON)!
   expect(activeBuddy(again).journal).toHaveLength(1)
+})
+
+test('a comeback is judged against the stored rough best, across flushes', () => {
+  const clean = (afterRough: number): TurnFacts => ({ ...FACTS, afterRough })
+  const flush = (saved: Saved, afterRough: number) =>
+    applyChange(saved, { kind: 'flush', pending: {}, turns: { s: [clean(afterRough)] } }, NOON)!
+  const first = flush(migrate(V1), 4)
+  expect(activeBuddy(first).journal).toEqual([{ at: AT, kind: 'comeback', n: 4 }])
+  expect(activeBuddy(first).bests).toEqual({ failRun: 0, calls: 3, rough: 4 })
+  // The same number again is no record; a longer run is.
+  expect(activeBuddy(flush(first, 4)).journal).toHaveLength(1)
+  expect(activeBuddy(flush(first, 5)).journal?.map(m => m.n)).toEqual([4, 5])
 })
 
 test('bests fields a newer build wrote survive a flush', () => {
   const base = migrate(V1)
   const future = {
     ...base,
-    buddies: base.buddies.map(b => ({ ...b, bests: { failRun: 1, calls: 1, slowest: 2 } })),
+    buddies: base.buddies.map(b => ({ ...b, bests: { failRun: 1, calls: 1, rough: 1, slowest: 2 } })),
   } as Saved
   const saved = applyChange(future, { kind: 'flush', pending: {}, turns: { s: [FACTS] } }, NOON)!
-  expect(activeBuddy(saved).bests).toEqual({ failRun: 1, calls: 3, slowest: 2 } as Bests)
+  expect(activeBuddy(saved).bests).toEqual({ failRun: 1, calls: 3, rough: 1, slowest: 2 } as Bests)
 })
 
 test('a flush that reaches turn 100 logs the milestone after the turn moments', () => {

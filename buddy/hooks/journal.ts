@@ -23,8 +23,25 @@ export const RECALL_AGE_MS = 60 * 60_000
 // A turn with this many calls echoes a busyTurn memory.
 export const BUSY_RECALL = 25
 export const TALK_MEMORIES = 3
+// A memory recalled in this session is not recalled again for this long.
+export const RECALL_REPEAT_MS = 60 * 60_000
 
-const KINDS: readonly string[] = ['failRun', 'longTurn', 'busyTurn', 'turns', 'calls', 'comeback', 'away']
+// A moment's identity for the repeat rule: a kind, a number and a time.
+export function momentKey(m: Moment): string {
+  return `${m.kind}:${m.n}:${m.at}`
+}
+
+// The kinds this build can read. `satisfies` makes the compiler flag a kind added to MomentKind
+// and left out here.
+const KINDS = {
+  failRun: true,
+  longTurn: true,
+  busyTurn: true,
+  turns: true,
+  calls: true,
+  comeback: true,
+  away: true,
+} satisfies Record<MomentKind, true>
 
 const NOUN: Record<ToolGroup, string> = {
   shell: 'shell commands',
@@ -80,7 +97,7 @@ export function turnFacts(reason: TurnFacts['reason'], durationMs: number, t: Tu
 
 // A buddy's bests; missing ones read as zero.
 export function bestsOf(b: Pick<Buddy, 'bests'>): Bests {
-  return { failRun: b.bests?.failRun ?? 0, calls: b.bests?.calls ?? 0 }
+  return { failRun: b.bests?.failRun ?? 0, calls: b.bests?.calls ?? 0, rough: b.bests?.rough ?? 0 }
 }
 
 // Walks one buddy's finished turns in order. Each record is judged against bests that rise as
@@ -94,7 +111,7 @@ export function noticeTurns(
 ): { moments: Moment[]; bests: Bests } {
   const at = iso(now)
   const moments: Moment[] = []
-  let { failRun, calls } = bests
+  let { failRun, calls, rough } = bests
   let longest = longestTurnMs
   for (const f of facts) {
     if (f.failRun > failRun && f.failRun >= FAIL_RUN_FLOOR) {
@@ -104,12 +121,16 @@ export function noticeTurns(
       moments.push({ at, kind: 'longTurn', n: Math.floor(f.durationMs / 60_000) })
     }
     if (f.calls > calls && f.calls >= BUSY_TURN_FLOOR) moments.push({ at, kind: 'busyTurn', n: f.calls })
-    if (isClean(f) && f.afterRough >= ROUGH_FLOOR) moments.push({ at, kind: 'comeback', n: f.afterRough })
+    // A comeback is a record like the rest: only a clean turn ends a run of rough ones.
+    if (isClean(f)) {
+      if (f.afterRough > rough && f.afterRough >= ROUGH_FLOOR) moments.push({ at, kind: 'comeback', n: f.afterRough })
+      rough = Math.max(rough, f.afterRough)
+    }
     failRun = Math.max(failRun, f.failRun)
     calls = Math.max(calls, f.calls)
     longest = Math.max(longest, f.durationMs)
   }
-  return { moments, bests: { failRun, calls } }
+  return { moments, bests: { failRun, calls, rough } }
 }
 
 function crossed(marks: readonly number[], before: number, after: number, kind: MomentKind, at: string): Moment[] {
@@ -132,9 +153,15 @@ export function awayMoment(lastDay: string | null, today: string, now: number): 
   return days >= AWAY_FLOOR_DAYS ? { at: iso(now), kind: 'away', n: days } : null
 }
 
-// Appends `moments`, keeping the newest MAX_MOMENTS. A missing journal is empty.
+// A stored journal as an array. Anything else, a damaged field, reads as empty.
+function stored(journal: readonly Moment[] | undefined): readonly Moment[] {
+  return Array.isArray(journal) ? journal : []
+}
+
+// Appends `moments`, keeping the newest MAX_MOMENTS. A missing or damaged journal is empty, so the
+// next save replaces a damaged one.
 export function addMoments(journal: readonly Moment[] | undefined, moments: readonly Moment[]): Moment[] {
-  return [...(journal ?? []), ...moments].slice(-MAX_MOMENTS)
+  return [...stored(journal), ...moments].slice(-MAX_MOMENTS)
 }
 
 // Adds `facts` to a queue, keeping the newest MAX_QUEUED_TURNS.
@@ -155,10 +182,15 @@ export function mergeTurns(
 }
 
 // The moments this build can read, oldest first. A newer build's kind, or a damaged entry, is
-// skipped: kept in the journal, never shown or recalled.
+// skipped: kept in the journal, never shown or recalled. A journal that isn't an array is empty.
 export function readable(journal: readonly Moment[] | undefined): Moment[] {
-  return (journal ?? []).filter(
-    m => KINDS.includes(m.kind) && Number.isFinite(m.n) && Number.isFinite(Date.parse(m.at)),
+  return stored(journal).filter(
+    m =>
+      typeof m === 'object' &&
+      m !== null &&
+      Object.hasOwn(KINDS, m.kind) &&
+      Number.isFinite(m.n) &&
+      Number.isFinite(Date.parse(m.at)),
   )
 }
 
@@ -212,8 +244,10 @@ function echoes(f: TurnFacts): MomentKind[] {
 }
 
 // The one memory a quip carries, or null (Memory spec section 4). Only memories an hour old or
-// more count. One the turn echoes comes first: the largest of its kind, the newest on a tie.
-// Otherwise, when `roll` comes in under WISDOM's chance, `pick` chooses one.
+// more count, and not one `recalled` took in the last RECALL_REPEAT_MS: `recalled` maps a
+// moment's key to the time it was last recalled. One the turn echoes comes first: the largest of
+// its kind, the newest on a tie. Otherwise, when `roll` comes in under WISDOM's chance, `pick`
+// chooses one.
 export function recall(o: {
   journal: readonly Moment[] | undefined
   facts: TurnFacts
@@ -221,15 +255,21 @@ export function recall(o: {
   stats: Stats
   roll: number
   pick: number
+  recalled?: Readonly<Record<string, number>>
 }): Moment | null {
-  const old = readable(o.journal).filter(m => o.now - Date.parse(m.at) >= RECALL_AGE_MS)
+  const recalled = o.recalled ?? {}
+  const eligible = readable(o.journal).filter(m => {
+    if (o.now - Date.parse(m.at) < RECALL_AGE_MS) return false
+    const last = recalled[momentKey(m)]
+    return last === undefined || o.now - last >= RECALL_REPEAT_MS
+  })
   for (const kind of echoes(o.facts)) {
     let best: Moment | null = null
-    for (const m of old) if (m.kind === kind && (!best || m.n >= best.n)) best = m
+    for (const m of eligible) if (m.kind === kind && (!best || m.n >= best.n)) best = m
     if (best) return best
   }
-  if (old.length === 0 || o.roll >= recallChance(o.stats)) return null
-  return old[Math.min(old.length - 1, Math.floor(o.pick * old.length))] ?? null
+  if (eligible.length === 0 || o.roll >= recallChance(o.stats)) return null
+  return eligible[Math.min(eligible.length - 1, Math.floor(o.pick * eligible.length))] ?? null
 }
 
 // The quip prompt's line for a recalled memory.

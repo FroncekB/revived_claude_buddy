@@ -1,9 +1,10 @@
 import { expect, test } from 'claude-code/testing'
 
-import type { Moment, TurnFacts } from '../types'
+import type { Bests, Moment, TurnFacts } from '../types'
 import {
-  addCall, addMoments, ageText, awayMoment, bestsOf, isClean, isRough, memoryLine, mergeTurns, milestones, momentText,
-  noCalls, noticeTurns, queueTurns, readable, recall, recallChance, talkMemories, turnFacts,
+  RECALL_REPEAT_MS, addCall, addMoments, ageText, awayMoment, bestsOf, isClean, isRough, memoryLine, mergeTurns,
+  milestones, momentKey, momentText, noCalls, noticeTurns, queueTurns, readable, recall, recallChance, talkMemories,
+  turnFacts,
 } from './journal'
 import { zeroCounts } from './ledger'
 
@@ -11,7 +12,7 @@ import { zeroCounts } from './ledger'
 const NOON = new Date(2026, 9, 7, 12).getTime()
 const AT = new Date(NOON).toISOString()
 const FACTS: TurnFacts = { reason: 'answer', durationMs: 4_000, calls: 3, failRun: 0, failRunGroup: null, afterRough: 0 }
-const NO_BESTS = { failRun: 0, calls: 0 }
+const NO_BESTS = { failRun: 0, calls: 0, rough: 0 }
 const notice = (f: Partial<TurnFacts>) => noticeTurns([{ ...FACTS, ...f }], NO_BESTS, 0, NOON).moments
 
 test('failed calls build a run; a success ends it, and a run across groups has none', () => {
@@ -70,26 +71,55 @@ test('each kind of turn moment is logged at its floor and not one under', () => 
 })
 
 test("a record must beat the buddy's best; the longest turn is the stored counts' own", () => {
-  expect(noticeTurns([{ ...FACTS, failRun: 7 }], { failRun: 7, calls: 0 }, 0, NOON).moments).toEqual([])
-  expect(noticeTurns([{ ...FACTS, calls: 80 }], { failRun: 0, calls: 80 }, 0, NOON).moments).toEqual([])
+  expect(noticeTurns([{ ...FACTS, failRun: 7 }], { failRun: 7, calls: 0, rough: 0 }, 0, NOON).moments).toEqual([])
+  expect(noticeTurns([{ ...FACTS, calls: 80 }], { failRun: 0, calls: 80, rough: 0 }, 0, NOON).moments).toEqual([])
   expect(noticeTurns([{ ...FACTS, durationMs: 900_000 }], NO_BESTS, 900_000, NOON).moments).toEqual([])
   expect(noticeTurns([{ ...FACTS, durationMs: 900_001 }], NO_BESTS, 900_000, NOON).moments).toEqual([
     { at: AT, kind: 'longTurn', n: 15 },
   ])
   expect(bestsOf({})).toEqual(NO_BESTS)
-  expect(bestsOf({ bests: { failRun: 3, calls: 40 } })).toEqual({ failRun: 3, calls: 40 })
+  expect(bestsOf({ bests: { failRun: 3, calls: 40, rough: 5 } })).toEqual({ failRun: 3, calls: 40, rough: 5 })
+  // A record saved before comebacks had a best reads it as zero.
+  expect(bestsOf({ bests: { failRun: 3, calls: 40 } as Bests })).toEqual({ failRun: 3, calls: 40, rough: 0 })
 })
 
 test('two queued turns cannot both take one record, and bests rise below the floors too', () => {
   const twice = noticeTurns([{ ...FACTS, failRun: 6 }, { ...FACTS, failRun: 6 }], NO_BESTS, 0, NOON)
   expect(twice.moments).toHaveLength(1)
-  expect(twice.bests).toEqual({ failRun: 6, calls: 3 })
+  expect(twice.bests).toEqual({ failRun: 6, calls: 3, rough: 0 })
   const longer = noticeTurns([{ ...FACTS, durationMs: 700_000 }, { ...FACTS, durationMs: 650_000 }], NO_BESTS, 0, NOON)
   expect(longer.moments).toHaveLength(1)
   expect(noticeTurns([{ ...FACTS, failRun: 2, calls: 9 }], NO_BESTS, 0, NOON)).toEqual({
     moments: [],
-    bests: { failRun: 2, calls: 9 },
+    bests: { failRun: 2, calls: 9, rough: 0 },
   })
+})
+
+test('a comeback is logged only when it ends more rough turns than any before it', () => {
+  const clean = (afterRough: number): TurnFacts => ({ ...FACTS, afterRough })
+  // A second comeback after the same number of rough turns isn't a record.
+  const same = noticeTurns([clean(4), clean(4)], NO_BESTS, 0, NOON)
+  expect(same.moments).toEqual([{ at: AT, kind: 'comeback', n: 4 }])
+  expect(same.bests.rough).toBe(4)
+  // A shorter one isn't either, and a longer one is.
+  const longer = noticeTurns([clean(4), clean(3), clean(5)], NO_BESTS, 0, NOON)
+  expect(longer.moments.map(m => m.n)).toEqual([4, 5])
+  expect(longer.bests.rough).toBe(5)
+  // Judged against the stored best too: a comeback that only ties it isn't logged.
+  expect(noticeTurns([clean(4)], { ...NO_BESTS, rough: 4 }, 0, NOON).moments).toEqual([])
+  expect(noticeTurns([clean(5)], { ...NO_BESTS, rough: 4 }, 0, NOON).moments).toEqual([{ at: AT, kind: 'comeback', n: 5 }])
+})
+
+test('the rough best rises on a clean turn below the floor, and only on a clean one', () => {
+  expect(noticeTurns([{ ...FACTS, afterRough: 2 }], NO_BESTS, 0, NOON)).toEqual({
+    moments: [],
+    bests: { failRun: 0, calls: 3, rough: 2 },
+  })
+  // A turn that isn't clean ends no run of rough ones.
+  expect(noticeTurns([{ ...FACTS, afterRough: 6, failRun: 1 }], NO_BESTS, 0, NOON).bests.rough).toBe(0)
+  expect(noticeTurns([{ ...FACTS, afterRough: 6, reason: 'refusal' }], NO_BESTS, 0, NOON).bests.rough).toBe(0)
+  // The best never falls.
+  expect(noticeTurns([{ ...FACTS, afterRough: 1 }], { ...NO_BESTS, rough: 5 }, 0, NOON).bests.rough).toBe(5)
 })
 
 test('milestones are the marks a save crosses, turns before calls', () => {
@@ -120,6 +150,11 @@ test('the journal keeps its newest 20, and the turn queue its newest 20 per seed
   expect(kept[0]?.n).toBe(1)
   expect(kept.at(-1)).toEqual({ at: AT, kind: 'away', n: 10 })
   expect(addMoments(undefined, [])).toEqual([])
+  // A damaged field reads as empty, so the next save replaces it instead of failing on it.
+  const away: Moment = { at: AT, kind: 'away', n: 9 }
+  expect(addMoments('damaged' as unknown as Moment[], [away])).toEqual([away])
+  expect(addMoments(null as unknown as Moment[], [away])).toEqual([away])
+  expect(addMoments({ 0: away, length: 1 } as unknown as Moment[], [away])).toEqual([away])
   const queued = queueTurns(undefined, Array.from({ length: 25 }, (_, i) => ({ ...FACTS, calls: i })))
   expect(queued).toHaveLength(20)
   expect(queued[0]?.calls).toBe(5)
@@ -156,6 +191,15 @@ test("a newer build's kind and a damaged entry are skipped", () => {
   expect(readable(undefined)).toEqual([])
 })
 
+test('a journal that is not an array, or has a null entry, never throws', () => {
+  const good = { at: AT, kind: 'away', n: 9 }
+  expect(readable([null, 7, 'away', good] as unknown as Moment[])).toEqual([good])
+  for (const damaged of [null, 'journal', 5, { length: 1 }]) {
+    expect(readable(damaged as unknown as Moment[])).toEqual([])
+    expect(talkMemories(damaged as unknown as Moment[], NOON)).toEqual([])
+  }
+})
+
 test('ages count calendar days between local dates', () => {
   const daysAgo = (d: number) => new Date(2026, 9, 7 - d, 12).toISOString()
   const ages: [number, string][] = [
@@ -190,8 +234,8 @@ const JOURNAL: Moment[] = [
   { at: OLD, kind: 'comeback', n: 4 },
   { at: FRESH, kind: 'longTurn', n: 40 },
 ]
-const remember = (f: Partial<TurnFacts>, roll = 0.99, pick = 0) =>
-  recall({ journal: JOURNAL, facts: { ...FACTS, ...f }, now: NOON, stats: STATS, roll, pick })
+const remember = (f: Partial<TurnFacts>, roll = 0.99, pick = 0, recalled: Record<string, number> = {}) =>
+  recall({ journal: JOURNAL, facts: { ...FACTS, ...f }, now: NOON, stats: STATS, roll, pick, recalled })
 
 test('a quip remembers what its turn echoes first: the largest of that kind, the newest on a tie', () => {
   expect(remember({ failRun: 2 })).toEqual(JOURNAL[3])
@@ -214,6 +258,46 @@ test('a memory under an hour old is never recalled, and with nothing to echo WIS
   expect(recallChance(STATS)).toBe(0.175)
   expect(recallChance({ ...STATS, WISDOM: 100 })).toBe(0.3)
   expect(recall({ journal: undefined, facts: { ...FACTS, failRun: 3 }, now: NOON, stats: STATS, roll: 0, pick: 0 })).toBeNull()
+})
+
+const minutesAgo = (m: number) => NOON - m * 60_000
+
+test('a moment is keyed by its kind, number and time', () => {
+  expect(momentKey(JOURNAL[2]!)).toBe(`busyTurn:60:${OLD}`)
+  expect(momentKey(JOURNAL[0]!)).not.toBe(momentKey(JOURNAL[1]!))
+})
+
+test('a memory recalled in the last hour is skipped; the next echo kind or the roll decides', () => {
+  // A turn that echoes a busyTurn and then a comeback memory.
+  const both = { calls: 30, afterRough: 1 }
+  expect(remember(both)).toEqual(JOURNAL[2])
+  const busy = { [momentKey(JOURNAL[2]!)]: minutesAgo(30) }
+  expect(remember(both, 0.99, 0, busy)).toEqual(JOURNAL[4])
+  // With both recalled, nothing is echoed and the roll decides, among the memories left.
+  const bothRecalled = { ...busy, [momentKey(JOURNAL[4]!)]: minutesAgo(5) }
+  expect(remember(both, 0.99, 0, bothRecalled)).toBeNull()
+  expect(remember(both, 0.1, 0, bothRecalled)).toEqual(JOURNAL[0])
+  expect(remember(both, 0.1, 0.99, bothRecalled)).toEqual(JOURNAL[3])
+  // A failure's echo falls to the next failRun memory the same way.
+  expect(remember({ failRun: 2 })).toEqual(JOURNAL[3])
+  expect(remember({ failRun: 2 }, 0.99, 0, { [momentKey(JOURNAL[3]!)]: minutesAgo(30) })).toEqual(JOURNAL[0])
+})
+
+test('a memory recalled an hour ago, to the millisecond, is eligible again', () => {
+  const key = momentKey(JOURNAL[3]!)
+  expect(RECALL_REPEAT_MS).toBe(3_600_000)
+  expect(remember({ failRun: 2 }, 0.99, 0, { [key]: NOON - RECALL_REPEAT_MS + 1 })).toEqual(JOURNAL[0])
+  expect(remember({ failRun: 2 }, 0.99, 0, { [key]: NOON - RECALL_REPEAT_MS })).toEqual(JOURNAL[3])
+  expect(remember({ failRun: 2 }, 0.99, 0, { [key]: minutesAgo(61) })).toEqual(JOURNAL[3])
+})
+
+test('with every eligible memory recently recalled, a quip recalls nothing, whatever the roll', () => {
+  const all = Object.fromEntries(JOURNAL.map(m => [momentKey(m), minutesAgo(10)]))
+  expect(remember({ failRun: 2 }, 0, 0, all)).toBeNull()
+  expect(remember({ afterRough: 1, calls: 30 }, 0, 0, all)).toBeNull()
+  expect(remember({}, 0, 0, all)).toBeNull()
+  // A recalled key that matches nothing in the journal changes nothing.
+  expect(remember({ failRun: 2 }, 0.99, 0, { 'failRun:1:never': minutesAgo(10) })).toEqual(JOURNAL[3])
 })
 
 test('a memory reads as one prompt line, and a talk carries the three newest', () => {

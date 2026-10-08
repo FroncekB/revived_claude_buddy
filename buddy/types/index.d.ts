@@ -56,11 +56,13 @@ export type Moment = {
   group?: ToolGroup
 }
 
-// Records past the ones `counts` keeps: the longest run of failed calls in one turn and the most
-// calls in one turn. They track the largest seen, whether or not it was logged.
+// Records past the ones `counts` keeps: the longest run of failed calls in one turn, the most
+// calls in one turn, and the longest run of rough turns a clean turn has ended. They track the
+// largest seen, whether or not it was logged.
 export type Bests = {
   failRun: number
   calls: number
+  rough: number
 }
 
 // One finished main turn, as the journal reads it (Memory spec section 3).

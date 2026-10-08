@@ -1287,7 +1287,7 @@ test('five failed shell calls in a row go in the journal once, on a record from 
     await clock.settle()
   }
   expect(activeOf(shared.row)?.journal).toEqual([{ at: new Date(NOON).toISOString(), kind: 'failRun', n: 5, group: 'shell' }])
-  expect(activeOf(shared.row)?.bests).toEqual({ failRun: 5, calls: 5 })
+  expect(activeOf(shared.row)?.bests).toEqual({ failRun: 5, calls: 5, rough: 0 })
 })
 
 test('a denied call leaves a run of failures going, a success ends it, and a subagent is no part of it', async ($, on) => {
@@ -1370,6 +1370,27 @@ test('a quip after a failed call remembers the worst run, and calls the model no
   expect(prompts[0]?.endsWith('\nReact in one line.')).toBe(true)
 })
 
+test('a quip does not carry the same memory twice within the hour', async ($, on) => {
+  const clock = world(on, { buddy: remembering([{ at: LAST_WEEK, kind: 'failRun', n: 17, group: 'edit' }]) })
+  engineBelow(on)
+  const prompts = model(on, null, 'Not again.')
+  await $.session.start(START)
+  await clock.settle()
+  const failedTurn = async (turnId: string) => {
+    await $.tool.call({ tool: 'Bash', command: 'false' })
+    await $.turn.complete({ ...TURN, turnId })
+    await clock.settle()
+  }
+  await failedTurn('t1')
+  // Ten minutes on, past the quip cooldown: the same memory is the only one, and it was just used.
+  await clock.advance(10 * 60_000)
+  await failedTurn('t2')
+  // An hour after the first recall, it is eligible again.
+  await clock.advance(50 * 60_000)
+  await failedTurn('t3')
+  expect(prompts.map(p => p.includes('A memory (6 days ago): Claude failed 17 edits in a row.'))).toEqual([true, false, true])
+})
+
 test("a talk's prompt carries the three newest memories", async ($, on) => {
   const clock = world(on, {
     buddy: remembering([
@@ -1396,6 +1417,37 @@ test("a talk's prompt carries the three newest memories", async ($, on) => {
       'Reply in one line.',
     ].join('\n'),
   ])
+})
+
+test('rough turns do not carry across "off", or over to a rerolled buddy', async ($, on) => {
+  const shared = sharedStore(on, SAVED)
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  const run = runner($)
+  let n = 0
+  const turn = async (rough: boolean) => {
+    if (rough) await $.tool.call({ tool: 'Bash', command: 'false' })
+    await $.turn.complete({ ...TURN, turnId: `t${++n}` })
+    await clock.settle()
+  }
+  // Two rough turns, one while off, then a clean one: three in a row only if "off" kept the count.
+  await turn(true)
+  await turn(true)
+  await run('off')
+  await turn(true)
+  await run('')
+  await turn(false)
+  expect(activeOf(shared.row)?.journal).toBeUndefined()
+  // Two more, a reroll, one rough turn for the new buddy, and a clean one.
+  await turn(true)
+  await turn(true)
+  await run('reroll confirm')
+  await turn(true)
+  await turn(false)
+  expect(activeOf(shared.row)?.journal).toBeUndefined()
 })
 
 test('a buddy that is off keeps no journal, even once it is back', async ($, on) => {

@@ -4,7 +4,9 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { Buddy, Counts, Moment, MoodEvent, Saved, TurnFacts } from '../types'
 import { dayInfo } from './calendar'
 import { cardAlt, cardSvg, journalAlt, journalSvg, meter } from './card'
-import { addCall, isRough, memoryLine, mergeTurns, noCalls, queueTurns, recall, talkMemories, turnFacts } from './journal'
+import {
+  addCall, isRough, memoryLine, mergeTurns, momentKey, noCalls, queueTurns, recall, talkMemories, turnFacts,
+} from './journal'
 import {
   bandRows, cardLines, compactLine, emptyJournal, isCompact, journalHeader, journalLines, journalRows, nameLine, rightRuns,
   spriteTint, streakLine,
@@ -102,6 +104,9 @@ let failedTools: string[] = []
 // spec section 3).
 let turnCalls = noCalls()
 let roughTurns = 0
+// When each journal memory was last recalled in a quip, by moment key (Memory spec section 4).
+// Lost on a reload, which is acceptable: at worst a memory comes back sooner.
+let recalled: Record<string, number> = {}
 // Main turns completed in this module's life, and the last one the DEBUGGING line spoke in: a
 // failed call's line can run after its turn has ended, so it carries its turn's number.
 let turnNo = 0
@@ -218,7 +223,11 @@ async function feel($: EngineInterface, events: readonly MoodEvent[], kind: 'fli
 // Queues a finished main turn for the journal, under the rules for counting (Memory spec section 3).
 async function remember($: EngineInterface, facts: TurnFacts) {
   const saved = await read($, record)
-  if (!saved || saved.mode === 'off' || (await read($, hatching))) return
+  if (!saved || saved.mode === 'off' || (await read($, hatching))) {
+    // A turn nobody is counting breaks the run of rough ones.
+    roughTurns = 0
+    return
+  }
   const seed = saved.active
   await update($, pendingTurns, p => ({ ...p, [seed]: queueTurns(p[seed], [facts]) }))
 }
@@ -388,8 +397,10 @@ async function soothe($: EngineInterface, event: CountEvent, who: Who, prompt: s
 // never the quip.
 function memoryFor(journal: readonly Moment[] | undefined, facts: TurnFacts, now: number, bones: Bones): string | null {
   try {
-    const m = recall({ journal, facts, now, stats: bones.stats, roll: Math.random(), pick: Math.random() })
-    return m ? memoryLine(m, now) : null
+    const m = recall({ journal, facts, now, stats: bones.stats, roll: Math.random(), pick: Math.random(), recalled })
+    if (!m) return null
+    recalled = { ...recalled, [momentKey(m)]: now }
+    return memoryLine(m, now)
   } catch {
     return null
   }
@@ -433,8 +444,9 @@ async function hatch($: EngineInterface, kind: 'hatch' | 'reroll'): Promise<stri
   const bones = rollBones(seed)
   await update($, hatching, () => true)
   try {
-    // A new buddy is shown as itself, not mid-tour.
+    // A new buddy is shown as itself, not mid-tour, and starts with no rough turns behind it.
     await update($, tourStart, () => null)
+    roughTurns = 0
     if (!timer) startTimer($)
     let soul = fallbackSoul(seed, bones)
     try {
