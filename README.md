@@ -40,13 +40,13 @@ It has moods. A run of failed tools makes it anxious, long clean turns make it s
 
 It keeps a journal of up to 20 moments: its longest turn, its worst run of failed tool calls, its busiest turn, the 100th, 1,000th and 10,000th turn and the 1,000th, 10,000th and 100,000th tool call, a clean turn after a rough patch, you coming back after days away, and growing up. A comment after a turn like one it remembers calls back to it ("remember when Claude failed 18 shell commands in a row?"), and when you talk to it, it can bring them up.
 
-It grows up as you work together. Turns, tool calls, rough turns it sat through, pets and talks earn it XP, and its level shows on its name line and its card. It hatches small, grows into an adult at level 10 and an elder at level 30, and each level lifts its weaker stats a little, so a buddy that never spoke up when a tool failed may start to. Seventeen achievements mark what you've done across every buddy you've had, like 500 shell commands, a 30-minute turn or a 30-day streak, and six of them unlock a hat no roll gives. `/buddy dex` lists every buddy you've had, and `/buddy swap` brings one back.
+It grows up as you work together. Turns, tool calls, rough turns it sat through, pets and talks earn it XP, and its level shows on its name line and its card. It hatches small, grows into an adult at level 10 and an elder at level 30, and as it levels up, its weakest stats rise toward a floor that grows with its level, so a buddy that never spoke up when a tool failed may start to. Seventeen achievements mark what you've done across every buddy you've had, like 500 shell commands, a 30-minute turn or a 30-day streak, and six of them unlock a hat no roll gives. Choosing one to wear comes in a later update. `/buddy dex` lists every buddy you've had, and `/buddy swap` brings one back.
 
 ## What it does with your session
 
 A mod runs inside Claude Code with your permissions, so here is exactly what this one touches. To see its hooks and calls for yourself, run `claude plugin validate ./buddy`.
 
-- **Model calls.** It calls Haiku on your account for three things:
+- **Model calls.** It calls Haiku on your account for four things:
   - once when it hatches
   - when you pet it or talk to it
   - once when a swap brings a buddy back, to say hello
