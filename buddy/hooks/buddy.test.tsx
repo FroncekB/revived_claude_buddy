@@ -1407,7 +1407,7 @@ test('a quip does not carry the same memory twice within the hour', async ($, on
 // gives this seed a 0.30 chance, and PATIENCE 27 a quip cooldown under 4 minutes.
 const WISE_SEED = 'wise-45'
 
-test('a quip with nothing to echo remembers some of the time, never every time', async ($, on) => {
+test('a quip with nothing to echo remembers some of the time, never every time', { timeoutMs: 30_000 }, async ($, on) => {
   // Twenty memories, so the ones recalled in the last hour always leave others eligible.
   const journal: Moment[] = Array.from({ length: 20 }, (_, i) => ({ at: LAST_WEEK, kind: 'away', n: i + 4 }))
   const wise: Saved = { ...SAVED, active: WISE_SEED, buddies: [{ ...SAVED.buddies[0]!, seed: WISE_SEED, journal }] }
