@@ -28,7 +28,7 @@ type Buddy = {
   counts: Counts
   mood?: Mood
   journal?: Moment[]          // oldest first, at most 20; missing reads as []
-  bests?: Bests               // missing reads as { failRun: 0, calls: 0 }
+  bests?: Bests               // missing reads as { failRun: 0, calls: 0, rough: 0 }
 }
 
 type Moment = {
@@ -43,11 +43,14 @@ type MomentKind = 'failRun' | 'longTurn' | 'busyTurn' | 'turns' | 'calls' | 'com
 type Bests = {
   failRun: number             // the longest run of consecutive failed calls in one turn
   calls: number               // the most tool calls in one turn
+  rough: number               // the longest run of rough turns a clean turn has ended
 }
 ```
-The longest turn is already `counts.longestTurnMs`, so `bests` doesn't repeat it. `bests` always tracks the largest value seen, floor or not.
+The longest turn is already `counts.longestTurnMs`, so `bests` doesn't repeat it. `bests` always tracks the largest value seen, floor or not. `rough` rises on a clean turn only, since only a clean turn ends a run of rough ones.
 
-The schema stays at 2. A record written before this build has neither field on any entry. Its `bests` read as zeros, so the first bad run after the upgrade can be logged as a record even if an older one was worse. As Foundation section 1 requires, a commit changes only the fields it names. So a `journal` written by this build survives a write from a 0.3.x session, which spreads each entry.
+The schema stays at 2. A record written before this build has neither field on any entry. Its `bests` read as zeros, so the first bad run after the upgrade can be logged as a record even if an older one was worse. A `bests` saved without `rough` reads it as 0. As Foundation section 1 requires, a commit changes only the fields it names. So a `journal` written by this build survives a write from a 0.3.x session, which spreads each entry.
+
+The cap applies when a save writes the journal. A newer build that raises the cap will see a 0.4 session trim the journal back to 20.
 
 A moment is stored as data, not text, so its wording can change without touching saves. One is about 75 bytes, so a full journal is about 1.5 KB.
 
@@ -74,6 +77,7 @@ Module variables (lost on reload, which is acceptable, as `tally` is):
 - the current run of failed calls and its group or groups
 - the turn's longest run and its call count
 - the count of rough turns in a row
+- when each memory was last recalled in a quip, by moment key (section 4)
 
 ## 2. Moments
 
@@ -84,7 +88,7 @@ Module variables (lost on reload, which is acceptable, as `tally` is):
 | `busyTurn` | a turn's `calls` beats `bests.calls` and is at least 50 | the calls | `73 tool calls in one turn` |
 | `turns` | lifetime `turns` cross 100, 1,000 or 10,000 | the mark | `1,000 turns together` |
 | `calls` | lifetime tool calls (`totalCalls`) cross 1,000, 10,000 or 100,000 | the mark | `10,000 tool calls together` |
-| `comeback` | a clean turn after 3 or more rough turns in a row (section 3) | the rough turns | `a clean turn after 4 rough ones` |
+| `comeback` | a clean turn ends more rough turns in a row than any comeback before it (`bests.rough`), and at least 3 (section 3) | the rough turns | `a clean turn after 4 rough ones` |
 | `away` | a visit after 3 or more missed days: `daysBetween(lastDay, today) >= 4` | `daysBetween` | `back after 9 days away` |
 
 **The group noun** in `failRun` text:
@@ -114,7 +118,7 @@ Module variables (lost on reload, which is acceptable, as `tally` is):
 - **Calls.** The turn counts the calls that ran.
 - **Rough turns.** A turn is rough when its reason is `error` or `aborted`, or it had a failed call. It is clean when its reason is `answer` and it had no failed call.
 - **At `turn.complete`:** one `TurnFacts` is queued on `pendingTurns[seed of the active buddy]`, keeping the last 20 per seed. `afterRough` is the count of rough turns in a row before this one. After queuing, a rough turn adds 1 to that count, and any other turn resets it to 0. The run and the turn's tallies reset.
-- **Gating.** Nothing is queued with no record, while hatching, when mode is `off`, or when the record is damaged or foreign. Mode `muted` queues as normal (Foundation section 3).
+- **Gating.** Nothing is queued with no record, while hatching, when mode is `off`, or when the record is damaged or foreign. Mode `muted` queues as normal (Foundation section 3). A turn that isn't queued resets the count of rough turns to 0, and so does hatching a new buddy. So a run of rough turns never crosses "off" or a reroll.
 
 **The flush change** grows a field:
 ```ts
@@ -129,7 +133,7 @@ A flush takes `pendingTurns` with `pending` and `pendingMood` and clears all thr
 
 **In `applyChange`** (pure, against the freshly read store):
 1. **The visit** (`arrive`) runs first, as today. When the day is new, `lastDay` is not null, and `daysBetween(lastDay, today) >= 4`, the active buddy gets an `away` moment next to its sulk. `arrive` also runs in `visit` and before a reroll retires anyone, so the moment lands on the buddy that was left alone, never the new one.
-2. **Turn facts.** For each entry with facts, `noticeTurns` walks them in order. Each fact is checked against the running bests: `failRun` against `bests.failRun`, `longTurn` against `counts.longestTurnMs`, `busyTurn` against `bests.calls`, then `comeback`. The running bests rise after each fact, so two queued turns can't both claim one record.
+2. **Turn facts.** For each entry with facts, `noticeTurns` walks them in order. Each fact is checked against the running bests: `failRun` against `bests.failRun`, `longTurn` against `counts.longestTurnMs`, `busyTurn` against `bests.calls`, then `comeback`. Only a clean fact is checked for `comeback`, against `bests.rough`. The running bests rise after each fact, so two queued turns can't both claim one record. A clean fact raises `rough` even when it is under the floor.
 3. **Milestones** compare the entry's counts before and after `addCounts` with this flush's pending counts.
 4. **Write.** The entry gets its new `bests`, and its new moments are appended in that order (away, turn moments, milestones), then trimmed to 20.
 
@@ -151,8 +155,8 @@ Because detection runs against the fresh store, two open sessions can't both log
 | 60–729 | N months ago (`floor(days / 30)`) |
 | 730 or more | N years ago (`floor(days / 365)`) |
 
-**Quips.** `shouldQuip` is unchanged, so a memory never makes the buddy speak more often. It only rides along on a quip that was already going to happen. Once a quip is on, `recall(journal, facts, now, stats, roll, pick)` returns at most one memory:
-1. **Eligible** memories are at least an hour old, so a record set by this very turn isn't "remembered" seconds later.
+**Quips.** `shouldQuip` is unchanged, so a memory never makes the buddy speak more often. It only rides along on a quip that was already going to happen. Once a quip is on, `recall(journal, facts, now, stats, roll, pick, recalled)` returns at most one memory:
+1. **Eligible** memories are at least an hour old, so a record set by this very turn isn't "remembered" seconds later. A memory recalled in this session in the last hour isn't eligible again. Without that rule, every failed call and every turn over 2 minutes would carry the same line. A moment's key is `momentKey(m)`, which is `kind:n:at`. `register.tsx` keeps a map from key to the time of the last recall. The map is lost on a reload, which is acceptable: at worst a memory comes back sooner.
 2. **Relevant first.** Take the first row below that this turn matches and that has an eligible memory of its kind. Within the kind, the largest `n` wins; on a tie, the newest.
 
    | This turn | Kind |
@@ -175,7 +179,7 @@ The memory adds one line to `reactionPrompt`, before `React in one line.`:
 A memory (2 weeks ago): Claude failed 18 shell commands in a row. Bring it up if it fits, as "remember when...", without a date.
 ```
 
-**Talk.** `talkPrompt(message, memories)` carries the 3 newest memories, of any age, before `Reply in one line.`. With an empty journal it is unchanged.
+**Talk.** `talkPrompt(message, memories)` carries the 3 newest memories, of any age, before `Reply in one line.`. With an empty journal it is unchanged. The repeat rule doesn't apply to talks.
 ```
 Your memories, newest first:
 - yesterday: a clean turn after 4 rough ones
@@ -218,13 +222,13 @@ last week      1,000 turns together
 
 | File | Change |
 |-|-|
-| `journal.ts` (new, pure) | Kinds, floors and marks; `noticeTurns`, `milestones`, `awayMoment`, `addMoments` (the cap), `momentText`, `ageText`, `recallChance`, `recall`, `memoryLine`, `talkMemories`, `queueTurns`, `mergeTurns` |
+| `journal.ts` (new, pure) | Kinds, floors and marks; `noticeTurns`, `milestones`, `awayMoment`, `addMoments` (the cap), `momentText`, `ageText`, `recallChance`, `recall`, `memoryLine`, `talkMemories`, `queueTurns`, `mergeTurns`, `momentKey`, `RECALL_REPEAT_MS` |
 | `ledger.ts` | `withCommas`, moved here from `layout.ts` and exported, so `journal.ts` and `layout.ts` share it |
 | `record.ts` | `flush` applies turn facts and milestones; `arrive` adds `away`; `parseSub` and `USAGE` gain `journal` |
 | `voice.ts` | `reactionPrompt(summary, memory?)`; `talkPrompt(message, memories)` |
 | `layout.ts` | `journalRows`, `journalLines` |
 | `card.ts` | `journalSvg`, `journalAlt` |
-| `register.tsx` | Run, call and rough-turn tracking in the existing `tool.call` and `turn.complete` hooks; `pendingTurns` with take, clear and put-back in `flush`; the `recall` rolls in `react`; memories in the talk prompt; the `journal` subcommand, argument hint and its pane render hook |
+| `register.tsx` | Run, call and rough-turn tracking in the existing `tool.call` and `turn.complete` hooks; `pendingTurns` with take, clear and put-back in `flush`; the `recall` rolls in `react` and the map of recalled memories; memories in the talk prompt; the `journal` subcommand, argument hint and its pane render hook |
 | `types/index.d.ts` | `Moment`, `MomentKind`, `Bests`, `TurnFacts`; `journal?` and `bests?` on `Buddy`; `pendingTurns` in `PluginState` |
 | `README.md` | `/buddy journal` in "Use"; journal and bests in "What it saves"; a short paragraph on memories; this spec in "Design" |
 | `plugin.json` | version 0.4.0 |
@@ -238,6 +242,8 @@ As base section 9, Foundation section 6 and Alive section 9:
 - A flush that fails before it adopts puts the turn facts back into `pendingTurns`.
 - A throw in `recall` or `memoryLine` sends the quip without a memory. A throw in `talkMemories` sends the talk without memories.
 - A throw while drawing the journal pane falls back to `next(e)`.
+- A damaged journal never throws. A `journal` that isn't an array reads as empty, and a `null` or non-object entry is skipped, wherever moments are shown or recalled. The next save replaces a non-array `journal` with the new moments.
+- One accepted edge: after a put-back or two overlapping saves, a later turn's facts can be judged before an earlier turn's counts land. That rarely logs a "longest yet" that isn't. It is accepted.
 
 **Cost:**
 - No new model calls, and the quip rate is unchanged (Alive section 3).
@@ -253,7 +259,8 @@ All with `claude plugin test` (base section 11).
   - each kind at its floor and one under: a run of 5 and 4, 10 min and 9:59, 50 calls and 49, 3 rough turns and 2, 3 missed days and 2
   - a record must beat the stored best, `longTurn` against an existing `counts.longestTurnMs`; missing `bests` read as zeros
   - two queued facts with the same run log one `failRun`
-  - `bests` rising on a value under the floor
+  - `bests` rising on a value under the floor, `rough` included, and only on a clean turn
+  - a comeback logged only when it beats the best rough run: a second one with the same count isn't, a longer one is
   - the group noun for a one-group run and a mixed one
   - milestones at 99→100, 100→101 (none), 999→1,000 calls, and one jump across two marks
   - `addMoments` keeping the newest 20
@@ -262,10 +269,13 @@ All with `claude plugin test` (base section 11).
   - `recall`:
     - a relevant memory beating the roll; the largest `n` within the kind, the newest on a tie
     - memories under an hour old skipped
+    - a memory recalled 30 minutes ago skipped, so the next echo kind or the roll decides; one recalled exactly an hour ago eligible again; with every memory recently recalled, none, even at roll 0
     - the WISDOM gate; an empty journal
+  - `readable` and `addMoments` with a `null` entry and with a journal that isn't an array
     - `recallChance` at 1, 50 and 100
 - `record.test.ts`:
   - `flush` applies facts to the right entry and drops an unknown seed
+  - a comeback judged against the stored `bests.rough`, across flushes
   - `visit` adds `away` with the sulk, and a reroll after a gap puts it on the retiring buddy
   - a missing `journal` reads as empty; unknown fields are kept
   - `parseSub('journal')`, and `journal x` as usage
@@ -278,11 +288,12 @@ All with `claude plugin test` (base section 11).
   - 5 failed Bash calls in a row save a `failRun` moment with group `shell` and `bests.failRun` 5; the same turn again logs nothing
   - fail ×3, a success, fail ×3 logs nothing, and a denied call between failures doesn't break the run
   - a subagent's failed calls are ignored
-- **Comebacks:** 3 turns with failed calls, then a clean answer, log a comeback.
+- **Comebacks:** 3 turns with failed calls, then a clean answer, log a comeback. Rough turns don't count across "off" or a reroll.
 - **Milestones across sessions:** another session writes counts that reach turn 100 mid-turn, and this session's flush does not log it again.
 - **Callbacks:**
   - with an old `failRun` moment stored, a quip after a turn with failed calls carries its line
   - with no relevant memory and a roll above the chance, no line
+  - the same memory isn't carried by two quips within the hour, and is carried again after it
   - no test sees more `$.model.complete` calls than before this build
   - a talk's prompt carries the 3 newest memories
 - **The command:** `/buddy journal` opens the pane and draws it in the terminal and as SVG. Where no pane is placed it returns the text fallback, and it works in mode `off`.
