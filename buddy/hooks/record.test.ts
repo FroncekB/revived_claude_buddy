@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import type { Bests, Saved, TurnFacts } from '../types'
 import { countEvent, zeroCounts } from './ledger'
-import { USAGE, activeBuddy, applyChange, classify, migrate, parseSub } from './record'
+import { USAGE, activeBuddy, applyChange, classify, findBuddy, migrate, parseSub, shownBuddy, targetOf } from './record'
 import type { Change } from './record'
 
 const SOUL = { name: 'Pip', personality: 'x', hatchedAt: '2026-10-07T00:00:00.000Z' }
@@ -21,7 +21,10 @@ test('subcommands', () => {
   expect(sub('journal')).toBe('journal')
   expect(sub('dex')).toBe('dex')
   expect(sub('dex all')).toBe('usage')
-  expect(USAGE).toBe('Usage: /buddy [pet | card | journal | dex | mute | unmute | off | reroll [confirm]]')
+  expect(parseSub('card #2')).toEqual({ sub: 'card', target: '#2' })
+  expect(parseSub('Journal Pip')).toEqual({ sub: 'journal', target: 'Pip' })
+  expect(sub('card Pip twice')).toBe('usage')
+  expect(USAGE).toBe('Usage: /buddy [pet | card [who] | journal [who] | dex | mute | unmute | off | reroll [confirm]]')
   expect(sub('mute')).toBe('mute')
   expect(sub('unmute')).toBe('unmute')
   expect(sub('off')).toBe('off')
@@ -262,4 +265,38 @@ test('an earned field that is not an object is replaced when something is earned
   const damaged = { ...base, you: { lastDay: '2026-10-06', streak: 6, bestStreak: 6, days: 6, earned: 'lots' } } as unknown as Saved
   expect(applyChange(damaged, { kind: 'visit' }, NOON)?.you.earned).toEqual({ regular: AT })
   expect('earned' in applyChange(base, { kind: 'visit' }, NOON)!.you).toBe(false)
+})
+
+// Pip, a common dragon ('swap-1'); Bix, a common ghost ('test-seed'); and pip, a common axolotl
+// ('swap-2'), who is here now.
+const THREE: Saved = {
+  ...migrate(V1),
+  active: 'swap-2',
+  buddies: [
+    { seed: 'swap-1', soul: SOUL, retiredAt: AT, counts: zeroCounts() },
+    { seed: 'test-seed', soul: { ...SOUL, name: 'Bix' }, retiredAt: AT, counts: zeroCounts() },
+    { seed: 'swap-2', soul: { ...SOUL, name: 'pip' }, retiredAt: null, counts: zeroCounts() },
+  ],
+}
+
+test('a buddy is found by name in any case, or by its dex number', () => {
+  expect(findBuddy(THREE, 'BIX')).toEqual({ kind: 'one', seed: 'test-seed' })
+  expect(findBuddy(THREE, '#1')).toEqual({ kind: 'one', seed: 'swap-1' })
+  expect(findBuddy(THREE, '3')).toEqual({ kind: 'one', seed: 'swap-2' })
+  expect(findBuddy(THREE, 'Pip')).toEqual({ kind: 'many', numbers: [1, 3] })
+  for (const nobody of ['Rex', '#4', '0', '#']) expect([nobody, findBuddy(THREE, nobody)]).toEqual([nobody, { kind: 'none' }])
+})
+
+test('a card or journal target is one buddy, the active one as null, or the reason there is none', () => {
+  expect(targetOf(THREE, undefined, 'card')).toEqual({ seed: null })
+  expect(targetOf(THREE, 'bix', 'card')).toEqual({ seed: 'test-seed' })
+  expect(targetOf(THREE, '#3', 'card')).toEqual({ seed: null })
+  expect(targetOf(THREE, 'PIP', 'journal')).toEqual({
+    reply: '2 buddies are named Pip: #1 dragon, #3 axolotl. Run /buddy journal #3.',
+  })
+  expect(targetOf(THREE, 'Rex', 'card')).toEqual({ reply: 'No buddy named Rex in the dex.' })
+  expect(targetOf(THREE, '#09', 'card')).toEqual({ reply: 'No buddy #9 in the dex.' })
+  expect(shownBuddy(THREE, 'test-seed').soul.name).toBe('Bix')
+  expect(shownBuddy(THREE, null).seed).toBe('swap-2')
+  expect(shownBuddy(THREE, 'gone').seed).toBe('swap-2')
 })

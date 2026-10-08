@@ -20,7 +20,7 @@ import { MAX_QUEUED_MOOD, applyMood, moodLine, moodOf, turnMood } from './mood'
 import type { MoodName } from './mood'
 import { bonesFor, levelOf } from './progress'
 import { mergeQueues, queueNewest } from './queue'
-import { STORE_KEY, USAGE, activeBuddy, applyChange, classify, parseSub } from './record'
+import { STORE_KEY, USAGE, activeBuddy, applyChange, classify, parseSub, shownBuddy, targetOf } from './record'
 import type { Change, Parsed, Stored } from './record'
 import { RARITY, STATS, rollBones } from './roll'
 import type { Bones } from './roll'
@@ -68,6 +68,8 @@ const posing = atom({ plugin: 'buddy', key: 'pose' } as const, null)
 const lastActive = atom({ plugin: 'buddy', key: 'lastActiveTick' } as const, 0)
 const pendingMood = atom({ plugin: 'buddy', key: 'pendingMood' } as const, {})
 const pendingTurns = atom({ plugin: 'buddy', key: 'pendingTurns' } as const, {})
+const cardSeed = atom({ plugin: 'buddy', key: 'cardSeed' } as const, null)
+const journalSeed = atom({ plugin: 'buddy', key: 'journalSeed' } as const, null)
 
 const CARD = 'card'
 const JOURNAL = 'journal'
@@ -544,21 +546,29 @@ async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | un
       return undefined
     }
     case 'card': {
+      const target = targetOf(saved, parsed.target, 'card')
+      if ('reply' in target) return target.reply
+      await update($, cardSeed, () => target.seed)
       const opened = await $.ui.open({ id: CARD, title: 'Buddy', closeOnEscape: true })
       // A surface that places no panes gets the card as text instead.
       if (opened.isPlaced) return undefined
-      const progress = cardProgress(saved, buddy)
+      const shown = shownBuddy(saved, target.seed)
+      const progress = cardProgress(saved, shown)
       return [
-        ...cardLines(buddy.soul, bones, saved.rerolls, progress),
-        streakLine(saved.you, await countsOf($, buddy)),
+        ...cardLines(shown.soul, bonesFor(shown), saved.rerolls, progress),
+        streakLine(saved.you, await countsOf($, shown)),
         achievementsText(progress.earned.length),
       ].join('\n')
     }
     case 'journal': {
+      const target = targetOf(saved, parsed.target, 'journal')
+      if ('reply' in target) return target.reply
+      await update($, journalSeed, () => target.seed)
       const opened = await $.ui.open({ id: JOURNAL, title: 'Journal', closeOnEscape: true })
       // A surface that places no panes gets the newest ten as text instead.
       if (opened.isPlaced) return undefined
-      return journalLines(name, buddy.journal, await $.clock.now()).join('\n')
+      const shown = shownBuddy(saved, target.seed)
+      return journalLines(shown.soul.name, shown.journal, await $.clock.now()).join('\n')
     }
     case 'dex': {
       const opened = await $.ui.open({ id: DEX, title: 'Buddydex', closeOnEscape: true })
@@ -680,7 +690,7 @@ export const register: Register = on => {
       await $.command.register({
         name: 'buddy',
         description: 'Hatch, pet, or manage your terminal buddy',
-        argumentHint: '[pet | card | journal | dex | mute | unmute | off | reroll [confirm]]',
+        argumentHint: '[pet | card [who] | journal [who] | dex | mute | unmute | off | reroll [confirm]]',
         immediate: true,
       })
     } catch {
@@ -850,7 +860,7 @@ export const register: Register = on => {
       const saved = await read($, record)
       if (!saved) return <Text dimColor>{NO_BUDDY}</Text>
 
-      const buddy = activeBuddy(saved)
+      const buddy = shownBuddy(saved, await read($, cardSeed))
       const bones = bonesFor(buddy)
       const progress = cardProgress(saved, buddy)
       const history = { you: saved.you, counts: await countsOf($, buddy) }
@@ -917,14 +927,14 @@ export const register: Register = on => {
     }
   })
 
-  // The journal pane (Memory spec section 5): the active buddy's saved moments, newest first.
+  // The journal pane (Memory spec section 5): the shown buddy's saved moments, newest first.
   on('ui.render', { component: 'Pane', requestId: JOURNAL }, async ($, e, next) => {
     try {
       const { Box, Text } = $.ui.resolve(e)
       const saved = await read($, record)
       if (!saved) return <Text dimColor>{NO_BUDDY}</Text>
 
-      const buddy = activeBuddy(saved)
+      const buddy = shownBuddy(saved, await read($, journalSeed))
       const name = buddy.soul.name
       const rows = journalRows(buddy.journal, await $.clock.now())
       if (e.surface !== 'terminal') {

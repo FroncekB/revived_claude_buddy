@@ -1842,3 +1842,33 @@ test('where no pane can be placed, dex prints a count and the newest ten', async
   expect(lines[2]).toMatch(/^#5 /)
   expect(lines[11]).toMatch(/^#14 .* – now$/)
 })
+
+test('card and journal show a retired buddy by number or by name, and the active one again with neither', async ($, on) => {
+  const pip = { ...TWO.buddies[0]!, journal: [{ at: LAST_WEEK, kind: 'away' as const, n: 9 }] }
+  const clock = world(on, { buddy: { ...TWO, buddies: [pip, TWO.buddies[1]!] } })
+  await $.session.start(START)
+  await clock.settle()
+  const run = runner($)
+  expect(await run('card #1')).toBeUndefined()
+  const card = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...pane() })
+  const text = (await card.findAll({ type: 'Text' })).map(t => t.text).join('\n')
+  await card.unmount()
+  expect(text).toMatch(/^Pip$/m)
+  expect(text).toContain('Hatched 2026-10-01   Rerolls: 1   Retired 2026-10-05')
+  expect(await run('journal pip')).toBeUndefined()
+  const journal = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...journalPane() })
+  expect(await journal.find({ text: "Pip's journal" })).toBeDefined()
+  expect(await journal.find({ text: 'back after 9 days away' })).toBeDefined()
+  expect(await cardText($)).toMatch(/^Mochi$/m)
+})
+
+test('a name two buddies share gets their numbers, and a name nobody has is answered', async ($, on) => {
+  const twins = { ...TWO, buddies: [TWO.buddies[0]!, { ...TWO.buddies[1]!, soul: { ...TWO.buddies[1]!.soul, name: 'Pip' } }] }
+  const clock = world(on, { buddy: twins }, false)
+  await $.session.start(START)
+  await clock.settle()
+  const run = runner($)
+  expect(await run('card pip')).toBe('2 buddies are named Pip: #1 dragon, #2 axolotl. Run /buddy card #2.')
+  expect(await run('journal Rex')).toBe('No buddy named Rex in the dex.')
+  expect((await run('card #1')) ?? '').toMatch(/^Pip, common dragon ★\nLv 1 hatchling · 0 \/ 100 xp\n/)
+})

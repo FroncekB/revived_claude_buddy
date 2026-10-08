@@ -136,6 +136,9 @@ declare module 'claude-code' {
       pendingMood: Record<string, MoodEvent[]>
       // Finished main turns not yet saved, by buddy seed (Memory spec section 3).
       pendingTurns: Record<string, TurnFacts[]>
+      // The buddy the card and journal panes show; null for the active one (Progression spec section 7).
+      cardSeed: string | null
+      journalSeed: string | null
     }
   }
 }

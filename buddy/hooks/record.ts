@@ -5,9 +5,10 @@ import { addMoments, awayMoment, bestsOf, milestones, noticeTurns } from './jour
 import { addCounts, localDay, visit, zeroCounts } from './ledger'
 import { applyMood, sulkFor, withSulk } from './mood'
 import { grewMoments } from './progress'
+import { rollBones } from './roll'
 
 export const STORE_KEY = 'buddy'
-export const USAGE = 'Usage: /buddy [pet | card | journal | dex | mute | unmute | off | reroll [confirm]]'
+export const USAGE = 'Usage: /buddy [pet | card [who] | journal [who] | dex | mute | unmute | off | reroll [confirm]]'
 
 // What the store holds, as this build reads it (Foundation spec section 1).
 export type Stored =
@@ -154,9 +155,11 @@ export type Sub =
   | 'debug-off' | 'usage'
 
 // A /buddy command as parsed: the subcommand, and what it was given (Progression spec section 7).
-export type Parsed = { sub: Sub }
+export type Parsed = { sub: Sub; target?: string }
 
-const SIMPLE: readonly string[] = ['pet', 'card', 'journal', 'dex', 'mute', 'unmute', 'off']
+const SIMPLE: readonly string[] = ['pet', 'dex', 'mute', 'unmute', 'off']
+// Subcommands that can name one buddy after them.
+const TARGETED: readonly string[] = ['card', 'journal']
 
 // Subcommand words match in any case; anything after them keeps the case it was typed in.
 export function parseSub(args: string): Parsed {
@@ -173,5 +176,56 @@ export function parseSub(args: string): Parsed {
     if (words.length === 1) return { sub: 'debug' }
     return { sub: words.length === 2 && second === 'off' ? 'debug-off' : 'usage' }
   }
+  if (TARGETED.includes(first)) {
+    if (words.length === 1) return { sub: first as Sub }
+    return words.length === 2 ? { sub: first as Sub, target: words[1]! } : { sub: 'usage' }
+  }
   return { sub: words.length === 1 && SIMPLE.includes(first) ? (first as Sub) : 'usage' }
+}
+
+// A buddy asked for by name, in any case, or by its dex number: "#5" or "5".
+export type Found = { kind: 'one'; seed: string } | { kind: 'many'; numbers: number[] } | { kind: 'none' }
+
+const NUMBER = /^#?(\d+)$/
+
+export function findBuddy(saved: Saved, who: string): Found {
+  const number = NUMBER.exec(who)
+  if (number) {
+    const b = saved.buddies[Number(number[1]) - 1]
+    return b ? { kind: 'one', seed: b.seed } : { kind: 'none' }
+  }
+  const name = who.toLowerCase()
+  const numbers = saved.buddies.flatMap((b, i) => (b.soul.name.toLowerCase() === name ? [i + 1] : []))
+  if (numbers.length > 1) return { kind: 'many', numbers }
+  const one = numbers[0]
+  return one === undefined ? { kind: 'none' } : { kind: 'one', seed: saved.buddies[one - 1]!.seed }
+}
+
+// The answer when `who` names no one buddy, with `command` in the hint.
+export function notFound(saved: Saved, who: string, found: Exclude<Found, { kind: 'one' }>, command: string): string {
+  if (found.kind === 'none') {
+    const number = NUMBER.exec(who)
+    return number ? `No buddy #${Number(number[1])} in the dex.` : `No buddy named ${who} in the dex.`
+  }
+  const each = found.numbers.map(n => `#${n} ${rollBones(saved.buddies[n - 1]!.seed).species}`)
+  const name = saved.buddies[found.numbers[0]! - 1]!.soul.name
+  return `${found.numbers.length} buddies are named ${name}: ${each.join(', ')}. Run /buddy ${command} #${found.numbers.at(-1)}.`
+}
+
+// What a card or journal asks to show: null for the active buddy, which a pane then follows
+// through a swap, or the line to answer with when `who` names no one buddy.
+export function targetOf(
+  saved: Saved,
+  who: string | undefined,
+  command: string,
+): { seed: string | null } | { reply: string } {
+  if (who === undefined) return { seed: null }
+  const found = findBuddy(saved, who)
+  if (found.kind !== 'one') return { reply: notFound(saved, who, found, command) }
+  return { seed: found.seed === saved.active ? null : found.seed }
+}
+
+// The buddy a pane shows: the one with `seed`, or the active one when that is null or gone.
+export function shownBuddy(saved: Saved, seed: string | null): Buddy {
+  return saved.buddies.find(b => b.seed === seed) ?? activeBuddy(saved)
 }
