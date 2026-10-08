@@ -1645,3 +1645,23 @@ test('an empty journal says so, as text and on the pane', async ($, on) => {
   const terminal = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...journalPane() })
   expect(await terminal.find({ text: "Nothing in Pip's journal yet." })).toBeDefined()
 })
+
+// SAVED's buddy with counts worth exactly 152,100 XP: level 40.
+const ELDERLY: Saved = { ...SAVED, buddies: [{ ...SAVED.buddies[0]!, counts: { ...zeroCounts(), turns: 15_210 } }] }
+
+test('the level shows on the name line, and the persona hears the stats the buddy grew into', async ($, on) => {
+  const clock = world(on, { buddy: ELDERLY })
+  const systems: string[] = []
+  on('model.complete', async (_$, e) => {
+    systems.push(e.system ?? '')
+    return { value: ok('Hm.') }
+  })
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await ui.find({ type: 'Text', text: '  Pip  Lv 40  common ghost  ' })).toBeDefined()
+  await runner($)('pet')
+  await clock.settle()
+  // 'test-seed' rolled DEBUGGING 7, PATIENCE 30, CHAOS 31 and SNARK 9; level 40 lifts each to 34.
+  expect(systems.at(-1)).toContain('Stats: DEBUGGING 34, PATIENCE 34, CHAOS 34, WISDOM 59, SNARK 34.')
+})

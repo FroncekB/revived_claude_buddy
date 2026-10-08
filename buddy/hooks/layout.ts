@@ -126,9 +126,14 @@ export function spriteTint(bones: Pick<Bones, 'rarity' | 'shiny'>, tick: number)
   return { color: RARITY[bones.rarity].color, bold: false }
 }
 
-export function nameLine(name: string, bones: Bones): { label: string; stars: string } {
+// The band's name line, with the level when there is one (the debug tour shows none).
+export function nameLine(
+  name: string,
+  bones: Pick<Bones, 'rarity' | 'species' | 'shiny'>,
+  level: number | null = null,
+): { label: string; stars: string } {
   return {
-    label: `  ${name}  ${bones.rarity} ${bones.species}${bones.shiny ? ' (shiny)' : ''}  `,
+    label: `  ${name}  ${level === null ? '' : `Lv ${level}  `}${bones.rarity} ${bones.species}${bones.shiny ? ' (shiny)' : ''}  `,
     stars: '★'.repeat(RARITY[bones.rarity].stars),
   }
 }

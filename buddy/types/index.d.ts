@@ -1,5 +1,8 @@
 export type Mode = 'on' | 'muted' | 'off'
 
+// How grown a buddy is, by its level (Progression spec section 2).
+export type Stage = 'hatchling' | 'adult' | 'elder'
+
 export type Soul = { name: string; personality: string; hatchedAt: string }
 
 // The schema 1 record (base spec section 3), read only to migrate it.

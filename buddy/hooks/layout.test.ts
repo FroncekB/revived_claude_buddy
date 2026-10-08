@@ -146,6 +146,8 @@ test('name line, compact line and card', () => {
   const bones = rollBones('layout-seed')
   const { label, stars } = nameLine('Pip', bones)
   expect(label).toContain(`Pip  ${bones.rarity} ${bones.species}`)
+  // 'layout-seed' rolls a common cactus.
+  expect(nameLine('Pip', bones, 12).label).toBe('  Pip  Lv 12  common cactus  ')
   expect(stars.length).toBeGreaterThanOrEqual(1)
   expect(compactLine('<(·)', 'Pip', null, 80, 0)).toBe('<(·)  Pip')
   expect(compactLine('<(·)', 'Pip', 'Hi.', 80, 0)).toBe('<(·)  Pip: Hi.')

@@ -17,6 +17,7 @@ import { CELEBRATE_TICKS, FLINCH_TICKS, draw, portrait } from './look'
 import type { Scene } from './look'
 import { MAX_QUEUED_MOOD, applyMood, moodLine, moodOf, turnMood } from './mood'
 import type { MoodName } from './mood'
+import { bonesFor, levelOf } from './progress'
 import { mergeQueues, queueNewest } from './queue'
 import { STORE_KEY, USAGE, activeBuddy, applyChange, classify, parseSub } from './record'
 import type { Change, Stored, Sub } from './record'
@@ -87,8 +88,9 @@ type Look = {
   prop: Prop | null
 }
 
-// The part of a buddy that speaks: its seed, for the bones, its soul, and its saved mood.
-type Who = Pick<Buddy, 'seed' | 'soul' | 'mood'>
+// The part of a buddy that speaks: its seed and counts, for its grown bones, its soul, and its
+// saved mood. A buddy just hatched has no counts yet, so it is level 1.
+type Who = Pick<Buddy, 'seed' | 'soul' | 'mood'> & { counts?: Counts }
 
 const tint = (color: string | undefined) => (color ? { color } : {})
 
@@ -292,7 +294,7 @@ async function countAndFlush(
 async function speakUp($: EngineInterface, turn: number) {
   const saved = await read($, record)
   if (!saved || (await read($, hatching))) return
-  const bones = rollBones(saved.active)
+  const bones = bonesFor(activeBuddy(saved))
   const t = await read($, tick)
   const said = await read($, bubble)
   const say = shouldFlag({
@@ -384,7 +386,7 @@ async function ask(
 
 // Talk, pet and hello: answered even when muted, at most one model call per 5 s.
 async function reply($: EngineInterface, who: Who, prompt: string) {
-  const bones = rollBones(who.seed)
+  const bones = bonesFor(who)
   const now = await $.clock.now()
   const last = await read($, lastReplyAt)
   await update($, lastReplyAt, () => now)
@@ -430,7 +432,7 @@ async function react($: EngineInterface, summary: TurnSummary, facts: TurnFacts)
   const saved = await read($, record)
   if (!saved || (await read($, hatching))) return
   const buddy = activeBuddy(saved)
-  const bones = rollBones(buddy.seed)
+  const bones = bonesFor(buddy)
   const now = await $.clock.now()
   const speak = shouldQuip({
     mode: saved.mode,
@@ -493,7 +495,7 @@ async function runBuddy($: EngineInterface, sub: Sub): Promise<string | undefine
   // Another session may have changed the store since this one last looked.
   await adopt($, saved)
   const buddy = activeBuddy(saved)
-  const bones = rollBones(buddy.seed)
+  const bones = bonesFor(buddy)
   const name = buddy.soul.name
   const who = `${name}, ${bones.rarity} ${bones.species}`
   const hidden = `${name} is hidden. Run /buddy to bring it back.`
@@ -591,7 +593,8 @@ async function buddyLook($: EngineInterface, saved: Saved, t: number): Promise<L
   // A running /buddy debug tour dresses the real buddy up; nothing saved changes.
   const started = await read($, tourStart)
   const tour = started === null ? null : tourAt(t - started)
-  const bones = tour ? { ...rollBones(buddy.seed), ...tour.look } : rollBones(buddy.seed)
+  const own = bonesFor(buddy)
+  const bones = tour ? { ...own, ...tour.look } : own
   const name = tour ? tour.name : buddy.soul.name
   const animTick = tour ? tour.tick : t
   const heartsUntilTick = await read($, heartsUntil)
@@ -612,7 +615,7 @@ async function buddyLook($: EngineInterface, saved: Saved, t: number): Promise<L
       }
     : await liveScene($, buddy, bones, t, heartsFrame, saying)
   const drawn = draw(scene)
-  const { label, stars } = nameLine(name, bones)
+  const { label, stars } = nameLine(name, bones, tour ? null : levelOf(buddy.counts))
   const sprite = spriteTint(bones, animTick)
   return {
     sprite: drawn.sprite,
@@ -806,7 +809,7 @@ export const register: Register = on => {
       if (!saved) return <Text dimColor>{NO_BUDDY}</Text>
 
       const buddy = activeBuddy(saved)
-      const bones = rollBones(buddy.seed)
+      const bones = bonesFor(buddy)
       const history = { you: saved.you, counts: await countsOf($, buddy) }
       if (e.surface !== 'terminal') {
         const { Svg } = $.ui.resolve(e)
@@ -877,7 +880,7 @@ export const register: Register = on => {
       const rows = journalRows(buddy.journal, await $.clock.now())
       if (e.surface !== 'terminal') {
         const { Svg } = $.ui.resolve(e)
-        return <Svg source={journalSvg(name, rollBones(buddy.seed), rows)} alt={journalAlt(name, rows)} />
+        return <Svg source={journalSvg(name, bonesFor(buddy), rows)} alt={journalAlt(name, rows)} />
       }
 
       return (
