@@ -1,8 +1,8 @@
 // What the buddy says and when: prompts for Haiku, the speak-or-not rule,
 // reply cleanup, and fallbacks for when the model doesn't answer.
-import type { Mode, Soul, You } from '../types'
+import type { Mode, Soul, TurnReason, You } from '../types'
 import { STATS, rngFor } from './roll'
-import type { Bones, StatName } from './roll'
+import type { Bones, StatName, Stats } from './roll'
 
 // The shortest quip cooldown: PATIENCE only ever lengthens it (Alive spec section 3).
 export const QUIP_COOLDOWN_MS = 180_000
@@ -20,7 +20,6 @@ export const HEART_TICKS = 5
 export const PET_PROMPT = 'The developer just petted you. React in one line.'
 export const HELLO_PROMPT = 'The developer just called you over. Say hello in one line.'
 
-export type TurnReason = 'answer' | 'aborted' | 'refusal' | 'error'
 export type TurnSummary = {
   reason: TurnReason
   durationMs: number
@@ -31,8 +30,6 @@ export type TurnSummary = {
 export function isNotable(s: TurnSummary): boolean {
   return s.failed.length > 0 || s.reason === 'error' || s.reason === 'aborted' || s.durationMs > LONG_TURN_MS
 }
-
-type Stats = Readonly<Record<StatName, number>>
 
 // CHAOS 1 to 100 gives a chance from 0.1525 to 0.40 that an ordinary turn gets a quip.
 export function quipChance(stats: Stats): number {

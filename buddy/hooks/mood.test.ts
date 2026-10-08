@@ -2,8 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import type { Mood, MoodEvent } from '../types'
 import {
-  MAX_QUEUED_MOOD, MOOD_GAP_MS, MOOD_STEP_MS, applyMood, decayMood, mergeMood, moodLine, moodOf, neutralMood,
-  queueMood, sulkFor, turnMood, withSulk,
+  MOOD_GAP_MS, MOOD_STEP_MS, applyMood, decayMood, moodLine, moodOf, neutralMood, sulkFor, turnMood, withSulk,
 } from './mood'
 
 const T0 = Date.UTC(2026, 9, 7, 12)
@@ -101,12 +100,6 @@ test('a finished turn becomes a fail, a clean turn, a long clean turn, or nothin
   expect(turnMood('answer', 120_001, 0)).toBe('longClean')
   expect(turnMood('answer', 200_000, 1)).toBeNull()
   expect(turnMood('refusal', 200_000, 0)).toBeNull()
-})
-
-test('the queue keeps the newest 20 events, and a failed save puts its events back in front', () => {
-  const many: MoodEvent[] = Array.from({ length: 25 }, (_, i) => (i < 5 ? 'soothe' : 'fail'))
-  expect(queueMood(undefined, many)).toEqual(Array.from({ length: MAX_QUEUED_MOOD }, () => 'fail'))
-  expect(mergeMood({ a: ['fail'] }, { a: ['clean'], b: ['soothe'] })).toEqual({ a: ['fail', 'clean'], b: ['soothe'] })
 })
 
 test('the persona hears the mood only when there is one', () => {

@@ -2,9 +2,8 @@ import { expect, test } from 'claude-code/testing'
 
 import type { Bests, Moment, TurnFacts } from '../types'
 import {
-  RECALL_REPEAT_MS, addCall, addMoments, ageText, awayMoment, bestsOf, isClean, isRough, memoryLine, mergeTurns,
-  milestones, momentKey, momentText, noCalls, noticeTurns, queueTurns, readable, recall, recallChance, talkMemories,
-  turnFacts,
+  MAX_MOMENTS, RECALL_REPEAT_MS, addCall, addMoments, ageText, awayMoment, bestsOf, isClean, isRough, memoryLine,
+  milestones, momentKey, momentText, noCalls, noticeTurns, readable, recall, recallChance, talkMemories, turnFacts,
 } from './journal'
 import { zeroCounts } from './ledger'
 
@@ -74,8 +73,10 @@ test("a record must beat the buddy's best; the longest turn is the stored counts
   expect(noticeTurns([{ ...FACTS, failRun: 7 }], { failRun: 7, calls: 0, rough: 0 }, 0, NOON).moments).toEqual([])
   expect(noticeTurns([{ ...FACTS, calls: 80 }], { failRun: 0, calls: 80, rough: 0 }, 0, NOON).moments).toEqual([])
   expect(noticeTurns([{ ...FACTS, durationMs: 900_000 }], NO_BESTS, 900_000, NOON).moments).toEqual([])
-  expect(noticeTurns([{ ...FACTS, durationMs: 900_001 }], NO_BESTS, 900_000, NOON).moments).toEqual([
-    { at: AT, kind: 'longTurn', n: 15 },
+  // Judged in the whole minutes it shows, so two longest turns never read the same.
+  expect(noticeTurns([{ ...FACTS, durationMs: 959_999 }], NO_BESTS, 900_000, NOON).moments).toEqual([])
+  expect(noticeTurns([{ ...FACTS, durationMs: 960_000 }], NO_BESTS, 959_999, NOON).moments).toEqual([
+    { at: AT, kind: 'longTurn', n: 16 },
   ])
   expect(bestsOf({})).toEqual(NO_BESTS)
   expect(bestsOf({ bests: { failRun: 3, calls: 40, rough: 5 } })).toEqual({ failRun: 3, calls: 40, rough: 5 })
@@ -140,7 +141,7 @@ test('a visit after three or more missed days is a moment; a weekend away is not
   expect(awayMoment('2026-10-03', '2026-10-07', NOON)).toEqual({ at: AT, kind: 'away', n: 4 })
 })
 
-test('the journal keeps its newest 20, and the turn queue its newest 20 per seed', () => {
+test('the journal keeps its newest 20', () => {
   const many: Moment[] = Array.from({ length: 19 }, (_, i) => ({ at: AT, kind: 'turns' as const, n: i }))
   const kept = addMoments(many, [
     { at: AT, kind: 'away', n: 9 },
@@ -155,12 +156,6 @@ test('the journal keeps its newest 20, and the turn queue its newest 20 per seed
   expect(addMoments('damaged' as unknown as Moment[], [away])).toEqual([away])
   expect(addMoments(null as unknown as Moment[], [away])).toEqual([away])
   expect(addMoments({ 0: away, length: 1 } as unknown as Moment[], [away])).toEqual([away])
-  const queued = queueTurns(undefined, Array.from({ length: 25 }, (_, i) => ({ ...FACTS, calls: i })))
-  expect(queued).toHaveLength(20)
-  expect(queued[0]?.calls).toBe(5)
-  const one = { ...FACTS, calls: 1 }
-  const two = { ...FACTS, calls: 2 }
-  expect(mergeTurns({ s: [one] }, { s: [two], t: [FACTS] })).toEqual({ s: [one, two], t: [FACTS] })
 })
 
 test('each moment reads as words with no date, numbers with commas', () => {
@@ -189,6 +184,11 @@ test("a newer build's kind and a damaged entry are skipped", () => {
   ] as unknown as Moment[]
   expect(readable(odd)).toEqual([{ at: AT, kind: 'away', n: 9 }])
   expect(readable(undefined)).toEqual([])
+})
+
+test('a stored journal over 20 moments reads as its newest 20', () => {
+  const long: Moment[] = Array.from({ length: 25 }, (_, i) => ({ at: AT, kind: 'turns' as const, n: i }))
+  expect(readable(long).map(m => m.n)).toEqual(Array.from({ length: MAX_MOMENTS }, (_, i) => i + 5))
 })
 
 test('a journal that is not an array, or has a null entry, never throws', () => {

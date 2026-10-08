@@ -65,9 +65,12 @@ export type Bests = {
   rough: number
 }
 
+// Why a main turn ended.
+export type TurnReason = 'answer' | 'aborted' | 'refusal' | 'error'
+
 // One finished main turn, as the journal reads it (Memory spec section 3).
 export type TurnFacts = {
-  reason: 'answer' | 'aborted' | 'refusal' | 'error'
+  reason: TurnReason
   durationMs: number
   // Tool calls that ran: a denied call never did.
   calls: number

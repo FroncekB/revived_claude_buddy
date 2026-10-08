@@ -14,6 +14,7 @@ export type Eye = (typeof EYES)[number]
 
 export const STATS = ['DEBUGGING', 'PATIENCE', 'CHAOS', 'WISDOM', 'SNARK'] as const
 export type StatName = (typeof STATS)[number]
+export type Stats = Readonly<Record<StatName, number>>
 
 export const HATS = ['crown', 'tophat', 'propeller', 'halo', 'wizard', 'beanie', 'tinyduck'] as const
 export type Hat = (typeof HATS)[number]

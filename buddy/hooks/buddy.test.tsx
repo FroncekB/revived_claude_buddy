@@ -84,11 +84,11 @@ function model(on: On, soul: string | null, say: string | null): string[] {
 const runner = ($: Engine) => async (args: string) =>
   (await $.command.run({ command: 'buddy', args, ...RUN })).text
 
-// A store this test can look into and turn off: one row under `buddy`, as another
-// session sharing it would see it.
+// A store this test can look into and turn off, for writes or for reads: one row under `buddy`,
+// as another session sharing it would see it.
 function sharedStore(on: On, row: unknown) {
-  const shared = { row, writes: 0, refuse: false }
-  on('store.get', async () => ({ value: shared.row }))
+  const shared = { row, writes: 0, refuse: false, refuseReads: false }
+  on('store.get', async () => (shared.refuseReads ? { deny: 'disk offline' } : { value: shared.row }))
   on('store.set', async (_$, e) => {
     if (shared.refuse) return { deny: 'disk full' }
     shared.row = e.value
@@ -1391,6 +1391,32 @@ test('a quip does not carry the same memory twice within the hour', async ($, on
   expect(prompts.map(p => p.includes('A memory (6 days ago): Claude failed 17 edits in a row.'))).toEqual([true, false, true])
 })
 
+// Math.random can't be stubbed in a test, so the WISDOM roll is checked by its odds. WISDOM 100
+// gives this seed a 0.30 chance, and PATIENCE 27 a quip cooldown under 4 minutes.
+const WISE_SEED = 'wise-45'
+
+test('a quip with nothing to echo remembers some of the time, never every time', async ($, on) => {
+  // Twenty memories, so the ones recalled in the last hour always leave others eligible.
+  const journal: Moment[] = Array.from({ length: 20 }, (_, i) => ({ at: LAST_WEEK, kind: 'away', n: i + 4 }))
+  const wise: Saved = { ...SAVED, active: WISE_SEED, buddies: [{ ...SAVED.buddies[0]!, seed: WISE_SEED, journal }] }
+  const clock = world(on, { buddy: wise })
+  engineBelow(on)
+  const prompts = model(on, null, 'Hm.')
+  await $.session.start(START)
+  await clock.settle()
+  // Errored turns with no calls: each gets a quip, and none echoes a kind of memory.
+  for (let i = 0; i < 60; i++) {
+    await $.turn.complete({ ...TURN, turnId: `t${i}`, reason: 'error' })
+    await clock.settle()
+    await clock.advance(4 * 60_000)
+  }
+  expect(prompts).toHaveLength(60)
+  // At 0.30, no memory in 60 quips comes about once in two billion runs, and one in all 60 never.
+  const remembered = prompts.filter(p => p.includes('\nA memory (')).length
+  expect(remembered).toBeGreaterThan(0)
+  expect(remembered).toBeLessThan(60)
+})
+
 test("a talk's prompt carries the three newest memories", async ($, on) => {
   const clock = world(on, {
     buddy: remembering([
@@ -1450,6 +1476,40 @@ test('rough turns do not carry across "off", or over to a rerolled buddy', async
   expect(activeOf(shared.row)?.journal).toBeUndefined()
 })
 
+test('rough turns do not carry across "off" with no turn while off, or to a buddy another session hatched', async ($, on) => {
+  const shared = sharedStore(on, SAVED)
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  const run = runner($)
+  let n = 0
+  const turn = async (rough: boolean) => {
+    if (rough) await $.tool.call({ tool: 'Bash', command: 'false' })
+    await $.turn.complete({ ...TURN, turnId: `t${++n}` })
+    await clock.settle()
+  }
+  // Three rough turns, off and straight back on, then a clean one.
+  for (let i = 0; i < 3; i++) await turn(true)
+  await run('off')
+  await run('')
+  await turn(false)
+  expect(activeOf(shared.row)?.journal).toBeUndefined()
+  // Three more, then another session rerolls. This session's next turn still counts for the old
+  // buddy, and its save shows the new one: a clean turn after that is the new buddy's first.
+  for (let i = 0; i < 3; i++) await turn(true)
+  const theirs = JSON.parse(JSON.stringify(shared.row)) as Saved
+  theirs.buddies[0]!.retiredAt = new Date(NOON).toISOString()
+  theirs.buddies.push({ seed: 'their-seed', soul: { ...RECORD.soul, name: 'Mo' }, retiredAt: null, counts: zeroCounts() })
+  theirs.active = 'their-seed'
+  shared.row = theirs
+  await turn(true)
+  await turn(false)
+  expect(activeOf(shared.row)?.seed).toBe('their-seed')
+  expect(activeOf(shared.row)?.journal).toBeUndefined()
+})
+
 test('a buddy that is off keeps no journal, even once it is back', async ($, on) => {
   const shared = sharedStore(on, { ...SAVED, mode: 'off' })
   const clock = world(on, null)
@@ -1483,6 +1543,63 @@ test('a failed write keeps a new moment for the next save', async ($, on) => {
   await $.turn.complete({ ...TURN, turnId: 't2' })
   await clock.settle()
   expect(activeOf(shared.row)?.journal).toEqual([{ at: new Date(NOON).toISOString(), kind: 'failRun', n: 5, group: 'shell' }])
+})
+
+test('a save that fails before it writes puts the turn back, and the next save keeps its moment', async ($, on) => {
+  const shared = sharedStore(on, SAVED)
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  // The save can't read the store, so nothing reaches this session's copy either.
+  shared.refuseReads = true
+  for (let i = 0; i < 5; i++) await $.tool.call({ tool: 'Bash', command: 'false' })
+  await $.turn.complete(TURN)
+  await clock.settle()
+  shared.refuseReads = false
+  expect(activeOf(shared.row)?.counts.turns).toBe(0)
+  await $.turn.complete({ ...TURN, turnId: 't2' })
+  await clock.settle()
+  expect(activeOf(shared.row)?.counts.turns).toBe(2)
+  expect(activeOf(shared.row)?.journal).toEqual([{ at: new Date(NOON).toISOString(), kind: 'failRun', n: 5, group: 'shell' }])
+})
+
+test('a 10-minute turn goes in the journal, even when another save lands while its facts are queued', async ($, on) => {
+  const shared = sharedStore(on, SAVED)
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, null, null)
+  // The turn's write to the facts queue is held until the test lets it go.
+  let hold = false
+  let release!: () => void
+  const gate = new Promise<void>(resolve => {
+    release = resolve
+  })
+  on('state.set', { plugin: 'buddy', key: 'pendingTurns' }, async (_$, e, next) => {
+    if (hold) {
+      hold = false
+      await gate
+    }
+    return next(e)
+  })
+  await $.session.start(START)
+  await clock.settle()
+  hold = true
+  await $.turn.complete({ ...TURN, durationMs: 10 * 60_000 })
+  await clock.settle()
+  await idle()
+  // A pet's save runs meanwhile. Had the turn's counts gone first, it would save the turn's
+  // length without its facts, and the facts would no longer beat the longest turn.
+  expect(await runner($)('pet')).toBeUndefined()
+  await clock.settle()
+  await idle()
+  expect(activeOf(shared.row)?.counts.pets).toBe(1)
+  release()
+  await clock.settle()
+  await idle()
+  expect(activeOf(shared.row)?.counts).toMatchObject({ turns: 1, pets: 1, longestTurnMs: 600_000 })
+  expect(activeOf(shared.row)?.journal).toEqual([{ at: new Date(NOON).toISOString(), kind: 'longTurn', n: 10 }])
 })
 
 const journalPane = () => ({ ...pane(), requestId: 'journal', props: { ...pane().props, title: 'Journal' } })

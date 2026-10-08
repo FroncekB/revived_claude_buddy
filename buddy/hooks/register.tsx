@@ -5,7 +5,7 @@ import type { Buddy, Counts, Moment, MoodEvent, Saved, TurnFacts } from '../type
 import { dayInfo } from './calendar'
 import { cardAlt, cardSvg, journalAlt, journalSvg, meter } from './card'
 import {
-  addCall, isRough, memoryLine, mergeTurns, momentKey, noCalls, queueTurns, recall, talkMemories, turnFacts,
+  MAX_QUEUED_TURNS, addCall, isRough, memoryLine, momentKey, noCalls, recall, talkMemories, turnFacts,
 } from './journal'
 import {
   bandRows, cardLines, compactLine, emptyJournal, isCompact, journalHeader, journalLines, journalRows, nameLine, rightRuns,
@@ -15,8 +15,9 @@ import { addCounts, countEvent, mergePending, toolGroup, zeroCounts } from './le
 import type { CountEvent } from './ledger'
 import { CELEBRATE_TICKS, FLINCH_TICKS, draw, portrait } from './look'
 import type { Scene } from './look'
-import { applyMood, mergeMood, moodLine, moodOf, queueMood, turnMood } from './mood'
+import { MAX_QUEUED_MOOD, applyMood, moodLine, moodOf, turnMood } from './mood'
 import type { MoodName } from './mood'
+import { mergeQueues, queueNewest } from './queue'
 import { STORE_KEY, USAGE, activeBuddy, applyChange, classify, parseSub } from './record'
 import type { Change, Stored, Sub } from './record'
 import { RARITY, STATS, rollBones } from './roll'
@@ -134,9 +135,13 @@ function later($: EngineInterface, work: () => Promise<unknown>) {
   })
 }
 
-// Make `saved` the session's buddy: into state, and the timer to match its mode.
+// Make `saved` the session's buddy: into state, and the timer to match its mode. A run of rough
+// turns never crosses "off" or a new buddy, whichever session made the change (Memory spec
+// section 3).
 async function adopt($: EngineInterface, saved: Saved) {
+  const before = await read($, record)
   await update($, record, () => saved)
+  if (saved.mode === 'off' || saved.active !== before?.active) roughTurns = 0
   if (saved.mode === 'off') stopTimer()
   else if (!timer) startTimer($)
 }
@@ -196,22 +201,27 @@ async function commitNow($: EngineInterface, change: Change): Promise<string | n
   }
 }
 
-// Adds one event to this session's unsaved counts for the active buddy. Nothing is counted
-// with no buddy, while the egg is out, or while the buddy is off.
-async function count($: EngineInterface, event: CountEvent) {
+// The active buddy's seed while events count; null with no buddy, while the egg is out, or while
+// the buddy is off.
+async function countedSeed($: EngineInterface): Promise<string | null> {
   const saved = await read($, record)
-  if (!saved || saved.mode === 'off' || (await read($, hatching))) return
-  const seed = saved.active
+  if (!saved || saved.mode === 'off' || (await read($, hatching))) return null
+  return saved.active
+}
+
+// Adds one event to this session's unsaved counts for the active buddy.
+async function count($: EngineInterface, event: CountEvent) {
+  const seed = await countedSeed($)
+  if (seed === null) return
   await update($, pending, p => ({ ...p, [seed]: countEvent(p[seed] ?? zeroCounts(), event) }))
 }
 
 // Queues mood events for the active buddy and strikes a pose, under the rules for counting
 // (Alive spec sections 2 and 4). A celebration never cuts a flinch short.
 async function feel($: EngineInterface, events: readonly MoodEvent[], kind: 'flinch' | 'celebrate' | null) {
-  const saved = await read($, record)
-  if (!saved || saved.mode === 'off' || (await read($, hatching))) return
-  const seed = saved.active
-  if (events.length > 0) await update($, pendingMood, p => ({ ...p, [seed]: queueMood(p[seed], events) }))
+  const seed = await countedSeed($)
+  if (seed === null) return
+  if (events.length > 0) await update($, pendingMood, p => ({ ...p, [seed]: queueNewest(p[seed], events, MAX_QUEUED_MOOD) }))
   if (kind === null) return
   const now = await read($, tick)
   const untilTick = now + (kind === 'flinch' ? FLINCH_TICKS : CELEBRATE_TICKS)
@@ -221,15 +231,14 @@ async function feel($: EngineInterface, events: readonly MoodEvent[], kind: 'fli
 }
 
 // Queues a finished main turn for the journal, under the rules for counting (Memory spec section 3).
-async function remember($: EngineInterface, facts: TurnFacts) {
-  const saved = await read($, record)
-  if (!saved || saved.mode === 'off' || (await read($, hatching))) {
+async function queueTurn($: EngineInterface, facts: TurnFacts) {
+  const seed = await countedSeed($)
+  if (seed === null) {
     // A turn nobody is counting breaks the run of rough ones.
     roughTurns = 0
     return
   }
-  const seed = saved.active
-  await update($, pendingTurns, p => ({ ...p, [seed]: queueTurns(p[seed], [facts]) }))
+  await update($, pendingTurns, p => ({ ...p, [seed]: queueNewest(p[seed], [facts], MAX_QUEUED_TURNS) }))
 }
 
 // Saves the unsaved counts, mood events and turns with today's visit. A failed store write has
@@ -258,8 +267,8 @@ async function flush($: EngineInterface) {
     await commit($, { kind: 'flush', pending: taken, mood: felt, turns })
   } catch {
     await update($, pending, p => mergePending(taken, p))
-    await update($, pendingMood, p => mergeMood(felt, p))
-    await update($, pendingTurns, p => mergeTurns(turns, p))
+    await update($, pendingMood, p => mergeQueues(felt, p, MAX_QUEUED_MOOD))
+    await update($, pendingTurns, p => mergeQueues(turns, p, MAX_QUEUED_TURNS))
   }
 }
 
@@ -272,7 +281,7 @@ async function countAndFlush(
 ) {
   // Queued before the counts: a flush landing between the two awaits would otherwise save this
   // turn's longestTurnMs without its facts, and the next flush would lose the long-turn moment.
-  if (facts) await remember($, facts)
+  if (facts) await queueTurn($, facts)
   await count($, event)
   await feel($, events, kind)
   await flush($)
@@ -306,8 +315,8 @@ async function moodNow($: EngineInterface, who: Who, now: number): Promise<MoodN
   return moodOf(applyMood(saved ? saved.mood : who.mood, queued, now), now)
 }
 
-// The moment, for the persona prompt: the mood with this session's unsaved events, and the day.
-async function momentLines($: EngineInterface, who: Who): Promise<string[]> {
+// The persona prompt's context: the mood with this session's unsaved events, and the day.
+async function contextLines($: EngineInterface, who: Who): Promise<string[]> {
   const now = await $.clock.now()
   const mood = moodLine(await moodNow($, who, now))
   const holiday = dayInfo(now, who.soul.hatchedAt).holiday
@@ -357,8 +366,8 @@ async function ask(
   const mine = { controller: new AbortController(), kind }
   inFlight = mine
   try {
-    const system = personaSystem(who.soul, bones, await momentLines($, who))
-    // A reply may have aborted this call while the moment lines were read.
+    const system = personaSystem(who.soul, bones, await contextLines($, who))
+    // A reply may have aborted this call while the context lines were read.
     if (mine.controller.signal.aborted) return null
     const result = await $.model.complete(
       { model: 'haiku', system, prompt, maxTokens: 80, timeoutMs: 8000 },
@@ -393,9 +402,9 @@ async function soothe($: EngineInterface, event: CountEvent, who: Who, prompt: s
   }
 }
 
-// The journal line a quip carries, if any (Memory spec section 4). A throw costs the memory,
-// never the quip.
-function memoryFor(journal: readonly Moment[] | undefined, facts: TurnFacts, now: number, bones: Bones): string | null {
+// The journal line a quip carries, if any (Memory spec section 4), noted in `recalled` so the
+// same memory isn't carried again within the hour. A throw costs the memory, never the quip.
+function quipMemory(journal: readonly Moment[] | undefined, facts: TurnFacts, now: number, bones: Bones): string | null {
   try {
     const m = recall({ journal, facts, now, stats: bones.stats, roll: Math.random(), pick: Math.random(), recalled })
     if (!m) return null
@@ -407,7 +416,7 @@ function memoryFor(journal: readonly Moment[] | undefined, facts: TurnFacts, now
 }
 
 // The journal lines a talk carries (Memory spec section 4). A throw costs the memories, never the reply.
-async function memoriesFor($: EngineInterface, journal: readonly Moment[] | undefined): Promise<string[]> {
+async function talkMemoryLines($: EngineInterface, journal: readonly Moment[] | undefined): Promise<string[]> {
   try {
     return talkMemories(journal, await $.clock.now())
   } catch {
@@ -434,7 +443,7 @@ async function react($: EngineInterface, summary: TurnSummary, facts: TurnFacts)
   })
   if (!speak) return
   await update($, lastQuipAt, () => now)
-  const memory = memoryFor(buddy.journal, facts, now, bones)
+  const memory = quipMemory(buddy.journal, facts, now, bones)
   const text = await ask($, buddy, bones, reactionPrompt(summary, memory), 'react')
   if (text) await showBubble($, text)
 }
@@ -444,9 +453,8 @@ async function hatch($: EngineInterface, kind: 'hatch' | 'reroll'): Promise<stri
   const bones = rollBones(seed)
   await update($, hatching, () => true)
   try {
-    // A new buddy is shown as itself, not mid-tour, and starts with no rough turns behind it.
+    // A new buddy is shown as itself, not mid-tour. Adopting it clears the rough turns.
     await update($, tourStart, () => null)
-    roughTurns = 0
     if (!timer) startTimer($)
     let soul = fallbackSoul(seed, bones)
     try {
@@ -722,7 +730,7 @@ export const register: Register = on => {
       const bare = !e.attachments || e.attachments.length === 0
       const message = buddy && fromPerson && bare ? matchAddress(buddy.soul.name, e.text) : null
       if (buddy && message !== null) {
-        later($, async () => soothe($, { kind: 'talk' }, buddy, talkPrompt(message, await memoriesFor($, buddy.journal))))
+        later($, async () => soothe($, { kind: 'talk' }, buddy, talkPrompt(message, await talkMemoryLines($, buddy.journal))))
         return { drop: `(to ${buddy.soul.name})` }
       }
     } catch {

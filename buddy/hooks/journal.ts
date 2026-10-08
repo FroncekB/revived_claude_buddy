@@ -1,8 +1,8 @@
 // The journal (Memory spec): notable moments in a buddy's life, how a session's turns become
 // them, and how they read. Pure: no $.
-import type { Bests, Buddy, Counts, Moment, MomentKind, ToolGroup, TurnFacts } from '../types'
+import type { Bests, Buddy, Counts, Moment, MomentKind, ToolGroup, TurnFacts, TurnReason } from '../types'
 import { daysBetween, localDay, totalCalls, withCommas } from './ledger'
-import type { StatName } from './roll'
+import type { Stats } from './roll'
 import { LONG_TURN_MS } from './voice'
 
 export const MAX_MOMENTS = 20
@@ -53,9 +53,8 @@ const NOUN: Record<ToolGroup, string> = {
   other: 'tool calls',
 }
 
-type Stats = Readonly<Record<StatName, number>>
-
 const iso = (ms: number) => new Date(ms).toISOString()
+const minutes = (ms: number) => Math.floor(ms / 60_000)
 
 // A run of consecutive failed calls: its length, and its group while every call in it shares one.
 export type Run = { n: number; group: ToolGroup | null }
@@ -84,7 +83,7 @@ export function isClean(f: Pick<TurnFacts, 'reason' | 'failRun'>): boolean {
   return f.reason === 'answer' && f.failRun === 0
 }
 
-export function turnFacts(reason: TurnFacts['reason'], durationMs: number, t: TurnCalls, afterRough: number): TurnFacts {
+export function turnFacts(reason: TurnReason, durationMs: number, t: TurnCalls, afterRough: number): TurnFacts {
   return {
     reason,
     durationMs,
@@ -117,8 +116,9 @@ export function noticeTurns(
     if (f.failRun > failRun && f.failRun >= FAIL_RUN_FLOOR) {
       moments.push({ at, kind: 'failRun', n: f.failRun, ...(f.failRunGroup ? { group: f.failRunGroup } : {}) })
     }
-    if (f.durationMs > longest && f.durationMs >= LONG_TURN_FLOOR_MS) {
-      moments.push({ at, kind: 'longTurn', n: Math.floor(f.durationMs / 60_000) })
+    // Judged in the whole minutes it shows, so two longest turns never read the same.
+    if (minutes(f.durationMs) > minutes(longest) && f.durationMs >= LONG_TURN_FLOOR_MS) {
+      moments.push({ at, kind: 'longTurn', n: minutes(f.durationMs) })
     }
     if (f.calls > calls && f.calls >= BUSY_TURN_FLOOR) moments.push({ at, kind: 'busyTurn', n: f.calls })
     // A comeback is a record like the rest: only a clean turn ends a run of rough ones.
@@ -164,27 +164,11 @@ export function addMoments(journal: readonly Moment[] | undefined, moments: read
   return [...stored(journal), ...moments].slice(-MAX_MOMENTS)
 }
 
-// Adds `facts` to a queue, keeping the newest MAX_QUEUED_TURNS.
-export function queueTurns(queue: readonly TurnFacts[] | undefined, facts: readonly TurnFacts[]): TurnFacts[] {
-  return [...(queue ?? []), ...facts].slice(-MAX_QUEUED_TURNS)
-}
-
-// Puts `older` back in front of anything queued since, seed by seed.
-export function mergeTurns(
-  older: Readonly<Record<string, readonly TurnFacts[]>>,
-  newer: Readonly<Record<string, readonly TurnFacts[]>>,
-): Record<string, TurnFacts[]> {
-  const merged: Record<string, TurnFacts[]> = {}
-  for (const seed of new Set([...Object.keys(older), ...Object.keys(newer)])) {
-    merged[seed] = queueTurns(older[seed], newer[seed] ?? [])
-  }
-  return merged
-}
-
-// The moments this build can read, oldest first. A newer build's kind, or a damaged entry, is
+// The moments this build can read, oldest first. Only the newest MAX_MOMENTS are read, so a
+// journal over the cap grows no pane or prompt. A newer build's kind, or a damaged entry, is
 // skipped: kept in the journal, never shown or recalled. A journal that isn't an array is empty.
 export function readable(journal: readonly Moment[] | undefined): Moment[] {
-  return stored(journal).filter(
+  return stored(journal).slice(-MAX_MOMENTS).filter(
     m =>
       typeof m === 'object' &&
       m !== null &&

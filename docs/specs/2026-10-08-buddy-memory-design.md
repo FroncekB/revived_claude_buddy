@@ -50,7 +50,7 @@ The longest turn is already `counts.longestTurnMs`, so `bests` doesn't repeat it
 
 The schema stays at 2. A record written before this build has neither field on any entry. Its `bests` read as zeros, so the first bad run after the upgrade can be logged as a record even if an older one was worse. A `bests` saved without `rough` reads it as 0. As Foundation section 1 requires, a commit changes only the fields it names. So a `journal` written by this build survives a write from a 0.3.x session, which spreads each entry.
 
-The cap applies when a save writes the journal. A newer build that raises the cap will see a 0.4 session trim the journal back to 20.
+The cap applies when a save writes the journal, and when one is read: only the newest 20 are shown or recalled, so a longer stored journal grows no pane or prompt. A newer build that raises the cap will see a 0.4 session trim the journal back to 20.
 
 A moment is stored as data, not text, so its wording can change without touching saves. One is about 75 bytes, so a full journal is about 1.5 KB.
 
@@ -84,7 +84,7 @@ Module variables (lost on reload, which is acceptable, as `tally` is):
 | Kind | Logged when | `n` | Text |
 |-|-|-|-|
 | `failRun` | a turn's `failRun` beats `bests.failRun` and is at least 5 | the run | `Claude failed 18 shell commands in a row` |
-| `longTurn` | a turn's `durationMs` beats `counts.longestTurnMs` and is at least 10 min | whole minutes | `a 34-minute turn, the longest yet` |
+| `longTurn` | a turn's `durationMs` beats `counts.longestTurnMs` in whole minutes, so two never read the same, and is at least 10 min | whole minutes | `a 34-minute turn, the longest yet` |
 | `busyTurn` | a turn's `calls` beats `bests.calls` and is at least 50 | the calls | `73 tool calls in one turn` |
 | `turns` | lifetime `turns` cross 100, 1,000 or 10,000 | the mark | `1,000 turns together` |
 | `calls` | lifetime tool calls (`totalCalls`) cross 1,000, 10,000 or 100,000 | the mark | `10,000 tool calls together` |
@@ -118,7 +118,7 @@ Module variables (lost on reload, which is acceptable, as `tally` is):
 - **Calls.** The turn counts the calls that ran.
 - **Rough turns.** A turn is rough when its reason is `error` or `aborted`, or it had a failed call. It is clean when its reason is `answer` and it had no failed call.
 - **At `turn.complete`:** one `TurnFacts` is queued on `pendingTurns[seed of the active buddy]`, keeping the last 20 per seed. `afterRough` is the count of rough turns in a row before this one. After queuing, a rough turn adds 1 to that count, and any other turn resets it to 0. The run and the turn's tallies reset.
-- **Gating.** Nothing is queued with no record, while hatching, when mode is `off`, or when the record is damaged or foreign. Mode `muted` queues as normal (Foundation section 3). A turn that isn't queued resets the count of rough turns to 0, and so does hatching a new buddy. So a run of rough turns never crosses "off" or a reroll.
+- **Gating.** Nothing is queued with no record, while hatching, when mode is `off`, or when the record is damaged or foreign. Mode `muted` queues as normal (Foundation section 3). A turn that isn't queued resets the count of rough turns to 0, and so does adopting a record that is `off` or has a new active buddy, whichever session made that change. So a run of rough turns never crosses "off" or a reroll, even `/buddy off` straight back to `/buddy`, or another session's reroll.
 
 **The flush change** grows a field:
 ```ts
@@ -222,14 +222,15 @@ last week      1,000 turns together
 
 | File | Change |
 |-|-|
-| `journal.ts` (new, pure) | Kinds, floors and marks; `noticeTurns`, `milestones`, `awayMoment`, `addMoments` (the cap), `momentText`, `ageText`, `recallChance`, `recall`, `memoryLine`, `talkMemories`, `queueTurns`, `mergeTurns`, `momentKey`, `RECALL_REPEAT_MS` |
+| `journal.ts` (new, pure) | Kinds, floors and marks; `noticeTurns`, `milestones`, `awayMoment`, `addMoments` (the cap), `momentText`, `ageText`, `recallChance`, `recall`, `memoryLine`, `talkMemories`, `momentKey`, `RECALL_REPEAT_MS` |
+| `queue.ts` (new, pure) | `queueNewest` and `mergeQueues`, the per-seed queues of unsaved turn facts and mood events, which replace Alive's `queueMood` and `mergeMood` |
 | `ledger.ts` | `withCommas`, moved here from `layout.ts` and exported, so `journal.ts` and `layout.ts` share it |
 | `record.ts` | `flush` applies turn facts and milestones; `arrive` adds `away`; `parseSub` and `USAGE` gain `journal` |
 | `voice.ts` | `reactionPrompt(summary, memory?)`; `talkPrompt(message, memories)` |
 | `layout.ts` | `journalRows`, `journalLines` |
 | `card.ts` | `journalSvg`, `journalAlt` |
 | `register.tsx` | Run, call and rough-turn tracking in the existing `tool.call` and `turn.complete` hooks; `pendingTurns` with take, clear and put-back in `flush`; the `recall` rolls in `react` and the map of recalled memories; memories in the talk prompt; the `journal` subcommand, argument hint and its pane render hook |
-| `types/index.d.ts` | `Moment`, `MomentKind`, `Bests`, `TurnFacts`; `journal?` and `bests?` on `Buddy`; `pendingTurns` in `PluginState` |
+| `types/index.d.ts` | `Moment`, `MomentKind`, `Bests`, `TurnFacts`, and `TurnReason`, moved here from `voice.ts`; `journal?` and `bests?` on `Buddy`; `pendingTurns` in `PluginState` |
 | `README.md` | `/buddy journal` in "Use"; journal and bests in "What it saves"; a short paragraph on memories; this spec in "Design" |
 | `plugin.json` | version 0.4.0 |
 
