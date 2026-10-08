@@ -1,5 +1,8 @@
 export type Mode = 'on' | 'muted' | 'off'
 
+// How grown a buddy is, by its level (Progression spec section 2).
+export type Stage = 'hatchling' | 'adult' | 'elder'
+
 export type Soul = { name: string; personality: string; hatchedAt: string }
 
 // The schema 1 record (base spec section 3), read only to migrate it.
@@ -30,6 +33,8 @@ export type You = {
   streak: number
   bestStreak: number
   days: number
+  // Achievement id to the ISO time it was earned (Progression spec section 3). Missing reads as none.
+  earned?: Record<string, string>
 }
 
 // A buddy's mood (Alive spec section 2): failures push the meter toward anxious, long clean
@@ -44,13 +49,14 @@ export type MoodEvent = 'fail' | 'clean' | 'longClean' | 'soothe'
 
 // A notable moment in a buddy's life (Memory spec section 2), kept as data: its words are made
 // when it is shown, so they can change without touching saves.
-export type MomentKind = 'failRun' | 'longTurn' | 'busyTurn' | 'turns' | 'calls' | 'comeback' | 'away'
+export type MomentKind = 'failRun' | 'longTurn' | 'busyTurn' | 'turns' | 'calls' | 'comeback' | 'away' | 'grew'
 
 export type Moment = {
   // When the save or visit that wrote it happened.
   at: string
   kind: MomentKind
-  // What the kind counts: the run, the minutes, the calls, the mark, the rough turns, the days.
+  // What the kind counts: the run, the minutes, the calls, the mark, the rough turns, the days,
+  // the stage grown into (1 adult, 2 elder).
   n: number
   // failRun only, when the whole run was in one group.
   group?: ToolGroup
@@ -104,7 +110,9 @@ export type Saved = {
   you: You
 }
 
-export type Bubble = { text: string; fromTick: number; untilTick: number }
+// `news` is the announcement a bubble carries (Progression spec section 4): a quip never replaces
+// one, and a reply follows it.
+export type Bubble = { text: string; fromTick: number; untilTick: number; news?: string }
 
 declare module 'claude-code' {
   interface PluginState {
@@ -129,6 +137,11 @@ declare module 'claude-code' {
       pendingMood: Record<string, MoodEvent[]>
       // Finished main turns not yet saved, by buddy seed (Memory spec section 3).
       pendingTurns: Record<string, TurnFacts[]>
+      // The buddy the card and journal panes show; null for the active one (Progression spec section 7).
+      cardSeed: string | null
+      journalSeed: string | null
+      // The stage /buddy debug tours (Progression spec section 5).
+      tourStage: Stage
     }
   }
 }

@@ -1,8 +1,9 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { Bests, Saved, TurnFacts } from '../types'
+import { newsOf } from './achievements'
 import { countEvent, zeroCounts } from './ledger'
-import { USAGE, activeBuddy, applyChange, classify, migrate, parseSub } from './record'
+import { USAGE, activeBuddy, applyChange, classify, findBuddy, migrate, parseSub, shownBuddy, targetOf } from './record'
 import type { Change } from './record'
 
 const SOUL = { name: 'Pip', personality: 'x', hatchedAt: '2026-10-07T00:00:00.000Z' }
@@ -12,27 +13,42 @@ const NOON = new Date(2026, 9, 7, 12).getTime()
 const AT = new Date(NOON).toISOString()
 const FACTS: TurnFacts = { reason: 'answer', durationMs: 4_000, calls: 3, failRun: 0, failRunGroup: null, afterRough: 0 }
 
+const sub = (args: string) => parseSub(args).sub
+
 test('subcommands', () => {
-  expect(parseSub('')).toBe('show')
-  expect(parseSub('  pet ')).toBe('pet')
-  expect(parseSub('CARD')).toBe('card')
-  expect(parseSub('journal')).toBe('journal')
-  expect(parseSub('journal all')).toBe('usage')
-  expect(USAGE).toBe('Usage: /buddy [pet | card | journal | mute | unmute | off | reroll [confirm]]')
-  expect(parseSub('mute')).toBe('mute')
-  expect(parseSub('unmute')).toBe('unmute')
-  expect(parseSub('off')).toBe('off')
-  expect(parseSub('reroll')).toBe('reroll')
-  expect(parseSub('reroll confirm')).toBe('reroll-confirm')
-  expect(parseSub('reroll now')).toBe('usage')
-  expect(parseSub('pet twice')).toBe('usage')
-  expect(parseSub('dance')).toBe('usage')
+  expect(parseSub('')).toEqual({ sub: 'show' })
+  expect(sub('  pet ')).toBe('pet')
+  expect(sub('CARD')).toBe('card')
+  expect(sub('journal')).toBe('journal')
+  expect(sub('dex')).toBe('dex')
+  expect(sub('dex all')).toBe('usage')
+  expect(parseSub('card #2')).toEqual({ sub: 'card', target: '#2' })
+  expect(parseSub('Journal Pip')).toEqual({ sub: 'journal', target: 'Pip' })
+  expect(sub('card Pip twice')).toBe('usage')
+  expect(parseSub('swap #2')).toEqual({ sub: 'swap', target: '#2' })
+  expect(sub('swap')).toBe('usage')
+  expect(sub('swap Pip now')).toBe('usage')
+  expect(USAGE).toBe(
+    'Usage: /buddy [pet | card [who] | journal [who] | dex | swap <who> | mute | unmute | off | reroll [confirm]]',
+  )
+  expect(sub('mute')).toBe('mute')
+  expect(sub('unmute')).toBe('unmute')
+  expect(sub('off')).toBe('off')
+  expect(sub('reroll')).toBe('reroll')
+  expect(sub('reroll confirm')).toBe('reroll-confirm')
+  expect(sub('reroll now')).toBe('usage')
+  expect(sub('pet twice')).toBe('usage')
+  expect(sub('dance')).toBe('usage')
 })
 
-test('debug is a subcommand the usage line never mentions', () => {
-  expect(parseSub('debug')).toBe('debug')
-  expect(parseSub(' DEBUG off ')).toBe('debug-off')
-  expect(parseSub('debug now')).toBe('usage')
+test('debug is a subcommand the usage line never mentions, and can tour one stage', () => {
+  expect(parseSub('debug')).toEqual({ sub: 'debug' })
+  expect(parseSub(' DEBUG off ')).toEqual({ sub: 'debug-off' })
+  expect(parseSub('debug Hatchling')).toEqual({ sub: 'debug', stage: 'hatchling' })
+  expect(parseSub('debug adult')).toEqual({ sub: 'debug', stage: 'adult' })
+  expect(parseSub('debug elder')).toEqual({ sub: 'debug', stage: 'elder' })
+  expect(parseSub('debug now')).toEqual({ sub: 'usage' })
+  expect(parseSub('debug elder off')).toEqual({ sub: 'usage' })
   expect(USAGE).not.toMatch(/debug/)
 })
 
@@ -46,6 +62,25 @@ test('schemas 1 and 2 are ours; a schema 2 record without its active buddy is da
   expect(classify({ schema: 2 })).toEqual({ kind: 'damaged' })
   expect(classify({ schema: 3, seed: 'x' })).toEqual({ kind: 'foreign', schema: '3' })
   expect(classify('junk')).toEqual({ kind: 'foreign', schema: 'unknown' })
+})
+
+test('a name or personality edited to carry control characters is read without them', () => {
+  const soulOf = (raw: unknown) => {
+    const stored = classify(raw)
+    return stored.kind === 'ok' ? activeBuddy(stored.saved).soul : null
+  }
+  const saved = migrate(V1)
+  const clean = classify(saved)
+  expect(clean.kind === 'ok' && clean.saved).toBe(saved)
+  const edited = (soul: object): Saved => ({ ...saved, buddies: [{ ...saved.buddies[0]!, soul: { ...SOUL, ...soul } }] })
+  expect(soulOf(edited({ name: 'P\u001b[2Jip\u009b', personality: 'Bold\u001b]52;c;aGk=\u0007 one.' }))).toEqual({
+    ...SOUL,
+    name: 'P[2Jip',
+    personality: 'Bold]52;c;aGk= one.',
+  })
+  // A name of nothing but control characters reads as "Buddy", in either schema.
+  expect(soulOf(edited({ name: '\u001b\u0007' }))?.name).toBe('Buddy')
+  expect(soulOf({ ...V1, soul: { ...SOUL, name: '\u009b' } })?.name).toBe('Buddy')
 })
 
 test('migration keeps the buddy and starts its counts and the streak at zero', () => {
@@ -228,4 +263,116 @@ test('a new day after three or more missed days writes "away" on the buddy left 
   // Two missed days leave a sulk but no moment.
   const weekend: Saved = { ...away, you: { ...away.you, lastDay: '2026-10-04' } }
   expect(activeBuddy(applyChange(weekend, { kind: 'visit' }, NOON)!).journal).toBeUndefined()
+})
+
+// V1's buddy one turn short of level 10.
+function nearly(): Saved {
+  const base = migrate(V1)
+  return { ...base, buddies: [{ ...base.buddies[0]!, counts: { ...zeroCounts(), turns: 809 } }] }
+}
+const ONE_TURN = countEvent(zeroCounts(), { kind: 'turn', reason: 'answer', durationMs: 1_000 })
+
+test('a flush that carries a buddy to level 10 logs that it grew and earns Grown up, once', () => {
+  const saved = applyChange(nearly(), { kind: 'flush', pending: { s: ONE_TURN } }, NOON)!
+  expect(activeBuddy(saved).journal).toEqual([{ at: AT, kind: 'grew', n: 1 }])
+  expect(saved.you.earned).toEqual({ grownUp: AT })
+  const again = applyChange(saved, { kind: 'flush', pending: { s: ONE_TURN } }, NOON + 1_000)!
+  expect(activeBuddy(again).journal).toHaveLength(1)
+  expect(again.you.earned).toEqual({ grownUp: AT })
+})
+
+test('a visit earns the streak achievements and keeps what was earned before', () => {
+  const base = migrate(V1)
+  const six = { ...base, you: { lastDay: '2026-10-06', streak: 6, bestStreak: 6, days: 6, earned: { marathon: 'before' } } }
+  const saved = applyChange(six, { kind: 'visit' }, NOON)!
+  expect(saved.you.earned).toEqual({ marathon: 'before', regular: AT })
+  expect(applyChange(saved, { kind: 'visit' }, NOON)).toBeNull()
+})
+
+test('an earned field that is not an object is replaced when something is earned, and none is added for nothing', () => {
+  const base = migrate(V1)
+  const damaged = { ...base, you: { lastDay: '2026-10-06', streak: 6, bestStreak: 6, days: 6, earned: 'lots' } } as unknown as Saved
+  expect(applyChange(damaged, { kind: 'visit' }, NOON)?.you.earned).toEqual({ regular: AT })
+  expect('earned' in applyChange(base, { kind: 'visit' }, NOON)!.you).toBe(false)
+})
+
+// Pip, a common dragon ('swap-1'); Bix, a common ghost ('test-seed'); and pip, a common axolotl
+// ('swap-2'), who is here now.
+const THREE: Saved = {
+  ...migrate(V1),
+  active: 'swap-2',
+  buddies: [
+    { seed: 'swap-1', soul: SOUL, retiredAt: AT, counts: zeroCounts() },
+    { seed: 'test-seed', soul: { ...SOUL, name: 'Bix' }, retiredAt: AT, counts: zeroCounts() },
+    { seed: 'swap-2', soul: { ...SOUL, name: 'pip' }, retiredAt: null, counts: zeroCounts() },
+  ],
+}
+
+test('a buddy is found by name in any case, or by its dex number', () => {
+  expect(findBuddy(THREE, 'BIX')).toEqual({ kind: 'one', seed: 'test-seed' })
+  expect(findBuddy(THREE, '#1')).toEqual({ kind: 'one', seed: 'swap-1' })
+  expect(findBuddy(THREE, '3')).toEqual({ kind: 'one', seed: 'swap-2' })
+  expect(findBuddy(THREE, 'Pip')).toEqual({ kind: 'many', numbers: [1, 3] })
+  for (const nobody of ['Rex', '#4', '0', '#']) expect([nobody, findBuddy(THREE, nobody)]).toEqual([nobody, { kind: 'none' }])
+})
+
+test('a card or journal target is one buddy, the active one as null, or the reason there is none', () => {
+  expect(targetOf(THREE, undefined, 'card')).toEqual({ seed: null })
+  expect(targetOf(THREE, 'bix', 'card')).toEqual({ seed: 'test-seed' })
+  expect(targetOf(THREE, '#3', 'card')).toEqual({ seed: null })
+  expect(targetOf(THREE, 'PIP', 'journal')).toEqual({
+    reply: '2 buddies are named Pip: #1 dragon, #3 axolotl. Run /buddy journal #3.',
+  })
+  expect(targetOf(THREE, 'Rex', 'card')).toEqual({ reply: 'No buddy named Rex in the dex.' })
+  expect(targetOf(THREE, '#09', 'card')).toEqual({ reply: 'No buddy #9 in the dex.' })
+  expect(shownBuddy(THREE, 'test-seed').soul.name).toBe('Bix')
+  expect(shownBuddy(THREE, null).seed).toBe('swap-2')
+  expect(shownBuddy(THREE, 'gone').seed).toBe('swap-2')
+})
+
+// Two buddies: a, retired at `retiredAt`, and b, here now, last visited on `lastDay`.
+const pair = (retiredAt: string, lastDay = '2026-10-06'): Saved => ({
+  ...migrate(V1),
+  rerolls: 1,
+  active: 'b',
+  buddies: [
+    { seed: 'a', soul: SOUL, retiredAt, counts: zeroCounts() },
+    { seed: 'b', soul: { ...SOUL, name: 'Bix' }, retiredAt: null, counts: zeroCounts() },
+  ],
+  you: { lastDay, streak: 1, bestStreak: 1, days: 1 },
+})
+const YESTERDAY = new Date(2026, 9, 6, 12).toISOString()
+
+test('a swap retires the active buddy, brings the other back on, and leaves the reroll count alone', () => {
+  const saved = applyChange({ ...pair(YESTERDAY), mode: 'off' }, { kind: 'swap', seed: 'a' }, NOON)!
+  expect(saved).toMatchObject({ active: 'a', mode: 'on', rerolls: 1 })
+  expect(saved.buddies.map(b => [b.seed, b.retiredAt])).toEqual([
+    ['a', null],
+    ['b', AT],
+  ])
+  // A day in retirement is no reason to sulk.
+  expect(saved.buddies[0]?.mood).toBeUndefined()
+  expect(saved.buddies[0]?.journal).toBeUndefined()
+  expect(applyChange(pair(YESTERDAY), { kind: 'swap', seed: 'b' }, NOON)).toBeNull()
+  expect(applyChange(pair(YESTERDAY), { kind: 'swap', seed: 'gone' }, NOON)).toBeNull()
+  expect(applyChange(null, { kind: 'swap', seed: 'a' }, NOON)).toBeNull()
+})
+
+test('a buddy back after five days retired sulks and remembers being away; the one left keeps the visit sulk', () => {
+  const saved = applyChange(pair(new Date(2026, 9, 2, 12).toISOString(), '2026-10-04'), { kind: 'swap', seed: 'a' }, NOON)!
+  expect(saved.buddies[0]?.mood).toEqual({ meter: 0, sulk: 3, at: AT })
+  expect(saved.buddies[0]?.journal).toEqual([{ at: AT, kind: 'away', n: 5 }])
+  // 2026-10-04 to 2026-10-07 misses two days: the buddy left alone sulks 1.
+  expect(saved.buddies[1]?.mood?.sulk).toBe(1)
+  // A damaged retirement time leaves no sulk.
+  expect(applyChange(pair('never'), { kind: 'swap', seed: 'a' }, NOON)?.buddies[0]?.mood).toBeUndefined()
+})
+
+test('a swap on a new day keeps the streak but earns nothing; the next flush earns it, and so announces it', () => {
+  const six: Saved = { ...pair(YESTERDAY), you: { lastDay: '2026-10-06', streak: 6, bestStreak: 6, days: 6 } }
+  const swapped = applyChange(six, { kind: 'swap', seed: 'a' }, NOON)!
+  expect(swapped.you).toEqual({ lastDay: '2026-10-07', streak: 7, bestStreak: 7, days: 7 })
+  const flushed = applyChange(swapped, { kind: 'flush', pending: { a: ONE_TURN } }, NOON + 1_000)!
+  expect(flushed.you.earned).toEqual({ regular: new Date(NOON + 1_000).toISOString() })
+  expect(newsOf(swapped, flushed)?.earned).toEqual(['regular'])
 })

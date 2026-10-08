@@ -10,12 +10,21 @@ import type { Pose } from './sprites'
 // A plain duck in a crown, doing nothing in particular.
 const BONES = { species: 'duck' as const, eye: '·' as const, hat: 'crown' as const, shiny: false }
 const CALM: Scene = {
-  bones: BONES, tick: 0, mood: 'neutral', pose: null, idleTicks: 0, night: false, holiday: null, heartsFrame: null, saying: false,
+  bones: BONES,
+  stage: 'adult',
+  tick: 0,
+  mood: 'neutral',
+  pose: null,
+  idleTicks: 0,
+  night: false,
+  holiday: null,
+  heartsFrame: null,
+  saying: false,
 }
 const HATCHED = new Date(2020, 0, 15, 12).toISOString()
 const JULY4 = holidayOn('2026-07-04', HATCHED)
 const body = (rows: string[]) => rows.slice(1).map(r => r.trimEnd())
-const posed = (pose: Pose) => bodyRows('duck', pose).map(r => fillEyes(r, POSE_EYE[pose]).trimEnd())
+const posed = (pose: Pose) => bodyRows('duck', 'adult', pose).map(r => fillEyes(r, POSE_EYE[pose]).trimEnd())
 
 test('a pose beats sleep and the fidget cycle, and draws its own frame and eye', () => {
   expect(body(draw({ ...CALM, pose: 'flinch', idleTicks: DAY_SLEEP_TICKS }).sprite)).toEqual(posed('flinch'))
@@ -69,7 +78,7 @@ test('a holiday prop shows only while nothing is said', () => {
 })
 
 test("the card's portrait is the rolled buddy: its hat and its eye", () => {
-  const rows = portrait(BONES, 0)
+  const rows = portrait(BONES, 'adult', 0)
   expect(rows[0]).toBe(HAT_ART.crown.padEnd(SPRITE_W))
   expect(rows.join('\n')).toContain('<(· )___')
 })

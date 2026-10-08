@@ -1,15 +1,16 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Buddy, Counts, Moment, MoodEvent, Saved, TurnFacts } from '../types'
+import type { Buddy, Counts, Moment, MoodEvent, Saved, Stage, TurnFacts } from '../types'
+import { newsOf } from './achievements'
 import { dayInfo } from './calendar'
-import { cardAlt, cardSvg, journalAlt, journalSvg, meter } from './card'
+import { cardAlt, cardSvg, dexAlt, dexSvg, journalAlt, journalSvg, meter } from './card'
 import {
   MAX_QUEUED_TURNS, addCall, isRough, memoryLine, momentKey, noCalls, recall, talkMemories, turnFacts,
 } from './journal'
 import {
-  bandRows, cardLines, compactLine, emptyJournal, isCompact, journalHeader, journalLines, journalRows, nameLine, rightRuns,
-  spriteTint, streakLine,
+  achievementsText, bandRows, cardLines, cardProgress, compactLine, dexLines, dexRows, dexText, emptyJournal, isCompact,
+  journalHeader, journalLines, journalRows, levelText, nameLine, rightRuns, spriteTint, streakLine,
 } from './layout'
 import { addCounts, countEvent, mergePending, toolGroup, zeroCounts } from './ledger'
 import type { CountEvent } from './ledger'
@@ -17,9 +18,12 @@ import { CELEBRATE_TICKS, FLINCH_TICKS, draw, portrait } from './look'
 import type { Scene } from './look'
 import { MAX_QUEUED_MOOD, applyMood, moodLine, moodOf, turnMood } from './mood'
 import type { MoodName } from './mood'
+import { bonesFor, levelOf, stageOf } from './progress'
 import { mergeQueues, queueNewest } from './queue'
-import { STORE_KEY, USAGE, activeBuddy, applyChange, classify, parseSub } from './record'
-import type { Change, Stored, Sub } from './record'
+import {
+  STORE_KEY, USAGE, activeBuddy, applyChange, classify, findBuddy, notFound, parseSub, shownBuddy, targetOf,
+} from './record'
+import type { Change, Parsed, Stored } from './record'
 import { RARITY, STATS, rollBones } from './roll'
 import type { Bones } from './roll'
 import { eggRows, frameAt } from './sprites'
@@ -38,6 +42,7 @@ import {
   fallbackSoul,
   hatchRequest,
   matchAddress,
+  newsLine,
   parseSoul,
   personaSystem,
   reactionPrompt,
@@ -65,9 +70,13 @@ const posing = atom({ plugin: 'buddy', key: 'pose' } as const, null)
 const lastActive = atom({ plugin: 'buddy', key: 'lastActiveTick' } as const, 0)
 const pendingMood = atom({ plugin: 'buddy', key: 'pendingMood' } as const, {})
 const pendingTurns = atom({ plugin: 'buddy', key: 'pendingTurns' } as const, {})
+const cardSeed = atom({ plugin: 'buddy', key: 'cardSeed' } as const, null)
+const journalSeed = atom({ plugin: 'buddy', key: 'journalSeed' } as const, null)
+const tourStage = atom({ plugin: 'buddy', key: 'tourStage' } as const, 'adult')
 
 const CARD = 'card'
 const JOURNAL = 'journal'
+const DEX = 'dex'
 const NO_BUDDY = 'No buddy yet. Run /buddy to hatch one.'
 const SAVE_FAILED = 'Could not save your buddy; it lives for this session only.'
 
@@ -87,8 +96,9 @@ type Look = {
   prop: Prop | null
 }
 
-// The part of a buddy that speaks: its seed, for the bones, its soul, and its saved mood.
-type Who = Pick<Buddy, 'seed' | 'soul' | 'mood'>
+// The part of a buddy that speaks: its seed and counts, for its grown bones, its soul, and its
+// saved mood. A buddy just hatched has no counts yet, so it is level 1.
+type Who = Pick<Buddy, 'seed' | 'soul' | 'mood'> & { counts?: Counts }
 
 const tint = (color: string | undefined) => (color ? { color } : {})
 
@@ -188,9 +198,12 @@ async function commitNow($: EngineInterface, change: Change): Promise<string | n
   const base = await current($)
   const refused = refusal(base)
   if (refused) return refused
-  const saved = applyChange(base.kind === 'ok' ? base.saved : null, change, await $.clock.now())
+  const before = base.kind === 'ok' ? base.saved : null
+  const saved = applyChange(before, change, await $.clock.now())
   if (!saved) return null
   await adopt($, saved)
+  // Only the session whose commit made the change announces it, whether or not the write lands.
+  await announce($, before, saved)
   try {
     await $.store.set(STORE_KEY, saved)
     await update($, unsaved, () => false)
@@ -292,7 +305,7 @@ async function countAndFlush(
 async function speakUp($: EngineInterface, turn: number) {
   const saved = await read($, record)
   if (!saved || (await read($, hatching))) return
-  const bones = rollBones(saved.active)
+  const bones = bonesFor(activeBuddy(saved))
   const t = await read($, tick)
   const said = await read($, bubble)
   const say = shouldFlag({
@@ -335,9 +348,31 @@ async function stir($: EngineInterface) {
   await update($, lastActive, () => now)
 }
 
-async function showBubble($: EngineInterface, text: string) {
+// `news` is the announcement the bubble carries, if any.
+async function showBubble($: EngineInterface, text: string, news?: string) {
   const now = await read($, tick)
-  await update($, bubble, () => ({ text, fromTick: now, untilTick: now + bubbleTicks(text) }))
+  await update($, bubble, () => ({ text, fromTick: now, untilTick: now + bubbleTicks(text), ...(news ? { news } : {}) }))
+}
+
+// The announcement still showing, if one is.
+async function newsShowing($: EngineInterface): Promise<string | null> {
+  const said = await read($, bubble)
+  return said?.news !== undefined && (await read($, tick)) < said.untilTick ? said.news : null
+}
+
+// What a commit changed worth saying (Progression spec section 4): a celebration, and a canned
+// line unless muted. A throw costs only the announcement; the card shows the news either way.
+async function announce($: EngineInterface, before: Saved | null, after: Saved) {
+  try {
+    const news = newsOf(before, after)
+    if (!news || after.mode === 'off') return
+    await feel($, [], 'celebrate')
+    if (after.mode !== 'on') return
+    const line = newsLine(news)
+    await showBubble($, line, line)
+  } catch {
+    // Nothing to undo.
+  }
 }
 
 // The session's visit (spec section 3), greeting the streak on the first session of a new day.
@@ -347,7 +382,8 @@ async function visitToday($: EngineInterface) {
   const dayBefore = saved.you.lastDay
   await commit($, { kind: 'visit' })
   const after = await read($, record)
-  if (after && shouldGreet({ mode: after.mode, dayBefore, you: after.you })) {
+  // A visit that earned something has already said so.
+  if (after && shouldGreet({ mode: after.mode, dayBefore, you: after.you }) && (await newsShowing($)) === null) {
     await showBubble($, streakGreeting(after.you.streak))
   }
 }
@@ -382,14 +418,18 @@ async function ask(
   }
 }
 
-// Talk, pet and hello: answered even when muted, at most one model call per 5 s.
+// Talk, pet and hello: answered even when muted, at most one model call per 5 s. A reply that
+// lands on an announcement follows it in the same bubble, so a pet that earns Good friend still
+// says so (Progression spec section 4).
 async function reply($: EngineInterface, who: Who, prompt: string) {
-  const bones = rollBones(who.seed)
+  const bones = bonesFor(who)
   const now = await $.clock.now()
   const last = await read($, lastReplyAt)
   await update($, lastReplyAt, () => now)
   const text = now - last < REPLY_FLOOR_MS ? null : await ask($, who, bones, prompt, 'reply')
-  await showBubble($, text ?? cannedLine(bones, cannedCount++, Math.random()))
+  const line = text ?? cannedLine(bones, cannedCount++, Math.random())
+  const news = await newsShowing($)
+  await showBubble($, news === null ? line : `${news} ${line}`, news ?? undefined)
 }
 
 // A pet or a talk: counted and saved before the reply is asked for. A save in progress holds the
@@ -430,7 +470,7 @@ async function react($: EngineInterface, summary: TurnSummary, facts: TurnFacts)
   const saved = await read($, record)
   if (!saved || (await read($, hatching))) return
   const buddy = activeBuddy(saved)
-  const bones = rollBones(buddy.seed)
+  const bones = bonesFor(buddy)
   const now = await $.clock.now()
   const speak = shouldQuip({
     mode: saved.mode,
@@ -445,7 +485,8 @@ async function react($: EngineInterface, summary: TurnSummary, facts: TurnFacts)
   await update($, lastQuipAt, () => now)
   const memory = quipMemory(buddy.journal, facts, now, bones)
   const text = await ask($, buddy, bones, reactionPrompt(summary, memory), 'react')
-  if (text) await showBubble($, text)
+  // An announcement keeps the bubble: a quip that comes back over one is dropped.
+  if (text && (await newsShowing($)) === null) await showBubble($, text)
 }
 
 async function hatch($: EngineInterface, kind: 'hatch' | 'reroll'): Promise<string> {
@@ -484,20 +525,20 @@ async function hatch($: EngineInterface, kind: 'hatch' | 'reroll'): Promise<stri
   }
 }
 
-async function runBuddy($: EngineInterface, sub: Sub): Promise<string | undefined> {
-  if (sub === 'usage') return USAGE
+async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | undefined> {
+  if (parsed.sub === 'usage') return USAGE
   const stored = await current($)
-  if (stored.kind === 'none') return sub === 'show' ? hatch($, 'hatch') : NO_BUDDY
+  if (stored.kind === 'none') return parsed.sub === 'show' ? hatch($, 'hatch') : NO_BUDDY
   if (stored.kind !== 'ok') return refusal(stored) ?? undefined
   const saved = stored.saved
   // Another session may have changed the store since this one last looked.
   await adopt($, saved)
   const buddy = activeBuddy(saved)
-  const bones = rollBones(buddy.seed)
+  const bones = bonesFor(buddy)
   const name = buddy.soul.name
   const who = `${name}, ${bones.rarity} ${bones.species}`
   const hidden = `${name} is hidden. Run /buddy to bring it back.`
-  switch (sub) {
+  switch (parsed.sub) {
     case 'show': {
       const note = await commit($, { kind: 'mode', mode: 'on' })
       later($, () => reply($, buddy, HELLO_PROMPT))
@@ -511,16 +552,35 @@ async function runBuddy($: EngineInterface, sub: Sub): Promise<string | undefine
       return undefined
     }
     case 'card': {
+      const target = targetOf(saved, parsed.target, 'card')
+      if ('reply' in target) return target.reply
+      await update($, cardSeed, () => target.seed)
       const opened = await $.ui.open({ id: CARD, title: 'Buddy', closeOnEscape: true })
       // A surface that places no panes gets the card as text instead.
       if (opened.isPlaced) return undefined
-      return [...cardLines(buddy.soul, bones, saved.rerolls), streakLine(saved.you, await countsOf($, buddy))].join('\n')
+      const shown = shownBuddy(saved, target.seed)
+      const progress = cardProgress(saved, shown)
+      return [
+        ...cardLines(shown.soul, bonesFor(shown), saved.rerolls, progress),
+        streakLine(saved.you, await countsOf($, shown)),
+        achievementsText(progress.earned.length),
+      ].join('\n')
     }
     case 'journal': {
+      const target = targetOf(saved, parsed.target, 'journal')
+      if ('reply' in target) return target.reply
+      await update($, journalSeed, () => target.seed)
       const opened = await $.ui.open({ id: JOURNAL, title: 'Journal', closeOnEscape: true })
       // A surface that places no panes gets the newest ten as text instead.
       if (opened.isPlaced) return undefined
-      return journalLines(name, buddy.journal, await $.clock.now()).join('\n')
+      const shown = shownBuddy(saved, target.seed)
+      return journalLines(shown.soul.name, shown.journal, await $.clock.now()).join('\n')
+    }
+    case 'dex': {
+      const opened = await $.ui.open({ id: DEX, title: 'Buddydex', closeOnEscape: true })
+      // A surface that places no panes gets the count and the newest ten as text instead.
+      if (opened.isPlaced) return undefined
+      return dexLines(saved, await $.clock.now()).join('\n')
     }
     case 'mute':
       return (await commit($, { kind: 'mode', mode: 'muted' })) ?? `${name} will stay quiet unless spoken to.`
@@ -532,11 +592,32 @@ async function runBuddy($: EngineInterface, sub: Sub): Promise<string | undefine
       return `This retires ${who}. Run /buddy reroll confirm.`
     case 'reroll-confirm':
       return hatch($, 'reroll')
+    case 'swap': {
+      if (await read($, hatching)) return 'Wait for the egg to hatch.'
+      const found = findBuddy(saved, parsed.target)
+      if (found.kind !== 'one') return notFound(saved, parsed.target, found, 'swap')
+      if (found.seed === saved.active) return `${name} is already here.`
+      // The returning buddy is shown as itself, not mid-tour.
+      await update($, tourStart, () => null)
+      const note = await commit($, { kind: 'swap', seed: found.seed })
+      // Refused: nothing was written or adopted, so nobody is back to say hello.
+      if (note !== null && note !== SAVE_FAILED) return note
+      const back = shownBuddy((await read($, record)) ?? saved, found.seed)
+      // A card or journal that was pinned to this buddy now follows the active one, as targetOf
+      // answers null for it, so the next swap carries the panes along.
+      await update($, cardSeed, seed => (seed === found.seed ? null : seed))
+      await update($, journalSeed, seed => (seed === found.seed ? null : seed))
+      await update($, bubble, () => null)
+      later($, () => reply($, back, HELLO_PROMPT))
+      return note ?? `${back.soul.name} is back.`
+    }
     case 'debug': {
       if (saved.mode === 'off') return hidden
+      const stage = parsed.stage ?? 'adult'
       const now = await read($, tick)
+      await update($, tourStage, () => stage)
       await update($, tourStart, () => now)
-      return `Touring all ${TOUR_STEPS} species with their reactions, then the holidays and moods. Run /buddy debug off to stop.`
+      return `Touring all ${TOUR_STEPS} species as ${stage}s with their reactions, then the holidays and moods. Run /buddy debug off to stop.`
     }
     case 'debug-off':
       await update($, tourStart, () => null)
@@ -566,6 +647,7 @@ async function liveScene(
   $: EngineInterface,
   buddy: Buddy,
   bones: Bones,
+  stage: Stage,
   t: number,
   heartsFrame: number | null,
   saying: boolean,
@@ -575,6 +657,7 @@ async function liveScene(
   const posed = await read($, posing)
   return {
     bones,
+    stage,
     tick: t,
     mood: await moodNow($, buddy, now),
     pose: posed && t < posed.untilTick ? posed.kind : null,
@@ -590,8 +673,11 @@ async function buddyLook($: EngineInterface, saved: Saved, t: number): Promise<L
   const buddy = activeBuddy(saved)
   // A running /buddy debug tour dresses the real buddy up; nothing saved changes.
   const started = await read($, tourStart)
-  const tour = started === null ? null : tourAt(t - started)
-  const bones = tour ? { ...rollBones(buddy.seed), ...tour.look } : rollBones(buddy.seed)
+  const tour = started === null ? null : tourAt(t - started, await read($, tourStage))
+  const own = bonesFor(buddy)
+  const bones = tour ? { ...own, ...tour.look } : own
+  // The tour draws the stage it was asked for; otherwise the buddy is drawn at its own.
+  const stage = tour ? tour.stage : stageOf(levelOf(buddy.counts))
   const name = tour ? tour.name : buddy.soul.name
   const animTick = tour ? tour.tick : t
   const heartsUntilTick = await read($, heartsUntil)
@@ -601,6 +687,7 @@ async function buddyLook($: EngineInterface, saved: Saved, t: number): Promise<L
   const scene: Scene = tour
     ? {
         bones,
+        stage,
         tick: animTick,
         mood: tour.mood,
         pose: tour.pose,
@@ -610,9 +697,9 @@ async function buddyLook($: EngineInterface, saved: Saved, t: number): Promise<L
         heartsFrame,
         saying,
       }
-    : await liveScene($, buddy, bones, t, heartsFrame, saying)
+    : await liveScene($, buddy, own, stage, t, heartsFrame, saying)
   const drawn = draw(scene)
-  const { label, stars } = nameLine(name, bones)
+  const { label, stars } = nameLine(name, bones, tour ? null : levelOf(buddy.counts))
   const sprite = spriteTint(bones, animTick)
   return {
     sprite: drawn.sprite,
@@ -635,7 +722,7 @@ export const register: Register = on => {
       await $.command.register({
         name: 'buddy',
         description: 'Hatch, pet, or manage your terminal buddy',
-        argumentHint: '[pet | card | journal | mute | unmute | off | reroll [confirm]]',
+        argumentHint: '[pet | card [who] | journal [who] | dex | swap <who> | mute | unmute | off | reroll [confirm]]',
         immediate: true,
       })
     } catch {
@@ -805,15 +892,16 @@ export const register: Register = on => {
       const saved = await read($, record)
       if (!saved) return <Text dimColor>{NO_BUDDY}</Text>
 
-      const buddy = activeBuddy(saved)
-      const bones = rollBones(buddy.seed)
+      const buddy = shownBuddy(saved, await read($, cardSeed))
+      const bones = bonesFor(buddy)
+      const progress = cardProgress(saved, buddy)
       const history = { you: saved.you, counts: await countsOf($, buddy) }
       if (e.surface !== 'terminal') {
         const { Svg } = $.ui.resolve(e)
         return (
           <Svg
-            source={cardSvg(buddy.soul, bones, saved.rerolls, history)}
-            alt={cardAlt(buddy.soul, bones, saved.rerolls, history)}
+            source={cardSvg(buddy.soul, bones, saved.rerolls, history, progress)}
+            alt={cardAlt(buddy.soul, bones, saved.rerolls, history, progress)}
           />
         )
       }
@@ -829,17 +917,21 @@ export const register: Register = on => {
             <Text bold>{buddy.soul.name}</Text>
             <Text {...tint(starColor)}>{'  ' + stars}</Text>
           </Box>
+          <Text>{levelText(progress)}</Text>
           <Text dimColor>
             {`${bones.rarity} ${bones.species}${bones.shiny ? ' (shiny)' : ''}   Hat: ${bones.hat}   Eyes: ${bones.eye}`}
           </Text>
           <Text>{buddy.soul.personality}</Text>
         </Box>
       )
-      const footer = <Text dimColor>{`Hatched ${buddy.soul.hatchedAt.slice(0, 10)}   Rerolls: ${saved.rerolls}`}</Text>
+      const retired = progress.retiredAt ? `   Retired ${progress.retiredAt.slice(0, 10)}` : ''
+      const footer = (
+        <Text dimColor>{`Hatched ${buddy.soul.hatchedAt.slice(0, 10)}   Rerolls: ${saved.rerolls}${retired}`}</Text>
+      )
       const cells = Math.max(8, Math.min(30, e.props.bodyColumns - 18))
       return (
         <Box flexDirection="column">
-          {portrait(bones, t).map(row => (
+          {portrait(bones, progress.stage, t).map(row => (
             <Text {...tint(sprite.color)} bold={sprite.bold}>
               {row}
             </Text>
@@ -858,6 +950,8 @@ export const register: Register = on => {
           <Text> </Text>
           {footer}
           <Text dimColor>{streakLine(history.you, history.counts)}</Text>
+          <Text dimColor>{achievementsText(progress.earned.length)}</Text>
+          {progress.earned.length > 0 ? [<Text>{progress.earned.join(' · ')}</Text>] : []}
         </Box>
       )
     } catch {
@@ -865,19 +959,19 @@ export const register: Register = on => {
     }
   })
 
-  // The journal pane (Memory spec section 5): the active buddy's saved moments, newest first.
+  // The journal pane (Memory spec section 5): the shown buddy's saved moments, newest first.
   on('ui.render', { component: 'Pane', requestId: JOURNAL }, async ($, e, next) => {
     try {
       const { Box, Text } = $.ui.resolve(e)
       const saved = await read($, record)
       if (!saved) return <Text dimColor>{NO_BUDDY}</Text>
 
-      const buddy = activeBuddy(saved)
+      const buddy = shownBuddy(saved, await read($, journalSeed))
       const name = buddy.soul.name
       const rows = journalRows(buddy.journal, await $.clock.now())
       if (e.surface !== 'terminal') {
         const { Svg } = $.ui.resolve(e)
-        return <Svg source={journalSvg(name, rollBones(buddy.seed), rows)} alt={journalAlt(name, rows)} />
+        return <Svg source={journalSvg(name, bonesFor(buddy), rows)} alt={journalAlt(name, rows)} />
       }
 
       return (
@@ -891,6 +985,33 @@ export const register: Register = on => {
                   <Text>{row.text}</Text>
                 </Box>
               ))}
+        </Box>
+      )
+    } catch {
+      return next(e)
+    }
+  })
+
+  // The dex pane (Progression spec section 6): every buddy you've had, oldest first.
+  on('ui.render', { component: 'Pane', requestId: DEX }, async ($, e, next) => {
+    try {
+      const { Box, Text } = $.ui.resolve(e)
+      const saved = await read($, record)
+      if (!saved) return <Text dimColor>{NO_BUDDY}</Text>
+
+      const rows = dexRows(saved, await $.clock.now())
+      if (e.surface !== 'terminal') {
+        const { Svg } = $.ui.resolve(e)
+        return <Svg source={dexSvg(rows)} alt={dexAlt(rows)} />
+      }
+
+      const width = `#${rows.length}`.length
+      return (
+        <Box flexDirection="column">
+          <Text bold>Buddydex</Text>
+          {rows.map(row => (
+            <Text bold={row.active}>{dexText(row, width)}</Text>
+          ))}
         </Box>
       )
     } catch {

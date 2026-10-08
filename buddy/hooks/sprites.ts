@@ -1,5 +1,10 @@
-// ASCII art drawn fresh for this mod in the original's format: 5 rows x 12
-// columns, row 0 kept for a hat, {E} marking each eye.
+// ASCII art drawn fresh for this mod in the original's format: 5 rows x 12 columns, the hat row
+// just above the head (row 0 for an adult), {E} marking each eye. The bodies live in
+// art-hatchling.ts, art-adult.ts and art-elder.ts, one file per stage.
+import type { Stage } from '../types'
+import { ADULT } from './art-adult'
+import { ELDER } from './art-elder'
+import { HATCHLING } from './art-hatchling'
 import type { HolidayId } from './calendar'
 import type { Hat, Species } from './roll'
 
@@ -11,480 +16,6 @@ export type Pose = 'flinch' | 'celebrate' | 'sleep'
 export const POSES: readonly Pose[] = ['flinch', 'celebrate', 'sleep']
 // Each pose fills {E} with its own eye. None is a rolled eye.
 export const POSE_EYE: Record<Pose, string> = { flinch: 'O', celebrate: '^', sleep: '-' }
-
-// Each entry: five sections of four body rows, split by lines holding only "~": rest,
-// fidget B, flinch, celebrate, sleep. Lines start at column 0. Rest rows stay within 11
-// columns so fidget A (rest nudged one column right) still fits; the others may use all 12.
-const ART: Record<Species, string> = {
-  duck: String.raw`
-    __
-  <({E} )___
-   ( ._> /
-    '---'
-~
-    __
-  <({E} )___
-   ( ._> \/
-    '---'
-~
-    __  !
-  <({E} )___
-  \( ._> /\
-    '---'
-~
-  \ __
-  <({E} )___/
-   ( ._> /
-    '---'
-~
-
-    __
-  <({E} )____
-   (_.__>_/
-`,
-  goose: String.raw`
-    ({E}>
-     )|
-   _(  )_
-   ^^  ^^
-~
-    ({E}O
-     )|
-   _(  )_
-    ^^ ^^
-~
-  ! ({E}>
-    ( |
-   _(  )_
-   ^^  ^^
-~
-    ({E}>
-  \  )|  /
-   _(  )_
-   ^^  ^^
-~
-
-    _____
-   _( {E}<)_
-   ^^  ^^
-`,
-  blob: String.raw`
-  .------.
- ( {E}    {E} )
- (   ~~   )
-  '------'
-~
-
- .--------.
-( {E}    {E}  )
- '--------'
-~
- .-------. !
-( {E}    {E}  )
- (   oo   )
-  '------'
-~
-  .------.
-\( {E}    {E} )/
- (   \/   )
-  '------'
-~
-
-  .------.
- ( {E}    {E} )
- '--------'
-`,
-  cat: String.raw`
-  /\_/\
- ( {E} {E} )
- =\ w /=
-  (")(")~
-~
-  /\_/\
- ( {E} {E} )
- =\ w /=
-  (")(")_
-~
-  /\_/\  !
- ( {E} {E} )
- =\ o /=
- /(")(")\
-~
-  /\_/\
- ( {E} {E} )
-\=\ w /=/
-  (")(")~
-~
-
-  /\_/\___
- ( {E} {E}    )~
-  (")(")___)
-`,
-  dragon: String.raw`
-  /)    (\
- (  {E}  {E}  )
-  \  vv  /
-   \____/
-~
-  /)    (\
- (  {E}  {E}  )
-  \  ~~  /
-   \____/~
-~
-  /)    (\ !
- (  {E}  {E}  )
-  \  ^^  /
-   \____/~
-~
-  /)    (\
- (  {E}  {E}  )
-  \  vv  /~*
-   \____/
-~
-
-  /)____(\
- (  {E}  {E}  )
-  \______/
-`,
-  octopus: String.raw`
-   ,----,
-  ( {E}  {E} )
-  (  __  )
-  //||||\\
-~
-   ,----,
-  ( {E}  {E} )
-  (  __  )
-  \\||||//
-~
-   ,----, !
-  ( {E}  {E} )
-  (  oo  )
- /// || \\\
-~
-\\ ,----, //
- \( {E}  {E} )/
-  (  \/  )
-   /||||\
-~
-
-   ,----,
-  ( {E}  {E} )
- ~~||||||~~
-`,
-  owl: String.raw`
-  /\____/\
- ( ({E})({E}) )
- (   \/   )
-  '------'
-~
-  /\____/\
- ( ({E})(-) )
- (   \/   )
-  '------'
-~
-  /\____/\ !
- ( ({E})({E}) )
- (   <>   )
- /'------'\
-~
-  /\____/\
-\( ({E})({E}) )/
- (   \/   )
-  '------'
-~
-
-  /\____/\
- ( ({E})({E}) )
- (___\/___)
-`,
-  penguin: String.raw`
-   .--.
-  ({E} v {E})
- /(    )\
-   ^  ^
-~
-   .--.
-  ({E} v {E})
- \(    )/
-   ^  ^
-~
-   .--.  !
-  ({E} o {E})
- -(    )-
-   ^  ^
-~
- \ .--. /
-  ({E} v {E})
-   (    )
-  ^    ^
-~
-
-   .--.
-  ({E} v {E})
- _(____)_
-`,
-  turtle: String.raw`
-   .-==-.
-  ( {E}  {E} )
- /[_/\/\_]\
-  ''    ''
-~
-   .-==-.
-  ( {E}  {E} )
- /[_/\/\_]\
- ''      ''
-~
-   .-==-. !
-  ( {E}  {E} )
-  [_/\/\_]
-   ''  ''
-~
-   .-==-.
- \( {E}  {E} )/
- /[_/\/\_]\
-  ''    ''
-~
-
-   .-==-.
-  [_/{E}{E}\_]
-  ''    ''
-`,
-  snail: String.raw`
- {E} {E}  .--.
- \ \ ( @ )
-  \_\_)__/
-   ~~~~~~
-~
- {E}  {E} .--.
- | / ( @ )
-  \_\_)__/
-   ~~~~~~
-~
-  !   .--.
- {E}{E}  ( @ )
-  \_\_)__/
-   ~~~~~~
-~
- {E}   {E} .--.
-  \ / ( @ )
-  \_\_)__/
-   ~~~~~~
-~
-
-      .--.
-  {E}{E} ( @ )
-  \__)__/
-`,
-  ghost: String.raw`
-   .-''-.
-  / {E}  {E} \
-  |   o  |
-  |/\/\/\|
-~
-   .-''-.
-  / {E}  {E} \
-  |   O  |
-  |\/\/\/|
-~
-  .-''-.  !
- / {E}  {E}  \
- |   O   |
- |\/\/\/\|
-~
-   .-''-.
-\ / {E}  {E} \ /
-  |   v  |
-  |/\/\/\|
-~
-
-   .-''-.
-  / {E}  {E} \
-  '~~~~~~'
-`,
-  axolotl: String.raw`
-} ,----, {
-}( {E} . {E} ){
-  ( '--' )~
-   ^    ^
-~
-{ ,----, }
-{( {E} . {E} )}
-  ( '--' )~
-   ^    ^
-~
-}},----,{{ !
-}( {E} . {E} ){
-  ( 'oo' )~
-   ^    ^
-~
-{ ,----, }
-{( {E} . {E} )}
- \( '--' )/
-   ^    ^
-~
-
-} ,----, {
-}( {E} . {E} ){
- ~( ____ )~
-`,
-  capybara: String.raw`
-  o______o
- ( {E}    {E} )
- (  (oo)  )
-  '------'
-~
-  o______o
- ( {E}    {E} )
- (  (..)  )
-  '------'
-~
-  o______o !
- ( {E}    {E} )
- (  (OO)  )
- /'------'\
-~
-  o______o
-\( {E}    {E} )/
- (  (oo)  )
-  '------'
-~
-
-  o______o
- ( {E}    {E} )
- (__(..)__)
-`,
-  cactus: String.raw`
- n  .--.  n
- | | {E}{E} | |
- '-|    |-'
-   |____|
-~
- n  .*-.  n
- | | {E}{E} | |
- '-|    |-'
-   |____|
-~
- n *.--.* n
- | | {E}{E} | |
- '-|  o |-'
-   |____|
-~
-\n  .*-.  n/
- | | {E}{E} | |
- '-|    |-'
-   |____|
-~
-    .--.
-   | {E}{E} |
- .-|    |-.
- U |____| U
-`,
-  robot: String.raw`
-    _||_
-  |[{E}][{E}]|
-  | -==- |
-  d[____]b
-~
-    _|*_
-  |[{E}][{E}]|
-  | -==- |
-  d[____]b
-~
-  * _||_ *
-  |[{E}][{E}]|
-  | -!!- |
-  d[____]b
-~
-    _||_
-\ |[{E}][{E}]| /
-  | \__/ |
-  d[____]b
-~
-    _||_
-  |[{E}][{E}]|
-  | .... |
- _d[____]b_
-`,
-  rabbit: String.raw`
-   (\  /)
-  ( {E}  {E} )
- =(  w  )=
-  (")-(")
-~
-   (\  _)
-  ( {E}  {E} )
- =(  w  )=
-  (")-(")
-~
-   ||  || !
-  ( {E}  {E} )
- =(  o  )=
-  (")-(")
-~
-   (\  /)
- \( {E}  {E} )/
- =(  w  )=
-  ('')('')
-~
-
-  __    __
-  ( {E}  {E} )
- =(__w__)=
-`,
-  mushroom: String.raw`
-  .-o--o-.
- (________)
-   | {E}{E} |
-   (____)
-~
-  .-o--o-. .
- (________)
-   | {E}{E} |
-   (____)
-~
- .-o--o-. .
-(________) !
-   | {E}{E} |
-   (____)
-~
-  .-o--o-.
- (________)
- \ | {E}{E} | /
-   (____)
-~
-
-  .-o--o-.
- (________)
-   (_{E}{E}_)
-`,
-  chonk: String.raw`
-  /\____/\
- (  {E}  {E}  )
- (   ww   )
-  (______)
-~
-  /\____/\
- (  {E}  {E}  )
- (   ww   )~
-  (______)
-~
-  /\____/\ !
- (  {E}  {E}  )
- (   oo   )
- /(______)\
-~
-  /\____/\
-\(  {E}  {E}  )/
- (   ww   )
-  (______)
-~
-
-  /\____/\
- (  {E}  {E}  )
- (________)~
-`,
-}
 
 const EGG = String.raw`
     .--.
@@ -527,6 +58,27 @@ export const HAT_ART: Record<Hat, string> = {
   wizard: '     /*\\',
   beanie: '    (##)',
   tinyduck: "     <(')",
+}
+
+// Hats an achievement unlocks (Progression spec section 3). No roll gives one, so a tinyduck
+// still means legendary. Wearing one is E's /buddy hat.
+export const EARNED_HATS = ['hardhat', 'nightcap', 'flowercrown', 'headphones', 'mortarboard', 'laurel'] as const
+export type EarnedHat = (typeof EARNED_HATS)[number]
+export const EARNED_HAT_ART: Record<EarnedHat, string> = {
+  hardhat: '   _/==\\_',
+  nightcap: '    __.-*',
+  flowercrown: '   @*@*@',
+  headphones: '  [=----=]',
+  mortarboard: '   _[==]_',
+  laurel: '   ~v~v~v~',
+}
+
+// A hat a buddy can wear: one it rolled, or one you earned.
+export type Wearable = Hat | EarnedHat
+const WEARABLE_ART: Record<Wearable, string> = { ...HAT_ART, ...EARNED_HAT_ART }
+
+export function hatArt(hat: Wearable): string {
+  return WEARABLE_ART[hat]
 }
 
 export const HEARTS: readonly string[] = ['   ♥    ♥', '  ♥   ♥  ♥', ' ♥  ♥   ♥']
@@ -638,21 +190,35 @@ export function fillEyes(row: string, eye: string): string {
 // Where each frame after the rest frame sits in a species' art.
 const SECTION: Record<2 | Pose, number> = { 2: 1, flinch: 2, celebrate: 3, sleep: 4 }
 
-export function bodyRows(species: Species, frame: Frame | Pose): string[] {
-  const sections = parseArt(ART[species])
+// Each stage's bodies, every species drawn at every stage.
+const STAGE_ART: Record<Stage, Record<Species, string>> = { hatchling: HATCHLING, adult: ADULT, elder: ELDER }
+
+export function bodyRows(species: Species, stage: Stage, frame: Frame | Pose): string[] {
+  const sections = parseArt(STAGE_ART[stage][species])
   const rest = sections[0]!
   if (frame === 0) return rest
   if (frame === 1) return rest.map(row => ' ' + row)
   return sections[SECTION[frame]]!
 }
 
-export function spriteRows(o: { species: Species; eye: string; frame: Frame | Pose; top: string }): string[] {
-  return [o.top, ...bodyRows(o.species, o.frame).map(row => fillEyes(row, o.eye))].map(fit)
+// The body row a stage's head starts on: its rest frame's first row with anything drawn.
+export function headRow(rest: readonly string[]): number {
+  return Math.max(0, rest.findIndex(row => row.trim() !== ''))
+}
+
+// The 5 sprite rows. The top row (hearts, confetti, zZ, a hat or the sparkle) sits just above the
+// head, which is where the stage's rest frame starts, and every row above it is blank (Progression
+// spec section 5). Every adult's head starts on its first body row, so its top row is row 0. Art
+// keeps the rows above the head blank in every section, so the top row covers nothing.
+export function spriteRows(o: { species: Species; stage: Stage; eye: string; frame: Frame | Pose; top: string }): string[] {
+  const rows = [BLANK, ...bodyRows(o.species, o.stage, o.frame).map(row => fillEyes(row, o.eye))]
+  rows[headRow(bodyRows(o.species, o.stage, 0))] = o.top
+  return rows.map(fit)
 }
 
 // The hat row, the first that applies: hearts, confetti, zZ, a holiday hat, the rolled hat, the sparkle.
 export function topRow(o: {
-  hat: Hat | 'none'
+  hat: Wearable | 'none'
   heartsFrame: number | null
   sparkle: number | null
   confetti?: number | null
@@ -665,7 +231,7 @@ export function topRow(o: {
   if (confetti !== null) return fit(CONFETTI[confetti % CONFETTI.length]!)
   if (zzz !== null) return fit(ZZZ[Math.floor(zzz / 2) % ZZZ.length]!)
   if (o.holidayHat) return fit(o.holidayHat)
-  if (o.hat !== 'none') return fit(HAT_ART[o.hat])
+  if (o.hat !== 'none') return fit(hatArt(o.hat))
   if (o.sparkle !== null) return fit(o.sparkle % 2 === 0 ? '*' : ' '.repeat(SPRITE_W - 1) + '*')
   return BLANK
 }

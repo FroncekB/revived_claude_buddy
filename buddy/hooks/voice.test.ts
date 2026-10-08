@@ -1,9 +1,10 @@
 import { expect, test } from 'claude-code/testing'
 
+import type { News } from './achievements'
 import { rollBones } from './roll'
 import {
   BUBBLE_TICKS, FAIL_PLAIN, FAIL_SNARKY, FALLBACK_NAMES, MAX_SAY, QUIP_COOLDOWN_MS, RESERVED_NAMES, SAY_GOAL,
-  bubbleTicks, cannedLine, cleanSay, failLine, fallbackSoul, hatchRequest, matchAddress, parseSoul, personaSystem,
+  bubbleTicks, cannedLine, cleanSay, failLine, fallbackSoul, hatchRequest, matchAddress, newsLine, parseSoul, personaSystem,
   quipChance, quipCooldownMs, reactionPrompt, shouldFlag, shouldGreet, shouldQuip, streakGreeting, talkPrompt, withArticle,
 } from './voice'
 import type { TurnSummary } from './voice'
@@ -197,5 +198,22 @@ test('a quip prompt carries its memory just before the ask, and a talk prompt it
   expect(talkPrompt('hi')).toBe('The developer says to you: hi\nReply in one line.')
   expect(talkPrompt('hi', ['Your memories, newest first:', '- today: x', 'Mention one only if it fits what they said.'])).toBe(
     'The developer says to you: hi\nYour memories, newest first:\n- today: x\nMention one only if it fits what they said.\nReply in one line.',
+  )
+})
+
+test('an announcement reads the level, the stage, then what was earned and any hats', () => {
+  const news = (o: Partial<News>): News => ({ level: null, stage: null, earned: [], ...o })
+  expect(newsLine(news({ level: 12 }))).toBe('Level 12!')
+  expect(newsLine(news({ level: 10, stage: 'adult' }))).toBe('Level 10! I grew into an adult.')
+  expect(newsLine(news({ level: 30, stage: 'elder' }))).toBe("Level 30! I'm an elder now.")
+  expect(newsLine(news({ earned: ['marathon'] }))).toBe('Earned Marathon.')
+  expect(newsLine(news({ earned: ['marathon', 'survivor'] }))).toBe('Earned Marathon and Survivor.')
+  expect(newsLine(news({ earned: ['marathon', 'survivor', 'comeback'] }))).toBe('Earned Marathon, Survivor and Comeback.')
+  expect(newsLine(news({ earned: ['shell'] }))).toBe('Earned Shell regular, and a hard hat.')
+  expect(newsLine(news({ earned: ['ultramarathon', 'elder'] }))).toBe(
+    'Earned Ultramarathon and Elder, and a nightcap and a laurel.',
+  )
+  expect(newsLine(news({ level: 10, stage: 'adult', earned: ['grownUp'] }))).toBe(
+    'Level 10! I grew into an adult. Earned Grown up.',
   )
 })

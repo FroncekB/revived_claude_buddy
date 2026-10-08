@@ -1,10 +1,12 @@
 // The band's text layout: bubble wrapping, full and compact rows, and the card.
-import type { Counts, Moment, Soul, You } from '../types'
+import type { Buddy, Counts, Moment, Saved, Soul, Stage, You } from '../types'
+import { ACHIEVEMENTS, earnedOf, knownEarned } from './achievements'
 import { ageText, momentText, readable } from './journal'
 import { RARITY, STATS } from './roll'
 import type { Bones } from './roll'
 import { totalCalls, withCommas } from './ledger'
-import { PAINT } from './sprites'
+import { bonesFor, levelOf, nextLevelXp, stageOf, xpOf } from './progress'
+import { PAINT, faceFor } from './sprites'
 import type { Prop } from './sprites'
 
 // A stretch of one row in one color; no color is the text color.
@@ -126,9 +128,14 @@ export function spriteTint(bones: Pick<Bones, 'rarity' | 'shiny'>, tick: number)
   return { color: RARITY[bones.rarity].color, bold: false }
 }
 
-export function nameLine(name: string, bones: Bones): { label: string; stars: string } {
+// The band's name line, with the level when there is one (the debug tour shows none).
+export function nameLine(
+  name: string,
+  bones: Pick<Bones, 'rarity' | 'species' | 'shiny'>,
+  level: number | null = null,
+): { label: string; stars: string } {
   return {
-    label: `  ${name}  ${bones.rarity} ${bones.species}${bones.shiny ? ' (shiny)' : ''}  `,
+    label: `  ${name}  ${level === null ? '' : `Lv ${level}  `}${bones.rarity} ${bones.species}${bones.shiny ? ' (shiny)' : ''}  `,
     stars: '★'.repeat(RARITY[bones.rarity].stars),
   }
 }
@@ -144,14 +151,48 @@ export function compactLine(face: string, name: string, say: string | null, colu
   return `${head}: ${lines[page]}${page < lines.length - 1 ? ' …' : ''}`
 }
 
-export function cardLines(soul: Soul, bones: Bones, rerolls: number): string[] {
+// The shown buddy's growth and your achievements, for the card (Progression spec section 6).
+export type CardProgress = {
+  level: number
+  stage: Stage
+  xp: number
+  // Earned achievement titles, newest first.
+  earned: readonly string[]
+  // When the shown buddy was retired; null for the active one.
+  retiredAt: string | null
+}
+
+export function cardProgress(saved: Saved, buddy: Buddy): CardProgress {
+  const level = levelOf(buddy.counts)
+  const had = earnedOf(saved.you)
+  const when = (id: string) => String(had[id])
+  // Newest first; the sort is stable, so two earned together keep table order.
+  const earned = knownEarned(saved.you)
+    .sort((a, b) => (when(b.id) > when(a.id) ? 1 : when(b.id) < when(a.id) ? -1 : 0))
+    .map(a => a.title)
+  return { level, stage: stageOf(level), xp: xpOf(buddy.counts), earned, retiredAt: buddy.retiredAt }
+}
+
+// "Lv 12 adult · 12,345 / 14,400 xp": the XP so far over the XP for the next level.
+export function levelText(p: Pick<CardProgress, 'level' | 'stage' | 'xp'>): string {
+  const next = nextLevelXp(p.level)
+  return `Lv ${p.level} ${p.stage} · ${withCommas(p.xp)}${next !== null ? ` / ${withCommas(next)}` : ''} xp`
+}
+
+export function achievementsText(earned: number): string {
+  return `Achievements: ${earned} of ${ACHIEVEMENTS.length}`
+}
+
+export function cardLines(soul: Soul, bones: Bones, rerolls: number, progress?: CardProgress): string[] {
   const bar = (v: number) => '#'.repeat(Math.round(v / 5)).padEnd(20, '-')
+  const retired = progress?.retiredAt ? `   Retired ${progress.retiredAt.slice(0, 10)}` : ''
   return [
     `${soul.name}, ${bones.rarity} ${bones.species} ${'★'.repeat(RARITY[bones.rarity].stars)}${bones.shiny ? ' (shiny)' : ''}`,
+    ...(progress ? [levelText(progress)] : []),
     `Hat: ${bones.hat}   Eyes: ${bones.eye}`,
     soul.personality,
     ...STATS.map(s => `${s.padEnd(10)} ${bar(bones.stats[s])} ${String(bones.stats[s]).padStart(3)}`),
-    `Hatched ${soul.hatchedAt.slice(0, 10)}   Rerolls: ${rerolls}`,
+    `Hatched ${soul.hatchedAt.slice(0, 10)}   Rerolls: ${rerolls}${retired}`,
   ]
 }
 
@@ -192,4 +233,79 @@ export function journalLines(name: string, journal: readonly Moment[] | undefine
   const rows = journalRows(journal, now).slice(0, limit)
   if (rows.length === 0) return [journalHeader(name), emptyJournal(name)]
   return [journalHeader(name), ...rows.map(r => `${r.age}   ${r.text}`)]
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+// "2026-10-07T12:00:00.000Z" as "Oct 7, 2026", read off the string so no time zone moves the day.
+export function longDate(iso: string): string {
+  const [year, month, day] = iso.slice(0, 10).split('-').map(Number)
+  return `${MONTHS[(month ?? 1) - 1]} ${day}, ${year}`
+}
+
+// "Oct 7", with its year only when that isn't `year`.
+export function shortDate(iso: string, year: number): string {
+  const [y, month, day] = iso.slice(0, 10).split('-').map(Number)
+  return `${MONTHS[(month ?? 1) - 1]} ${day}${y === year ? '' : `, ${y}`}`
+}
+
+// One buddy in the dex (Progression spec section 6).
+export type DexRow = {
+  // Its place in `buddies`, from 1. `buddies` only grows, so the number never changes.
+  number: number
+  name: string
+  // Grown, for the portrait, the face, the rarity and the species.
+  bones: Bones
+  level: number
+  stage: Stage
+  // "Oct 7 – Nov 2", or "Oct 7 – now" for the active buddy.
+  dates: string
+  active: boolean
+}
+
+export const DEX_TEXT_ROWS = 10
+
+export function dexRows(saved: Saved, now: number): DexRow[] {
+  const year = new Date(now).getFullYear()
+  return saved.buddies.map((b, i) => {
+    const level = levelOf(b.counts)
+    const active = b.seed === saved.active
+    const end = active || b.retiredAt === null ? 'now' : shortDate(b.retiredAt, year)
+    return {
+      number: i + 1,
+      name: b.soul.name,
+      bones: bonesFor(b),
+      level,
+      stage: stageOf(level),
+      dates: `${shortDate(b.soul.hatchedAt, year)} – ${end}`,
+      active,
+    }
+  })
+}
+
+// One dex row as text, its number padded to `numberWidth`:
+// "#1  (×vv×)  Pip           Lv 30 elder common dragon ★  Oct 7 – Nov 2".
+export function dexText(row: DexRow, numberWidth: number): string {
+  const b = row.bones
+  return [
+    `#${row.number}`.padEnd(numberWidth),
+    faceFor(b.species, b.eye).padEnd(6),
+    row.name.padEnd(12),
+    `Lv ${row.level} ${row.stage} ${b.rarity} ${b.species} ${'★'.repeat(RARITY[b.rarity].stars)}`,
+    row.dates,
+  ].join('  ')
+}
+
+// The dex as text, where no pane is placed: the count, a note of any older ones, then the newest
+// ten in dex order, inside the 12 lines the card's text keeps to.
+export function dexLines(saved: Saved, now: number): string[] {
+  const rows = dexRows(saved, now)
+  const width = `#${rows.length}`.length
+  const shown = rows.slice(-DEX_TEXT_ROWS)
+  const earlier = rows.length - shown.length
+  return [
+    `Buddydex: ${rows.length} ${rows.length === 1 ? 'buddy' : 'buddies'}`,
+    ...(earlier > 0 ? [`…${earlier} earlier`] : []),
+    ...shown.map(row => dexText(row, width)),
+  ]
 }

@@ -314,3 +314,9 @@ test('a memory reads as one prompt line, and a talk carries the three newest', (
   ])
   expect(talkMemories(JOURNAL.slice(0, 1), NOON)).toHaveLength(3)
 })
+
+test('growing up reads as words, and a journal keeps it', () => {
+  expect(momentText({ at: AT, kind: 'grew', n: 1 })).toBe('grew into an adult')
+  expect(momentText({ at: AT, kind: 'grew', n: 2 })).toBe('grew into an elder')
+  expect(readable([{ at: AT, kind: 'grew', n: 1 }])).toEqual([{ at: AT, kind: 'grew', n: 1 }])
+})

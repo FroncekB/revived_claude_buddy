@@ -1,9 +1,12 @@
 // The card pane's drawings: the whole card as one SVG where the surface draws SVG,
 // solid stat meters on the terminal.
 
-import type { Counts, Soul, You } from '../types'
-import { countsText, emptyJournal, journalHeader, streakLine, streakText, wrap } from './layout'
-import type { JournalRow } from './layout'
+import type { Counts, Soul, Stage, You } from '../types'
+import { ACHIEVEMENTS } from './achievements'
+import { countsText, emptyJournal, journalHeader, longDate, streakLine, streakText, wrap } from './layout'
+import type { CardProgress, DexRow, JournalRow } from './layout'
+import { withCommas } from './ledger'
+import { nextLevelXp, xpForLevel } from './progress'
 import { RARITY, STATS } from './roll'
 import type { Bones, Hat, Rarity } from './roll'
 import { spriteRows, topRow } from './sprites'
@@ -28,7 +31,6 @@ const QUOTE_WIDTH = 44
 const JOURNAL_TOP = 76
 const JOURNAL_ROW = 22
 const JOURNAL_WORDS_X = PAD + 100
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const HAT_LABEL: Record<Hat, string> = {
   crown: 'Crown',
   tophat: 'Top hat',
@@ -101,12 +103,6 @@ const esc = (s: string) =>
 
 const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 
-// "2026-10-07T12:00:00.000Z" as "Oct 7, 2026", read off the string so no time zone moves the day.
-function hatchDay(iso: string): string {
-  const [year, month, day] = iso.slice(0, 10).split('-').map(Number)
-  return `${MONTHS[(month ?? 1) - 1]} ${day}, ${year}`
-}
-
 function chips(bones: Bones): string[] {
   return [
     ...(bones.hat === 'none' ? [] : [HAT_LABEL[bones.hat]]),
@@ -115,8 +111,25 @@ function chips(bones: Bones): string[] {
   ]
 }
 
+// A still portrait: the resting frame, hat on, eyes open. The card and the dex draw it.
+function stillRows(bones: Pick<Bones, 'species' | 'eye' | 'hat'>, stage: Stage): string[] {
+  const top = topRow({ hat: bones.hat, heartsFrame: null, sparkle: null })
+  return spriteRows({ species: bones.species, stage, eye: bones.eye, frame: 0, top })
+}
+
+// A chip: `text` centred in a pill in `color`, its left edge at `x` and its top at `y`.
+const chipWidth = (text: string) => text.length * 7 + 20
+
+function chipMarks(x: number, y: number, text: string, color: string): string[] {
+  const w = chipWidth(text)
+  return [
+    `<rect x="${x.toFixed(1)}" y="${y}" width="${w}" height="22" rx="11" fill="${color}" fill-opacity="0.15"/>`,
+    `<text x="${(x + w / 2).toFixed(1)}" y="${y + 15}" text-anchor="middle" font-size="12" fill="${color}">${esc(text)}</text>`,
+  ]
+}
+
 // The whole card, top to bottom: name and stars, kind, portrait, quote, chips, radar, history.
-export function cardSvg(soul: Soul, bones: Bones, rerolls: number, history?: CardHistory): string {
+export function cardSvg(soul: Soul, bones: Bones, rerolls: number, history?: CardHistory, progress?: CardProgress): string {
   const color = FILL[bones.rarity]
   const marks: string[] = [
     `<text x="${PAD}" y="44" font-size="22" font-weight="700" fill="${color}">${esc(soul.name)}</text>`,
@@ -125,9 +138,7 @@ export function cardSvg(soul: Soul, bones: Bones, rerolls: number, history?: Car
     `<rect x="${PAD}" y="80" width="${W - 2 * PAD}" height="104" rx="10" fill="${color}" fill-opacity="0.1"/>`,
   ]
 
-  // A still portrait: the resting frame, hat on, eyes open.
-  const top = topRow({ hat: bones.hat, heartsFrame: null, sparkle: null })
-  spriteRows({ species: bones.species, eye: bones.eye, frame: 0, top }).forEach((row, i) =>
+  stillRows(bones, progress?.stage ?? 'adult').forEach((row, i) =>
     marks.push(
       `<text x="${MID}" y="${101 + i * 18}" text-anchor="middle" xml:space="preserve" ` +
         `font-family="ui-monospace, Consolas, monospace" font-size="15" fill="${bones.shiny ? SHINY : INK}">${esc(row)}</text>`,
@@ -145,15 +156,11 @@ export function cardSvg(soul: Soul, bones: Bones, rerolls: number, history?: Car
 
   const chipTop = 214 + Math.max(0, lines.length - 1) * 20 + 16
   const labels = chips(bones)
-  const widths = labels.map(text => text.length * 7 + 20)
+  const widths = labels.map(chipWidth)
   let x = MID - (widths.reduce((sum, w) => sum + w, 0) + 8 * (labels.length - 1)) / 2
   labels.forEach((text, i) => {
-    const w = widths[i]!
-    marks.push(
-      `<rect x="${x.toFixed(1)}" y="${chipTop}" width="${w}" height="22" rx="11" fill="${color}" fill-opacity="0.15"/>`,
-      `<text x="${(x + w / 2).toFixed(1)}" y="${chipTop + 15}" text-anchor="middle" font-size="12" fill="${color}">${esc(text)}</text>`,
-    )
-    x += w + 8
+    marks.push(...chipMarks(x, chipTop, text, color))
+    x += widths[i]! + 8
   })
 
   const chartTop = chipTop + 42
@@ -161,7 +168,7 @@ export function cardSvg(soul: Soul, bones: Bones, rerolls: number, history?: Car
   marks.push(
     `<g transform="translate(10 ${chartTop})">${statChart(bones)}</g>`,
     `<line x1="${PAD}" y1="${foot}" x2="${W - PAD}" y2="${foot}" stroke="${INK}" stroke-opacity="0.3"/>`,
-    `<text x="${PAD}" y="${foot + 22}" font-size="12" fill="${INK}">Hatched ${hatchDay(soul.hatchedAt)}</text>`,
+    `<text x="${PAD}" y="${foot + 22}" font-size="12" fill="${INK}">Hatched ${longDate(soul.hatchedAt)}</text>`,
     `<text x="${W - PAD}" y="${foot + 22}" text-anchor="end" font-size="12" fill="${INK}">Rerolls ${rerolls}</text>`,
   )
 
@@ -172,7 +179,49 @@ export function cardSvg(soul: Soul, bones: Bones, rerolls: number, history?: Car
     )
   }
 
-  return framed(color, foot + (history ? 58 : 38), marks)
+  if (progress?.retiredAt) {
+    marks.push(
+      `<text x="${MID}" y="${foot + 22}" text-anchor="middle" font-size="12" fill="${INK}">Retired ${longDate(progress.retiredAt)}</text>`,
+    )
+  }
+
+  const last = foot + (history ? 42 : 22)
+  return framed(color, (progress ? growthMarks(marks, color, progress, last) : last) + 16, marks)
+}
+
+// The level, its XP bar and your achievements under the card's last row, whose baseline is at
+// `last` (Progression spec section 6). Pushes onto `marks` and returns the new last baseline.
+function growthMarks(marks: string[], color: string, p: CardProgress, last: number): number {
+  const span = W - 2 * PAD
+  const levelY = last + 30
+  const barY = levelY + 10
+  const from = xpForLevel(p.level)
+  const next = nextLevelXp(p.level)
+  const filled = next !== null ? Math.min(1, Math.max(0, (p.xp - from) / (next - from))) : 1
+  const label = next !== null ? `${withCommas(p.xp)} / ${withCommas(next)} xp` : `${withCommas(p.xp)} xp`
+  marks.push(
+    `<text x="${PAD}" y="${levelY}" font-size="13" font-weight="700" fill="${color}">Lv ${p.level} ${p.stage}</text>`,
+    `<text x="${W - PAD}" y="${levelY}" text-anchor="end" font-size="12" fill="${INK}">${label}</text>`,
+    `<rect x="${PAD}" y="${barY}" width="${span}" height="6" rx="3" fill="${color}" fill-opacity="0.15"/>`,
+    `<rect x="${PAD}" y="${barY}" width="${(span * filled).toFixed(1)}" height="6" rx="3" fill="${color}"/>`,
+  )
+  const headY = barY + 30
+  marks.push(
+    `<text x="${PAD}" y="${headY}" font-size="12" fill="${INK}">Achievements ${p.earned.length} of ${ACHIEVEMENTS.length}</text>`,
+  )
+  // The earned ones as chips, newest first, wrapping at the right pad.
+  let x = PAD
+  let top = headY + 10
+  for (const title of p.earned) {
+    const w = chipWidth(title)
+    if (x > PAD && x + w > W - PAD) {
+      x = PAD
+      top += 30
+    }
+    marks.push(...chipMarks(x, top, title, color))
+    x += w + 8
+  }
+  return p.earned.length > 0 ? top + 22 : headY
 }
 
 // The card's frame around `marks`: a rounded border in the rarity color, `h` px tall.
@@ -211,14 +260,25 @@ export function journalAlt(name: string, rows: readonly JournalRow[]): string {
   return `${journalHeader(name)}. ${rows.map(r => `${capital(r.age.trim())}: ${r.text}.`).join(' ')}`
 }
 
-export function cardAlt(soul: Soul, bones: Bones, rerolls: number, history?: CardHistory): string {
+export function cardAlt(soul: Soul, bones: Bones, rerolls: number, history?: CardHistory, progress?: CardProgress): string {
   const stars = RARITY[bones.rarity].stars
   return (
     `${soul.name}, ${bones.rarity} ${bones.species}, ${stars} star${stars === 1 ? '' : 's'}. ` +
     `"${soul.personality}" ${chips(bones).join(', ')}. ${statAlt(bones)}. ` +
-    `Hatched ${hatchDay(soul.hatchedAt)}. Rerolls ${rerolls}.` +
+    (progress ? `${growthAlt(progress)} ` : '') +
+    `Hatched ${longDate(soul.hatchedAt)}.` +
+    (progress?.retiredAt ? ` Retired ${longDate(progress.retiredAt)}.` : '') +
+    ` Rerolls ${rerolls}.` +
     (history ? ` ${streakLine(history.you, history.counts)}.` : '')
   )
+}
+
+// "Level 12, adult, 13,250 of 14,400 XP. 2 of 17 achievements: Marathon, Shell regular."
+function growthAlt(p: CardProgress): string {
+  const next = nextLevelXp(p.level)
+  const xp = next !== null ? `${withCommas(p.xp)} of ${withCommas(next)} XP` : `${withCommas(p.xp)} XP`
+  const earned = `${p.earned.length} of ${ACHIEVEMENTS.length} achievements${p.earned.length > 0 ? `: ${p.earned.join(', ')}` : ''}`
+  return `Level ${p.level}, ${p.stage}, ${xp}. ${earned}.`
 }
 
 export function statAlt(bones: Bones): string {
@@ -234,4 +294,53 @@ export function meter(value: number, cells: number): string {
   const eighths = Math.round((Math.max(0, Math.min(100, value)) / 100) * cells * 8)
   const part = eighths % 8
   return ('█'.repeat(Math.floor(eighths / 8)) + (part ? EIGHTHS[part] : '')).padEnd(cells, ' ')
+}
+
+// The dex's tiles: 3 across under the header.
+const TILE_W = 118
+const TILE_H = 136
+const TILE_GAP = 9
+const TILE_ROW = TILE_H + 10
+const DEX_TOP = 64
+
+// The dex as one SVG in the card's frame (Progression spec section 6): a tile per buddy, oldest
+// first, each with its still portrait in its rarity color, the active one outlined.
+export function dexSvg(rows: readonly DexRow[]): string {
+  const lead = rows.find(r => r.active) ?? rows[0]
+  const color = FILL[lead?.bones.rarity ?? 'common']
+  const marks = [`<text x="${PAD}" y="44" font-size="22" font-weight="700" fill="${color}">Buddydex</text>`]
+  rows.forEach((row, i) => {
+    const x = PAD + (i % 3) * (TILE_W + TILE_GAP)
+    const y = DEX_TOP + Math.floor(i / 3) * TILE_ROW
+    const mid = x + TILE_W / 2
+    const tint = FILL[row.bones.rarity]
+    const outline = row.active ? ` stroke="${tint}" stroke-width="2"` : ''
+    // A span with a year ("Oct 7, 2025 – Nov 2, 2025") is wider than the tile, so squeeze it in.
+    const fit = row.dates.length > 19 ? ` textLength="${TILE_W - 10}" lengthAdjust="spacingAndGlyphs"` : ''
+    marks.push(
+      `<rect x="${x}" y="${y}" width="${TILE_W}" height="${TILE_H}" rx="10" fill="${tint}" fill-opacity="0.08"${outline}/>`,
+    )
+    stillRows(row.bones, row.stage).forEach((line, j) =>
+      marks.push(
+        `<text x="${mid}" y="${y + 18 + j * 12}" text-anchor="middle" xml:space="preserve" ` +
+          `font-family="ui-monospace, Consolas, monospace" font-size="11" fill="${row.bones.shiny ? SHINY : tint}">${esc(line)}</text>`,
+      ),
+    )
+    marks.push(
+      `<text x="${mid}" y="${y + 86}" text-anchor="middle" font-size="11" font-weight="700" fill="${tint}">${esc(`#${row.number} ${row.name}`)}</text>`,
+      `<text x="${mid}" y="${y + 101}" text-anchor="middle" font-size="11" fill="${tint}">${'★'.repeat(RARITY[row.bones.rarity].stars)} Lv ${row.level}</text>`,
+      `<text x="${mid}" y="${y + 115}" text-anchor="middle" font-size="11" fill="${INK}">${row.stage} ${row.bones.species}</text>`,
+      `<text x="${mid}" y="${y + 129}" text-anchor="middle" font-size="10"${fit} fill="${INK}">${esc(row.dates)}</text>`,
+    )
+  })
+  return framed(color, DEX_TOP + Math.max(1, Math.ceil(rows.length / 3)) * TILE_ROW + 14, marks)
+}
+
+export function dexAlt(rows: readonly DexRow[]): string {
+  const each = rows.map(
+    r =>
+      `Number ${r.number}, ${r.name}, level ${r.level} ${r.stage} ${r.bones.rarity} ${r.bones.species}, ` +
+      `${r.dates.replace(' – ', ' to ')}.`,
+  )
+  return [`Buddydex, ${rows.length} ${rows.length === 1 ? 'buddy' : 'buddies'}.`, ...each].join(' ')
 }

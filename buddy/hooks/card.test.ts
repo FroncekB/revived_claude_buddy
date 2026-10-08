@@ -1,6 +1,10 @@
 import { expect, test } from 'claude-code/testing'
 
-import { cardAlt, cardSvg, journalAlt, journalSvg, meter, radarPoint, statAlt } from './card'
+import { ACHIEVEMENTS } from './achievements'
+import type { Saved } from '../types'
+import { cardAlt, cardSvg, dexAlt, dexSvg, journalAlt, journalSvg, meter, radarPoint, statAlt } from './card'
+import { dexRows } from './layout'
+import type { CardProgress } from './layout'
 import { zeroCounts } from './ledger'
 import type { Bones } from './roll'
 
@@ -155,4 +159,97 @@ test("the journal is drawn in the card's frame, a row per moment, growing with t
     "Nib's journal. Yesterday: a clean turn after 4 rough ones. 2 weeks ago: Claude failed <18> shell commands in a row.",
   )
   expect(journalAlt('Nib', [])).toBe("Nothing in Nib's journal yet.")
+})
+
+const PROGRESS: CardProgress = { level: 12, stage: 'adult', xp: 13_250, earned: ['Marathon', 'Shell regular'], retiredAt: null }
+const heightOf = (svg: string) => Number(/height="(\d+)"/.exec(svg)?.[1])
+
+test('given its progress, the card shows the level, an XP bar part full, and the achievements', () => {
+  const svg = cardSvg(SOUL, BONES, 0, undefined, PROGRESS)
+  expect(svg).toContain('>Lv 12 adult</text>')
+  expect(svg).toContain('>13,250 / 14,400 xp</text>')
+  // 13,250 is 1,150 of the 2,300 XP from level 12 to 13: half of the 372 px bar.
+  expect(svg).toContain('width="186.0" height="6"')
+  expect(svg).toContain('>Achievements 2 of 17</text>')
+  expect(svg.indexOf('>Marathon</text>')).toBeLessThan(svg.indexOf('>Shell regular</text>'))
+  expect(cardAlt(SOUL, BONES, 0, undefined, PROGRESS)).toBe(
+    'Nib, uncommon mushroom, 2 stars. "Speaks rarely, mostly in proverbs." Propeller hat, ✦ eyes. ' +
+      `${statAlt(BONES)}. Level 12, adult, 13,250 of 14,400 XP. 2 of 17 achievements: Marathon, Shell regular. ` +
+      'Hatched Oct 7, 2026. Rerolls 0.',
+  )
+})
+
+test('the XP bar is empty at the start of a level, and full at 99 with no next level', () => {
+  expect(cardSvg(SOUL, BONES, 0, undefined, { ...PROGRESS, xp: 12_100 })).toContain('width="0.0" height="6"')
+  const top = { ...PROGRESS, level: 99, stage: 'elder' as const, xp: 1_034_500, earned: [] }
+  const svg = cardSvg(SOUL, BONES, 0, undefined, top)
+  expect(svg).toContain('>1,034,500 xp</text>')
+  expect(svg).toContain('width="372.0" height="6"')
+  expect(cardAlt(SOUL, BONES, 0, undefined, top)).toContain('Level 99, elder, 1,034,500 XP. 0 of 17 achievements. Hatched')
+})
+
+test('a retired buddy says when it retired, and achievement titles are escaped', () => {
+  const retired = { ...PROGRESS, earned: ['<b>'], retiredAt: '2026-10-09T08:00:00.000Z' }
+  const svg = cardSvg(SOUL, BONES, 0, undefined, retired)
+  expect(svg).toContain('>Retired Oct 9, 2026</text>')
+  expect(svg).toContain('>&lt;b&gt;</text>')
+  expect(cardAlt(SOUL, BONES, 0, undefined, retired)).toContain('Hatched Oct 7, 2026. Retired Oct 9, 2026. Rerolls 0.')
+})
+
+test('the card grows with its chips, and progress adds 70 px under the last row', () => {
+  const none = cardSvg(SOUL, BONES, 0, undefined, { ...PROGRESS, earned: [] })
+  const all = cardSvg(SOUL, BONES, 0, undefined, { ...PROGRESS, earned: ACHIEVEMENTS.map(a => a.title) })
+  expect(heightOf(all)).toBeGreaterThan(heightOf(none) + 60)
+  expect(heightOf(none)).toBe(heightOf(cardSvg(SOUL, BONES, 0)) + 70)
+})
+
+// Pip, a common dragon retired on Nov 2 at level 30, and Mochi, a common axolotl here now at level 12.
+const DEX_RECORD: Saved = {
+  schema: 2,
+  mode: 'on',
+  rerolls: 1,
+  active: 'swap-2',
+  buddies: [
+    {
+      seed: 'swap-1',
+      soul: { ...SOUL, name: 'Pip' },
+      retiredAt: '2026-11-02T12:00:00.000Z',
+      counts: { ...zeroCounts(), turns: 8_410 },
+    },
+    {
+      seed: 'swap-2',
+      soul: { ...SOUL, name: 'Mochi', hatchedAt: '2026-11-02T12:00:00.000Z' },
+      retiredAt: null,
+      counts: { ...zeroCounts(), turns: 1_210 },
+    },
+  ],
+  you: { lastDay: '2026-11-03', streak: 1, bestStreak: 1, days: 1 },
+}
+const NOV3 = new Date(2026, 10, 3, 12).getTime()
+
+test('the dex is a tile per buddy, three across, the active one outlined; its alt reads them out', () => {
+  const rows = dexRows(DEX_RECORD, NOV3)
+  const svg = dexSvg(rows)
+  expect(svg).toContain('>Buddydex</text>')
+  expect(svg).toContain('>#1 Pip</text>')
+  expect(svg).toContain('>elder dragon</text>')
+  expect(svg).toContain('>Oct 7 – Nov 2</text>')
+  expect(svg).toContain('>#2 Mochi</text>')
+  // The frame and the active tile are the only outlines.
+  expect(svg.match(/stroke-width="2"/g)).toHaveLength(2)
+  // A fourth buddy starts a second row of tiles, 146 px down.
+  expect(heightOf(dexSvg([...rows, ...rows]))).toBe(heightOf(svg) + 146)
+  expect(dexSvg([{ ...rows[0]!, name: '<Pip>' }])).toContain('>#1 &lt;Pip&gt;</text>')
+  expect(dexAlt(rows)).toBe(
+    'Buddydex, 2 buddies. Number 1, Pip, level 30 elder common dragon, Oct 7 to Nov 2. ' +
+      'Number 2, Mochi, level 12 adult common axolotl, Nov 2 to now.',
+  )
+})
+
+test('a dex date span from another year is squeezed to fit its tile; a short one is left alone', () => {
+  const row = dexRows(DEX_RECORD, NOV3)[0]!
+  const dateText = (dates: string) => dexSvg([{ ...row, dates }]).match(new RegExp(`<text[^>]*>${dates}</text>`))?.[0]
+  expect(dateText('Oct 7, 2025 – Nov 2, 2025')).toContain('textLength="108"')
+  expect(dateText('Oct 7 – now')).toBeDefined()
+  expect(dateText('Oct 7 – now')).not.toContain('textLength')
 })

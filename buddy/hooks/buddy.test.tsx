@@ -5,6 +5,7 @@ import type { Engine } from 'claude-code/testing'
 import type { Moment, Saved } from '../types'
 import { SHIMMER } from './layout'
 import { zeroCounts } from './ledger'
+import { HAT_ART, bodyRows, fillEyes, headRow } from './sprites'
 import { TOUR_TICKS } from './tour'
 import { FAIL_PLAIN, FAIL_SNARKY, FALLBACK_NAMES } from './voice'
 
@@ -256,7 +257,7 @@ test('card opens a pane with the name, personality, rerolls and streak, and prin
   expect(card).toMatch(/^Pip\b/m)
   expect(card).toMatch(/Counts semicolons\./)
   expect(card).toMatch(/Rerolls: 0/)
-  expect(card).toMatch(/Streak 1 day \(best 1\) · 0 turns · 0 tool calls$/)
+  expect(card).toMatch(/^Streak 1 day \(best 1\) · 0 turns · 0 tool calls\nAchievements: 0 of 17$/m)
 })
 
 test('the card pane is one drawn card on desktop and meters on the terminal', async ($, on) => {
@@ -284,7 +285,7 @@ test('where no pane can be placed, card prints the text card with the streak', a
   expect(card).toMatch(/^Pip, /)
   expect(card).toMatch(/DEBUGGING/)
   expect(card).toMatch(/Rerolls: 0/)
-  expect(card).toMatch(/\nStreak 1 day \(best 1\) · 0 turns · 0 tool calls$/)
+  expect(card).toMatch(/\nStreak 1 day \(best 1\) · 0 turns · 0 tool calls\nAchievements: 0 of 17$/)
 })
 
 test('reroll asks first, then replaces the buddy and counts the reroll', async ($, on) => {
@@ -651,7 +652,7 @@ test('the debug tour shows each species plain, shiny, then flinching, and never 
   await clock.settle()
   const visits = writes.length
   expect(await runner($)('debug')).toBe(
-    'Touring all 18 species with their reactions, then the holidays and moods. Run /buddy debug off to stop.',
+    'Touring all 18 species as adults with their reactions, then the holidays and moods. Run /buddy debug off to stop.',
   )
   const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
   const shimmering = async () => (await spriteTexts(ui)).every(t => t.props.bold === true)
@@ -785,6 +786,17 @@ const SAVED: Saved = {
   buddies: [{ seed: 'test-seed', soul: RECORD.soul, retiredAt: null, counts: zeroCounts() }],
   you: { lastDay: '2026-10-06', streak: 3, bestStreak: 3, days: 3 },
 }
+
+// RECORD's buddy grown to exactly level 10, the first adult level, so the tests below that read
+// sprite rows read the adult art. A common's floor at level 10 is 4, under every stat 'test-seed'
+// rolled, so its stats stay as rolled; Grown up is already earned, so nothing is announced.
+const ADULT: Saved = {
+  ...SAVED,
+  buddies: [{ ...SAVED.buddies[0]!, counts: { ...zeroCounts(), turns: 810 } }],
+  you: { lastDay: null, streak: 0, bestStreak: 0, days: 0, earned: { grownUp: '2026-10-01T12:00:00.000Z' } },
+}
+// ADULT, with another seed's buddy.
+const adultAs = (seed: string): Saved => ({ ...ADULT, active: seed, buddies: [{ ...ADULT.buddies[0]!, seed }] })
 
 test('a main turn saves its counts when it completes; a denied call is not counted', async ($, on) => {
   const shared = sharedStore(on, RECORD)
@@ -967,7 +979,7 @@ const drawnSprite = async (ui: Drawn) =>
 const JULY4_NOON = new Date(2026, 6, 4, 12).getTime()
 
 test('on the Fourth of July a quiet buddy wears the hat and holds the flag; a bubble takes its place', async ($, on) => {
-  const clock = world(on, { buddy: RECORD }, true, JULY4_NOON)
+  const clock = world(on, { buddy: ADULT }, true, JULY4_NOON)
   model(on, null, 'Fireworks later?')
   await $.session.start(START)
   await clock.settle()
@@ -987,7 +999,7 @@ test('on the Fourth of July a quiet buddy wears the hat and holds the flag; a bu
 
 test('the card keeps the rolled hat on a holiday', async ($, on) => {
   // 'tint-11' rolls a rare penguin in a wizard hat.
-  const clock = world(on, { buddy: { ...RECORD, seed: 'tint-11' } }, true, JULY4_NOON)
+  const clock = world(on, { buddy: adultAs('tint-11') }, true, JULY4_NOON)
   await $.session.start(START)
   await clock.settle()
   const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
@@ -998,7 +1010,7 @@ test('the card keeps the rolled hat on a holiday', async ($, on) => {
 })
 
 test('a buddy left alone for 10 minutes falls asleep, and a prompt wakes it', async ($, on) => {
-  const clock = world(on, { buddy: RECORD })
+  const clock = world(on, { buddy: ADULT })
   engineBelow(on)
   await $.session.start(START)
   await clock.settle()
@@ -1015,7 +1027,7 @@ test('a buddy left alone for 10 minutes falls asleep, and a prompt wakes it', as
 })
 
 test('at night the buddy dozes off after a minute', async ($, on) => {
-  const clock = world(on, { buddy: RECORD }, true, new Date(2026, 9, 7, 0, 30).getTime())
+  const clock = world(on, { buddy: ADULT }, true, new Date(2026, 9, 7, 0, 30).getTime())
   await $.session.start(START)
   await clock.settle()
   const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
@@ -1049,7 +1061,7 @@ const bubbleOf = async (ui: Drawn) =>
     .join(' ')
 
 test('a failed tool call makes the buddy flinch for 2 seconds', async ($, on) => {
-  const clock = world(on, { buddy: RECORD })
+  const clock = world(on, { buddy: ADULT })
   engineBelow(on)
   model(on, null, null)
   await $.session.start(START)
@@ -1064,7 +1076,7 @@ test('a failed tool call makes the buddy flinch for 2 seconds', async ($, on) =>
 })
 
 test('two failed turns make the buddy anxious, and the turn-end save keeps the mood', async ($, on) => {
-  const shared = sharedStore(on, RECORD)
+  const shared = sharedStore(on, ADULT)
   const clock = world(on, null)
   engineBelow(on)
   model(on, null, null)
@@ -1084,7 +1096,7 @@ test('two failed turns make the buddy anxious, and the turn-end save keeps the m
 })
 
 test('a long clean turn makes the buddy celebrate under confetti', async ($, on) => {
-  const clock = world(on, { buddy: RECORD })
+  const clock = world(on, { buddy: ADULT })
   engineBelow(on)
   model(on, null, null)
   await $.session.start(START)
@@ -1118,7 +1130,7 @@ test("another session's mood survives this session's save", async ($, on) => {
 
 test('back after days away, the buddy sulks until it is petted', async ($, on) => {
   // 2026-10-04 to 2026-10-07 misses two days: sulk 1.
-  const shared = sharedStore(on, { ...SAVED, you: { ...SAVED.you, lastDay: '2026-10-04' } })
+  const shared = sharedStore(on, { ...ADULT, you: { ...ADULT.you, lastDay: '2026-10-04' } })
   const clock = world(on, null)
   model(on, null, 'Hmph.')
   await $.session.start(START)
@@ -1395,7 +1407,7 @@ test('a quip does not carry the same memory twice within the hour', async ($, on
 // gives this seed a 0.30 chance, and PATIENCE 27 a quip cooldown under 4 minutes.
 const WISE_SEED = 'wise-45'
 
-test('a quip with nothing to echo remembers some of the time, never every time', async ($, on) => {
+test('a quip with nothing to echo remembers some of the time, never every time', { timeoutMs: 30_000 }, async ($, on) => {
   // Twenty memories, so the ones recalled in the last hour always leave others eligible.
   const journal: Moment[] = Array.from({ length: 20 }, (_, i) => ({ at: LAST_WEEK, kind: 'away', n: i + 4 }))
   const wise: Saved = { ...SAVED, active: WISE_SEED, buddies: [{ ...SAVED.buddies[0]!, seed: WISE_SEED, journal }] }
@@ -1644,4 +1656,533 @@ test('an empty journal says so, as text and on the pane', async ($, on) => {
   expect(await runner($)('journal')).toBe("Pip's journal\nNothing in Pip's journal yet.")
   const terminal = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...journalPane() })
   expect(await terminal.find({ text: "Nothing in Pip's journal yet." })).toBeDefined()
+})
+
+// SAVED's buddy with counts worth exactly 152,100 XP: level 40.
+const ELDERLY: Saved = { ...SAVED, buddies: [{ ...SAVED.buddies[0]!, counts: { ...zeroCounts(), turns: 15_210 } }] }
+
+test('the level shows on the name line, and the persona hears the stats the buddy grew into', async ($, on) => {
+  const clock = world(on, { buddy: ELDERLY })
+  const systems: string[] = []
+  on('model.complete', async (_$, e) => {
+    systems.push(e.system ?? '')
+    return { value: ok('Hm.') }
+  })
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await ui.find({ type: 'Text', text: '  Pip  Lv 40  common ghost  ' })).toBeDefined()
+  await runner($)('pet')
+  await clock.settle()
+  // 'test-seed' rolled DEBUGGING 7, PATIENCE 30, CHAOS 31 and SNARK 9; level 40 lifts each to 34.
+  expect(systems.at(-1)).toContain('Stats: DEBUGGING 34, PATIENCE 34, CHAOS 34, WISDOM 59, SNARK 34.')
+})
+
+test('a quip hears the stats the buddy grew into, too', async ($, on) => {
+  const clock = world(on, { buddy: ELDERLY })
+  engineBelow(on)
+  const asked: { prompt: string; system: string }[] = []
+  on('model.complete', async (_$, e) => {
+    asked.push({ prompt: e.prompt, system: e.system ?? '' })
+    return { value: ok('Hm.') }
+  })
+  await $.session.start(START)
+  await clock.settle()
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  await $.turn.complete(TURN)
+  await clock.settle()
+  const quip = asked.find(a => a.prompt.startsWith('Claude just finished a turn'))
+  expect(quip?.system).toContain('Stats: DEBUGGING 34, PATIENCE 34, CHAOS 34, WISDOM 59, SNARK 34.')
+})
+
+// SAVED's buddy one turn short of level 10, on its first visit, so no streak greeting takes the bubble.
+const NEARLY: Saved = {
+  ...SAVED,
+  buddies: [{ ...SAVED.buddies[0]!, counts: { ...zeroCounts(), turns: 809 } }],
+  you: { lastDay: null, streak: 0, bestStreak: 0, days: 0 },
+}
+const CONFETTI_ROWS = [' *  .  *  . ', ' .  *  .  * ']
+const NEWS_10 = 'Level 10! I grew into an adult. Earned Grown up.'
+
+test('the turn that reaches level 10 is announced once, under confetti, and saved as growing up', async ($, on) => {
+  const shared = sharedStore(on, NEARLY)
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(await bubbleOf(ui)).toBe(NEWS_10)
+  expect(CONFETTI_ROWS).toContain((await drawnSprite(ui))[0])
+  expect(await ui.find({ type: 'Text', text: '  Pip  Lv 10  common ghost  ' })).toBeDefined()
+  expect(activeOf(shared.row)?.journal).toEqual([{ at: new Date(NOON).toISOString(), kind: 'grew', n: 1 }])
+  expect((shared.row as Saved).you.earned).toEqual({ grownUp: new Date(NOON).toISOString() })
+  // The next turn crosses nothing and says nothing.
+  await clock.advance(30_000)
+  await $.turn.complete({ ...TURN, turnId: 't2' })
+  await clock.settle()
+  expect(await bubbleOf(ui)).toBe('')
+})
+
+test('muted, an announcement is confetti with no words', async ($, on) => {
+  const shared = sharedStore(on, { ...NEARLY, mode: 'muted' })
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(await bubbleOf(ui)).toBe('')
+  expect(CONFETTI_ROWS).toContain((await drawnSprite(ui))[0])
+  expect((shared.row as Saved).you.earned).toEqual({ grownUp: new Date(NOON).toISOString() })
+})
+
+test('a level another session reached is not announced here', async ($, on) => {
+  const shared = sharedStore(on, NEARLY)
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  // Another session saves the turn that reaches level 10, and what it earned.
+  const theirs = JSON.parse(JSON.stringify(shared.row)) as Saved
+  theirs.buddies[0]!.counts.turns = 810
+  theirs.you.earned = { grownUp: new Date(NOON).toISOString() }
+  shared.row = theirs
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(activeOf(shared.row)?.counts.turns).toBe(811)
+  expect(await bubbleOf(ui)).toBe('')
+  expect(CONFETTI_ROWS).not.toContain((await drawnSprite(ui))[0])
+})
+
+test('a quip that comes back over an announcement is dropped; a pet reply follows it', async ($, on) => {
+  const clock = world(on, { buddy: NEARLY })
+  engineBelow(on)
+  const prompts = model(on, null, 'Nice.')
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  await $.turn.complete(TURN)
+  await clock.settle()
+  // Past the failed call's flinch, whose frame has a row that reads like a bubble row.
+  await clock.advance(2_000)
+  // The failed call made the turn notable, so a quip was asked for; the news kept the bubble.
+  expect(prompts.filter(p => p.startsWith('Claude just finished a turn'))).toHaveLength(1)
+  expect(await bubbleOf(ui)).toBe(NEWS_10)
+  await runner($)('pet')
+  await clock.settle()
+  expect(await bubbleOf(ui)).toBe(`${NEWS_10} Nice.`)
+})
+
+test('once an announcement has gone, a quip shows again', async ($, on) => {
+  const clock = world(on, { buddy: NEARLY })
+  engineBelow(on)
+  model(on, null, 'Nice.')
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  // Aborted turns are notable, so each asks for a quip, and no failed call can put up a fail line.
+  await $.turn.complete({ ...TURN, reason: 'aborted' })
+  await clock.settle()
+  expect(await bubbleOf(ui)).toBe(NEWS_10)
+  // Past the bubble and the quip cooldown: 180 s, and 1.8 s for each of Pip's 30 PATIENCE.
+  await clock.advance(300_000)
+  await $.turn.complete({ ...TURN, turnId: 't2', reason: 'aborted' })
+  await clock.settle()
+  expect(await bubbleOf(ui)).toBe('Nice.')
+})
+
+test('a pet that earns Good friend says so, then answers, in one bubble', async ($, on) => {
+  const fond: Saved = { ...SAVED, buddies: [{ ...SAVED.buddies[0]!, counts: { ...zeroCounts(), pets: 99 } }] }
+  const clock = world(on, { buddy: fond })
+  model(on, null, 'Purr.')
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  await runner($)('pet')
+  await clock.settle()
+  expect(await bubbleOf(ui)).toBe('Earned Good friend, and a flower crown. Purr.')
+})
+
+test('an announcement shows even when its save fails', async ($, on) => {
+  const shared = sharedStore(on, NEARLY)
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  shared.refuse = true
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(await bubbleOf(ui)).toBe(NEWS_10)
+  expect(activeOf(shared.row)?.counts.turns).toBe(809)
+})
+
+test('a visit that earns something says so in place of the streak greeting', async ($, on) => {
+  const clock = world(on, { buddy: { ...SAVED, you: { lastDay: '2026-10-06', streak: 6, bestStreak: 6, days: 6 } } })
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await bubbleOf(ui)).toBe('Earned Regular.')
+})
+
+test('the card shows the level, the XP to the next one, and your achievements, on every surface', async ($, on) => {
+  // 500 turns and 7,100 MCP calls are 12,100 XP, level 12, with no turn or call achievement.
+  const grown: Saved = {
+    ...SAVED,
+    buddies: [{ ...SAVED.buddies[0]!, counts: { ...zeroCounts(), turns: 500, calls: { ...zeroCounts().calls, mcp: 7_100 } } }],
+    you: { ...SAVED.you, earned: { grownUp: '2026-10-04T12:00:00.000Z', marathon: '2026-10-05T12:00:00.000Z' } },
+  }
+  const clock = world(on, { buddy: grown })
+  await $.session.start(START)
+  await clock.settle()
+  const text = await cardText($)
+  expect(text).toContain('\nLv 12 adult · 12,100 / 14,400 xp\n')
+  expect(text).toMatch(/\nAchievements: 2 of 17\nMarathon · Grown up$/)
+  const desktop = await $.ui.mount({ plugin: 'buddy', surface: 'desktop', ...pane() })
+  const svg = await desktop.find({ type: 'Svg' })
+  expect(svg?.props.alt).toContain('. Level 12, adult, 12,100 of 14,400 XP. 2 of 17 achievements: Marathon, Grown up. Hatched')
+  expect(String(svg?.props.source)).toContain('>Lv 12 adult</text>')
+})
+
+// Pip, a common dragon ('swap-1') retired two days ago, and Mochi, a common axolotl ('swap-2'), here now.
+const TWO: Saved = {
+  ...SAVED,
+  rerolls: 1,
+  active: 'swap-2',
+  buddies: [
+    {
+      seed: 'swap-1',
+      soul: { ...RECORD.soul, hatchedAt: '2026-10-01T12:00:00.000Z' },
+      retiredAt: '2026-10-05T12:00:00.000Z',
+      counts: zeroCounts(),
+    },
+    {
+      seed: 'swap-2',
+      soul: { ...RECORD.soul, name: 'Mochi', hatchedAt: '2026-10-05T12:00:00.000Z' },
+      retiredAt: null,
+      counts: zeroCounts(),
+    },
+  ],
+}
+const dexPane = () => ({ ...pane(), requestId: 'dex', props: { ...pane().props, title: 'Buddydex' } })
+
+test('dex opens a pane listing every buddy oldest first, the active one in bold, even while off', async ($, on) => {
+  const clock = world(on, { buddy: { ...TWO, mode: 'off' } })
+  await $.session.start(START)
+  await clock.settle()
+  expect(await runner($)('dex')).toBeUndefined()
+  const terminal = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...dexPane() })
+  const texts = await terminal.findAll({ type: 'Text' })
+  expect(texts.map(t => t.text)).toEqual([
+    'Buddydex',
+    `#1  (×vv×)  ${'Pip'.padEnd(12)}  Lv 1 hatchling common dragon ★  Oct 1 – Oct 5`,
+    `#2  }◉.◉{   ${'Mochi'.padEnd(12)}  Lv 1 hatchling common axolotl ★  Oct 5 – now`,
+  ])
+  expect(texts.map(t => t.props.bold)).toEqual([true, false, true])
+  const desktop = await $.ui.mount({ plugin: 'buddy', surface: 'desktop', ...dexPane() })
+  const svgs = await desktop.findAll({ type: 'Svg' })
+  expect(svgs).toHaveLength(1)
+  expect(svgs[0]?.props.alt).toBe(
+    'Buddydex, 2 buddies. Number 1, Pip, level 1 hatchling common dragon, Oct 1 to Oct 5. ' +
+      'Number 2, Mochi, level 1 hatchling common axolotl, Oct 5 to now.',
+  )
+})
+
+test('where no pane can be placed, dex prints a count and the newest ten', async ($, on) => {
+  const many: Saved = {
+    ...SAVED,
+    active: 'b13',
+    buddies: Array.from({ length: 14 }, (_, i) => ({
+      ...SAVED.buddies[0]!,
+      seed: `b${i}`,
+      retiredAt: i === 13 ? null : '2026-10-06T12:00:00.000Z',
+    })),
+  }
+  const clock = world(on, { buddy: many }, false)
+  await $.session.start(START)
+  await clock.settle()
+  const lines = ((await runner($)('dex')) ?? '').split('\n')
+  expect(lines).toHaveLength(12)
+  expect(lines.slice(0, 2)).toEqual(['Buddydex: 14 buddies', '…4 earlier'])
+  expect(lines[2]).toMatch(/^#5 /)
+  expect(lines[11]).toMatch(/^#14 .* – now$/)
+})
+
+test('card and journal show a retired buddy by number or by name, and the active one again with neither', async ($, on) => {
+  const pip = { ...TWO.buddies[0]!, journal: [{ at: LAST_WEEK, kind: 'away' as const, n: 9 }] }
+  const clock = world(on, { buddy: { ...TWO, buddies: [pip, TWO.buddies[1]!] } })
+  await $.session.start(START)
+  await clock.settle()
+  const run = runner($)
+  expect(await run('card #1')).toBeUndefined()
+  const card = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...pane() })
+  const text = (await card.findAll({ type: 'Text' })).map(t => t.text).join('\n')
+  await card.unmount()
+  expect(text).toMatch(/^Pip$/m)
+  expect(text).toContain('Hatched 2026-10-01   Rerolls: 1   Retired 2026-10-05')
+  expect(await run('journal pip')).toBeUndefined()
+  const journal = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...journalPane() })
+  expect(await journal.find({ text: "Pip's journal" })).toBeDefined()
+  expect(await journal.find({ text: 'back after 9 days away' })).toBeDefined()
+  expect(await cardText($)).toMatch(/^Mochi$/m)
+})
+
+test('a name two buddies share gets their numbers, and a name nobody has is answered', async ($, on) => {
+  const twins = { ...TWO, buddies: [TWO.buddies[0]!, { ...TWO.buddies[1]!, soul: { ...TWO.buddies[1]!.soul, name: 'Pip' } }] }
+  const clock = world(on, { buddy: twins }, false)
+  await $.session.start(START)
+  await clock.settle()
+  const run = runner($)
+  expect(await run('card pip')).toBe('2 buddies are named Pip: #1 dragon, #2 axolotl. Run /buddy card #2.')
+  expect(await run('journal Rex')).toBe('No buddy named Rex in the dex.')
+  expect((await run('card #1')) ?? '').toMatch(/^Pip, common dragon ★\nLv 1 hatchling · 0 \/ 100 xp\n/)
+})
+
+test('swap brings a retired buddy back by name, says hello once, and draws it', async ($, on) => {
+  const shared = sharedStore(on, TWO)
+  const clock = world(on, null)
+  const prompts = model(on, null, 'Missed you.')
+  await $.session.start(START)
+  await clock.settle()
+  expect(await runner($)('swap pip')).toBe('Pip is back.')
+  await clock.settle()
+  expect(shared.row).toMatchObject({ active: 'swap-1', rerolls: 1, mode: 'on' })
+  expect((shared.row as Saved).buddies.map(b => b.retiredAt)).toEqual([null, new Date(NOON).toISOString()])
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await ui.find({ type: 'Text', text: '  Pip  Lv 1  common dragon  ' })).toBeDefined()
+  expect(await ui.find({ text: /Missed you\./ })).toBeDefined()
+  expect(prompts.filter(p => p.includes('called you over'))).toHaveLength(1)
+})
+
+test('swap by number; the buddy already here, a stranger and a bare swap are answered without one', async ($, on) => {
+  const clock = world(on, { buddy: TWO })
+  model(on, null, 'Hi.')
+  await $.session.start(START)
+  await clock.settle()
+  const run = runner($)
+  expect(await run('swap #2')).toBe('Mochi is already here.')
+  expect(await run('swap Rex')).toBe('No buddy named Rex in the dex.')
+  expect(await run('swap')).toMatch(/^Usage: /)
+  expect(await run('swap 1')).toBe('Pip is back.')
+  expect(await run('swap mochi')).toBe('Mochi is back.')
+})
+
+test('a swap hands the card and journal back to the active buddy, so they follow the next swap', async ($, on) => {
+  const clock = world(on, { buddy: TWO })
+  model(on, null, 'Hi.')
+  await $.session.start(START)
+  await clock.settle()
+  const run = runner($)
+  expect(await run('card Pip')).toBeUndefined()
+  expect(await run('journal Pip')).toBeUndefined()
+  expect(await run('swap Pip')).toBe('Pip is back.')
+  expect(await run('swap Mochi')).toBe('Mochi is back.')
+  // Mount the panes as they stand: running /buddy card again would reset the target itself.
+  const card = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...pane() })
+  expect(await card.find({ text: 'Mochi' })).toBeDefined()
+  expect(await card.find({ text: 'Pip' })).toBeUndefined()
+  await card.unmount()
+  const journal = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...journalPane() })
+  expect(await journal.find({ text: "Mochi's journal" })).toBeDefined()
+  expect(await journal.find({ text: "Pip's journal" })).toBeUndefined()
+  await journal.unmount()
+})
+
+test('calls counted before a swap land on the buddy that made them, and the turn after on the one back', async ($, on) => {
+  const shared = sharedStore(on, TWO)
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  await clock.settle()
+  expect(await runner($)('swap Pip')).toBe('Pip is back.')
+  await $.turn.complete(TURN)
+  await clock.settle()
+  const [pip, mochi] = (shared.row as Saved).buddies
+  expect(mochi?.counts).toMatchObject({ turns: 0, failedCalls: 1, calls: { shell: 1 } })
+  expect(pip?.counts).toMatchObject({ turns: 1, failedCalls: 0 })
+})
+
+test('a swap while the egg is out is told to wait, and swaps nobody', async ($, on) => {
+  const shared = sharedStore(on, TWO)
+  const clock = world(on, null)
+  let release!: () => void
+  const gate = new Promise<void>(resolve => {
+    release = resolve
+  })
+  on('model.complete', async () => {
+    await gate
+    return { value: failed() }
+  })
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  const run = runner($)
+  const rerolled = run('reroll confirm')
+  for (let i = 0; i < 100 && !(await ui.find({ text: /hatching/ })); i++) await Promise.resolve()
+  expect(await run('swap pip')).toBe('Wait for the egg to hatch.')
+  release()
+  await rerolled
+  await clock.settle()
+  expect(activeOf(shared.row)?.seed).not.toBe('swap-1')
+  expect((shared.row as Saved).buddies[0]?.retiredAt).toBe(TWO.buddies[0]!.retiredAt)
+})
+
+test('a swap ends a running tour, so the buddy back is drawn as itself', async ($, on) => {
+  const clock = world(on, { buddy: TWO })
+  model(on, null, 'Hi.')
+  await $.session.start(START)
+  await clock.settle()
+  const run = runner($)
+  await run('debug')
+  expect(await run('swap pip')).toBe('Pip is back.')
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await ui.find({ type: 'Text', text: /tour/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: '  Pip  Lv 1  common dragon  ' })).toBeDefined()
+})
+
+test("a swap clears the bubble, so the hello never follows the last buddy's news", async ($, on) => {
+  // TWO, with Mochi one turn short of level 10 and no visit yet, so no greeting takes the bubble.
+  const nearlyTwo: Saved = {
+    ...TWO,
+    buddies: [TWO.buddies[0]!, { ...TWO.buddies[1]!, counts: { ...zeroCounts(), turns: 809 } }],
+    you: NEARLY.you,
+  }
+  const clock = world(on, { buddy: nearlyTwo })
+  engineBelow(on)
+  model(on, null, 'Missed you.')
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(await bubbleOf(ui)).toBe('Level 10! I grew into an adult. Earned Grown up.')
+  expect(await runner($)('swap pip')).toBe('Pip is back.')
+  await clock.settle()
+  expect(await bubbleOf(ui)).toBe('Missed you.')
+})
+
+test('a swap the store will not take lasts the session, and still says hello', async ($, on) => {
+  const shared = sharedStore(on, TWO)
+  const clock = world(on, null)
+  const prompts = model(on, null, 'Missed you.')
+  await $.session.start(START)
+  await clock.settle()
+  shared.refuse = true
+  expect(await runner($)('swap pip')).toBe('Could not save your buddy; it lives for this session only.')
+  await clock.settle()
+  expect(activeOf(shared.row)?.seed).toBe('swap-2')
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await ui.find({ type: 'Text', text: '  Pip  Lv 1  common dragon  ' })).toBeDefined()
+  expect(await bubbleOf(ui)).toBe('Missed you.')
+  expect(prompts.filter(p => p.includes('called you over'))).toHaveLength(1)
+})
+
+test('a swap onto a record another session made unreadable is refused, and nobody says hello', async ($, on) => {
+  let row: unknown = TWO
+  let laterReadsForeign = false
+  on('store.get', async () => {
+    const value = row
+    if (laterReadsForeign) row = { schema: 3 }
+    return { value }
+  })
+  on('store.set', async (_$, e) => {
+    row = e.value
+    return { value: undefined }
+  })
+  const clock = world(on, null)
+  const prompts = model(on, null, 'Missed you.')
+  await $.session.start(START)
+  await clock.settle()
+  // A newer build writes its record between the command's read and the swap's.
+  laterReadsForeign = true
+  expect(await runner($)('swap pip')).toBe('Saved buddy uses schema 3; this mod knows 1 and 2.')
+  await clock.settle()
+  expect(row).toEqual({ schema: 3 })
+  expect(prompts).toEqual([])
+})
+
+test('debug can tour the hatchlings or the elders, and says which', async ($, on) => {
+  const clock = world(on, { buddy: RECORD })
+  await $.session.start(START)
+  await clock.settle()
+  const run = runner($)
+  expect(await run('debug hatchling')).toBe(
+    'Touring all 18 species as hatchlings with their reactions, then the holidays and moods. Run /buddy debug off to stop.',
+  )
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await ui.find({ type: 'Text', text: /tour 1\/18  common duck  $/ })).toBeDefined()
+  expect(await run('debug elder')).toMatch(/ as elders with /)
+  expect(await run('debug baby')).toMatch(/^Usage: /)
+})
+
+// The body rows a sprite should show under its top row, eyes filled and padded as the band pads them.
+const bodyBelowHead = (rest: string[], eye: string) => rest.slice(headRow(rest)).map(r => fillEyes(r, eye).padEnd(12))
+
+test('a new buddy is a hatchling, its hat just above its head, and the tour can show the hatchlings', async ($, on) => {
+  // 'tint-11' rolls a rare penguin with ° eyes in a wizard hat; with no counts it is a hatchling.
+  const clock = world(on, { buddy: { ...RECORD, seed: 'tint-11' } })
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  const rest = bodyRows('penguin', 'hatchling', 0)
+  const head = headRow(rest)
+  const rows = await drawnSprite(ui)
+  expect(head).toBeGreaterThan(0)
+  expect(rows.slice(0, head).every(r => r.trim() === '')).toBe(true)
+  expect(rows[head]).toBe(HAT_ART.wizard.padEnd(12))
+  expect(rows.slice(head + 1)).toEqual(bodyBelowHead(rest, '°'))
+  // The tour's first step is a plain common duck with · eyes.
+  await runner($)('debug hatchling')
+  const duck = bodyRows('duck', 'hatchling', 0)
+  expect((await drawnSprite(ui)).slice(headRow(duck) + 1)).toEqual(bodyBelowHead(duck, '·'))
+})
+
+test('a plain debug after an elder tour tours the adults again', async ($, on) => {
+  const clock = world(on, { buddy: RECORD })
+  await $.session.start(START)
+  await clock.settle()
+  const run = runner($)
+  await run('debug elder')
+  expect(await run('debug')).toMatch(/ as adults with /)
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  const duck = bodyRows('duck', 'adult', 0)
+  expect((await drawnSprite(ui)).slice(headRow(duck) + 1)).toEqual(bodyBelowHead(duck, '·'))
+})
+
+test('a buddy at level 30 is drawn as its elder, on the band and on the card', async ($, on) => {
+  // 8,410 turns are 84,100 XP: level 30. What that earns is already earned, so nothing is announced.
+  const elder: Saved = {
+    ...ADULT,
+    buddies: [{ ...ADULT.buddies[0]!, counts: { ...zeroCounts(), turns: 8_410 } }],
+    you: {
+      ...ADULT.you,
+      earned: {
+        grownUp: '2026-10-01T12:00:00.000Z',
+        elder: '2026-10-02T12:00:00.000Z',
+        thousandTurns: '2026-10-02T12:00:00.000Z',
+      },
+    },
+  }
+  const clock = world(on, { buddy: elder })
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  // 'test-seed' rolls a common ghost with ✦ eyes.
+  const rest = bodyRows('ghost', 'elder', 0)
+  const body = bodyBelowHead(rest, '✦')
+  expect((await drawnSprite(ui)).slice(headRow(rest) + 1)).toEqual(body)
+  expect(await cardText($)).toContain(body.join('\n'))
 })

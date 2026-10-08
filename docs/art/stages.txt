@@ -1,0 +1,449 @@
+== duck ==
+-- hatchling
+rest          fidget A      fidget B      flinch        celebrate     sleep
+
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+    __             __           __           __  !        \ __ /
+   (·>            (·>          (·>          (O>            (^>           (->_
+   (__)           (__)        /(__)         (__)           (__)          (___)
+
+-- adult
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+    __             __           __            __  !       \ __
+  <(· )___       <(· )___     <(· )___      <(O )___      <(^ )___/       __
+   ( ._> /        ( ._> /      ( ._> \/     \( ._> /\      ( ._> /      <(- )____
+    '---'          '---'        '---'         '---'         '---'        (_.__>_/
+
+-- elder
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+   ~__            ~__          ~__           ~__  !      \ ~__
+  <(· )___       <(· )___     <(· )___      <(O )___      <(^ )___/      ~__
+  ( ._> / |      ( ._> / |    ( ._> \/|    \( ._> /\|     ( ._> / |     <(- )____|
+   '---' _|       '---' _|     '---' _|      '---' _|      '---' _|     (_.__>_/_|
+
+== goose ==
+-- hatchling
+rest          fidget A      fidget B      flinch        celebrate     sleep
+
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+    (·>            (·>          (·O          (O>  !       \ (^> /
+   {,,,}          {,,,}        {,,,}/       {,,,}          {,,,}         {,,-<}
+  ^^^ ^^^        ^^^ ^^^      ^^^ ^^^      ^^^ ^^^        ^^^ ^^^       ^^^ ^^^
+
+-- adult
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+    (·>            (·>          (·O         ! (O>           (^>
+     )|             )|           )|           ( |         \  )|  /        _____
+   _(  )_         _(  )_       _(  )_        _(  )_        _(  )_        _( -<)_
+   ^^  ^^         ^^  ^^        ^^ ^^        ^^  ^^        ^^  ^^        ^^  ^^
+
+-- elder
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+   ,-(·>          ,-(·>        ,-(·O       ! (O>           ,-(^> |
+  (#             (#           (#             (#           (#     |       .---.
+ _(#  )_/|      _(#  )_/|    _(#  )_/|     _(#  )_ |    \_(#  )_/      _(# -<)_ |
+ ^^  ^^  |      ^^  ^^  |     ^^ ^^  |     ^^  ^^  |     ^^  ^^        ^^  ^^  _|
+
+== blob ==
+-- hatchling
+rest          fidget A      fidget B      flinch        celebrate     sleep
+
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+     .              .             .           .   !          .
+   .' '.          .' '.        .' ,'        .' '.         \.' './        .-'-.
+  ('· · )        ('· · )      ('· · )      ('O O )        ('^ ^ )       ('-.- )
+
+-- adult
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+  .------.       .------.                  .-------. !    .------.
+ ( ·    · )     ( ·    · )   .--------.   ( O    O  )   \( ^    ^ )/    .------.
+ (   ~~   )     (   ~~   )  ( ·    ·  )    (   oo   )    (   \/   )    ( -    - )
+  '------'       '------'    '--------'     '------'      '------'     '--------'
+
+-- elder
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+     ~              ~             ~            |   !         ~
+  .--'--.        .--'--.      .--'--.       .--'--.       .--'--.       .--~--.
+ (=·   ·=)      (=·   ·=)    (=·   ·=)     (=O   O=)    \(=^   ^=)/   (=-     -=)
+(____~____)    (____~____)  (_____~___)   (____o____)   (___\_/___)   (_________)
+
+== cat ==
+-- hatchling
+rest          fidget A      fidget B      flinch        celebrate     sleep
+
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+  /\   /\        /\   /\      /\   /|     /\   /\ !       /\   /\
+  =(·.·)=        =(·.·)=      =(·.·)=     =(OoO)=         \(^w^)/      /\___/\_
+  (")(")'        (")(")'      (")("),     /(")(")\        (")(")'      (_-.-__)
+
+-- adult
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+  /\_/\          /\_/\        /\_/\         /\_/\  !      /\_/\
+ ( · · )        ( · · )      ( · · )       ( O O )       ( ^ ^ )        /\_/\___
+ =\ w /=        =\ w /=      =\ w /=       =\ o /=      \=\ w /=/      ( - -    )~
+  (")(")~        (")(")~      (")(")_      /(")(")\       (")(")~       (")(")___)
+
+-- elder
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+   /\_/\          /\_/\        /\_/\         /\_/\  !      /\_/\
+  ( · · )        ( · · )      ( · · )       ( O O )       ( ^ ^ )       /\_/\___
+ ==\vwv/==      ==\vwv/==    ==\vwv/==     ==\vov/==    \==\vwv/==/    ( - -    )@
+/ (")(")@ \    / (")(")@ \  / (")(")_@\    /(")(")\ @     (")(")@     ==\vwv/___)
+
+== dragon ==
+-- hatchling
+rest          fidget A      fidget B      flinch        celebrate     sleep
+
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+   n  n           n  n         n  n         n  n  !      \ n  n /
+ /(·vv·)\       /(·vv·)\     /(·~~·)\     /(O^^O)\        (^vv^)        (-vv-)
+  \/\/\/         \/\/\/       \/\/\/~      \/\/\/         \/\/\/       \/\/\/\/
+
+-- adult
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+  /)    (\       /)    (\     /)    (\      /)    (\ !    /)    (\
+ (  ·  ·  )     (  ·  ·  )   (  ·  ·  )    (  O  O  )    (  ^  ^  )     /)____(\
+  \  vv  /       \  vv  /     \  ~~  /      \  ^^  /      \  vv  /~*   (  -  -  )
+   \____/         \____/       \____/~       \____/~       \____/       \______/
+
+-- elder
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+  @)    (@       @)    (@     @)    (@      @)    (@ !    @)    (@
+ (  ·  ·  )     (  ·  ·  )   (  ·  ·  )    (  O  O  )    (  ^  ^  )     @)____(@
+ ~\  vv  /~     ~\  vv  /~   ~\  ~~  /~    ~\  ^^  /~    ~\  vv  /~*   (  -  -  )
+ '/\_||_/\'     '/\_||_/\'   '/\_||_/\'~   '/\_||_/\'    \/\_||_/\/   ~~\__||__/~~
+
+== octopus ==
+-- hatchling
+rest          fidget A      fidget B      flinch        celebrate     sleep
+
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+   ,--,           ,--,         ,--,         ,--, !         ,--,
+  (·  ·)         (·  ·)       (·  ·)       (O  O)        \(^  ^)/        ,--,
+   /||\           /||\         \||/        /|  |\           ||         ~(-  -)~
+
+-- adult
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+   ,----,         ,----,       ,----,        ,----, !   \\ ,----, //
+  ( ·  · )       ( ·  · )     ( ·  · )      ( O  O )     \( ^  ^ )/      ,----,
+  (  __  )       (  __  )     (  __  )      (  oo  )      (  \/  )      ( -  - )
+  //||||\\       //||||\\     \\||||//     /// || \\\      /||||\      ~~||||||~~
+
+-- elder
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+  ,~~~~,         ,~~~~,       ,~~~~,        ,~~~~, !    \\,~~~~,  |
+ ( · (·))       ( · (·))     ( · (·))      ( O (O))     \( ^ (^)) |     ,~~~~,
+ (  __  )_      (  __  )_    (  __  )_     (  oo  )_     (  \/  )/     ( - (-))_
+ //|||||\ |     //|||||\ |   \\|||||/ |   /// ||\\  |     /||||\      ~~|||||~~ |
+
+== owl ==
+-- hatchling
+rest          fidget A      fidget B      flinch        celebrate     sleep
+
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+  .~~~~.         .~~~~.       .~~~~.       .~~~~. !      \.~~~~./
+ ((·)(·))       ((·)(·))     ((·)(-))     ((O)(O))       ((^)(^))      .(-)(-).
+  '-\/-'         '-\/-'       '-\/-'      /'-<>-'\        '-\/-'       (__\/__)
+
+-- adult
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+  /\____/\       /\____/\     /\____/\      /\____/\ !    /\____/\
+ ( (·)(·) )     ( (·)(·) )   ( (·)(-) )    ( (O)(O) )   \( (^)(^) )/    /\____/\
+ (   \/   )     (   \/   )   (   \/   )    (   <>   )    (   \/   )    ( (-)(-) )
+  '------'       '------'     '------'     /'------'\     '------'     (___\/___)
+
+-- elder
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+~~/\___/\~~    ~~/\___/\~~  ~~/\___/\~~    ~/\___/\~ !  ~~/\___/\~~
+ ((·)-(·))      ((·)-(·))    ((·)-(-))     ((O)-(O))    \((^)-(^))/   ~~/\___/\~~
+ ( \\v// )      ( \\v// )    ( \\v// )     ( \\o// )     ( \\v// )     ((-)-(-))
+  '-\|/-'        '-\|/-'      '-\|/-'      /'-\|/-'\      '-\|/-'      (_\\v//_)
+
+== penguin ==
+-- hatchling
+rest          fidget A      fidget B      flinch        celebrate     sleep
+
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+   (·v·)          (·v·)        (·v·)        (OoO) !       \(^v^)/
+  /(:::)\        /(:::)\      \(:::)/      -(:::)-         (:::)         (-v-)
+    ^ ^            ^ ^          ^ ^          ^ ^           ^   ^        _(:::)_
+
+-- adult
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+   .--.           .--.         .--.          .--.  !     \ .--. /
+  (· v ·)        (· v ·)      (· v ·)       (O o O)       (^ v ^)        .--.
+ /(    )\       /(    )\     \(    )/      -(    )-        (    )       (- v -)
+   ^  ^           ^  ^         ^  ^          ^  ^         ^    ^       _(____)_
+
+-- elder
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+   .-~-.          .-~-.        .~-~.         .-~-.  !      .-~-.
+ .(· v ·)       .(· v ·)     .(· v ·)      .(O o O)      \(^ v ^)        .-~-.
+( (    )\|     ( (    )\|   ( (    )_|    ( (    )-|      (    )\|     .(- v -)|
+  ^  ^   |       ^  ^   |     ^ ^    |      ^  ^   |      ^  ^   |    ( (____)_|
+
+== turtle ==
+-- hatchling
+rest          fidget A      fidget B      flinch        celebrate     sleep
+
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+   .==.           .==.         .==.         .==. !         .==.
+  (/\/\)         (/\/\)       (/\/\)       (/OO\)        \(/\/\)/        .==.
+  '(··)'         '(··)'      ' (··) '      '    '         '(^^)'        (/--\)
+
+-- adult
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+   .-==-.         .-==-.       .-==-.        .-==-. !      .-==-.
+  ( ·  · )       ( ·  · )     ( ·  · )      ( O  O )     \( ^  ^ )/      .-==-.
+ /[_/\/\_]\     /[_/\/\_]\   /[_/\/\_]\     [_/\/\_]     /[_/\/\_]\     [_/--\_]
+  ''    ''       ''    ''    ''      ''      ''  ''       ''    ''      ''    ''
+
+-- elder
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+   .~""~.         .~""~.       .~""~.        .~""~. !      .~""~.
+  ( ·  · )       ( ·  · )     ( ·  · )      ( O  O )     \( ^  ^ )/      .~""~.
+ /[_\||/_]\     /[_\||/_]\   /[_\||/_]\     [_\||/_]     /[_\||/_]\     [_/--\_]
+ (__)\/(__)     (__)\/(__)  (__) \/ (__)    (_)\/(_)     (__)\/(__)    (__)\/(__)
+
+== snail ==
+-- hatchling
+rest          fidget A      fidget B      flinch        celebrate     sleep
+
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+ · ·  .-.       · ·  .-.     ·  · .-.       !   .-.     ^   ^ .-.
+ \_\__(e)       \_\__(e)     |_/__(e)      OO___(e)      \_/__(e)           .-.
+  ~~~~~~         ~~~~~~       ~~~~~~        ~~~~~~        ~~~~~~        _--_(e)
+
+-- adult
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+ · ·  .--.      · ·  .--.    ·  · .--.      !   .--.     ^   ^ .--.
+ \ \ ( @ )      \ \ ( @ )    | / ( @ )     OO  ( @ )      \ / ( @ )         .--.
+  \_\_)__/       \_\_)__/     \_\_)__/      \_\_)__/      \_\_)__/      -- ( @ )
+   ~~~~~~         ~~~~~~       ~~~~~~        ~~~~~~        ~~~~~~       \__)__/
+
+-- elder
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+,_ ,_.~~~~.    ,_ ,_.~~~~.  ·  ,_.~~~~.     !  .~~~~.   ^  ^ .~~~~.
+·\ ·\( e  )    ·\ ·\( e  )   \ ·\( e  )     OO ( e  )    \  \( e  )        .~~~~.
+  \__\)___/      \__\)___/    \__\)___/     \___)___/     \__\)___/     -- ( e  )
+   ~~~~~~~~       ~~~~~~~~     ~~~~~~~~      ~~~~~~~~      ~~~~~~~~     \___)___/
+
+== ghost ==
+-- hatchling
+rest          fidget A      fidget B      flinch        celebrate     sleep
+
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+   .-'-.          .-'-.        .-'-.        .-'-. !       \.-'-./
+  / · · \        / · · \      / ·o· \      / O O \        / ^ ^ \       / - - \
+  '~~~~~'        '~~~~~'      '~~~~~'      '~~~~~'        '~~~~~'       '-----'
+
+-- adult
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+   .-''-.         .-''-.       .-''-.       .-''-.  !      .-''-.
+  / ·  · \       / ·  · \     / ·  · \     / O  O  \    \ / ^  ^ \ /     .-''-.
+  |   o  |       |   o  |     |   O  |     |   O   |      |   v  |      / -  - \
+  |/\/\/\|       |/\/\/\|     |\/\/\/|     |\/\/\/\|      |/\/\/\|      '~~~~~~'
+
+-- elder
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+   .-''-.         .-''-.       .-''-.       .-''-.  !      .-''-.
+  /==  ==\       /==  ==\     /==  ==\     /==  ==\     \ /==  ==\ /     .-''-.
+  | ·  · |       | ·  · |     | ·  · |     | O  O |       | ^  ^ |      /=-  -=\
+  |/\ /\/\~      |/\ /\/\~    |\/ \/\/~    |/\ /\/\~      |/\ /\/\~     '~,~~,~'~
+
+== axolotl ==
+-- hatchling
+rest          fidget A      fidget B      flinch        celebrate     sleep
+
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+   ,---,          ,---,        ,---,        ,---, !        ,---,
+  }(·.·){        }(·.·){      {(·.·)}     }}(O.O){{       }(^.^){       }(-.-){
+   (___)~         (___)~       (___)~       (_o_)~        \(___)/       ~(___)~
+
+-- adult
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+} ,----, {     } ,----, {   { ,----, }    }},----,{{ !  { ,----, }
+}( · . · ){    }( · . · ){  {( · . · )}   }( O . O ){   {( ^ . ^ )}   } ,----, {
+  ( '--' )~      ( '--' )~    ( '--' )~     ( 'oo' )~    \( '--' )/   }( - . - ){
+   ^    ^         ^    ^       ^    ^        ^    ^        ^    ^      ~( ____ )~
+
+-- elder
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+  ,-----,        ,-----,      ,-----,      },-----,{ !    ,-----,
+}( · . · ){    }( · . · ){  {( · . · )}   }( O . O ){   }( ^ . ^ ){     ,-----,
+}}('~~~'){{    }}('~~~'){{  {{('~~~')}}    }('ooo'){    }\('~~~')/{   }( - . - ){
+}  ^   ^  {    }  ^   ^  {  {  ^   ^  }     ^     ^     }  ^   ^  {   }}('___'){{
+
+== capybara ==
+-- hatchling
+rest          fidget A      fidget B      flinch        celebrate     sleep
+
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+  o____o         o____o       o____o       o____o !      \o____o/
+ ( ·  · )       ( ·  · )     ( ·  · )     ( O  O )       ( ^  ^ )       o____o
+  '(oo)'         '(oo)'       '(..)'      /'(oo)'\        '(oo)'       (-(..)-)
+
+-- adult
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+  o______o       o______o     o______o      o______o !    o______o
+ ( ·    · )     ( ·    · )   ( ·    · )    ( O    O )   \( ^    ^ )/    o______o
+ (  (oo)  )     (  (oo)  )   (  (..)  )    (  (OO)  )    (  (oo)  )    ( -    - )
+  '------'       '------'     '------'     /'------'\     '------'     (__(..)__)
+
+-- elder
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+ o______o       o______o     o______o      o______o  !  \o______o
+( ·    · )_    ( ·    · )_  ( ·    · )_   ( O    O )_   ( ^    ^ )_    o______o _
+( ~(oo)~ )|    ( ~(oo)~ )|  ( ~(..)~ )|   ( ~(OO)~ )|   ( ~(oo)~ )|   ( -    - )|
+(__)--(__)|    (__)--(__)|  (__)--(__)|   /__)--(__\|   (__)--(__)|   (_~(..)~_)|
+
+== cactus ==
+-- hatchling
+rest          fidget A      fidget B      flinch        celebrate     sleep
+
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+  (_\/_)         (_\/_)       (_\/_/         (\/) !       \_\/_/
+  _|··|_         _|··|_       _|··|_        _|OO|_        _|^^|_        (/--\)
+  \____/         \____/       \____/        \____/        \____/        \____/
+
+-- adult
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+ n  .--.  n     n  .--.  n   n  .*-.  n    n *.--.* n   \n  .*-.  n/      .--.
+ | | ·· | |     | | ·· | |   | | ·· | |    | | OO | |    | | ^^ | |      | -- |
+ '-|    |-'     '-|    |-'   '-|    |-'    '-|  o |-'    '-|    |-'    .-|    |-.
+   |____|         |____|       |____|        |____|        |____|      U |____| U
+
+-- elder
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+    .{*}.          .{*}.        .{*}.  ,     *.{*}.* !   n  .{*}. n
+ ,-| ·· |-,     ,-| ·· |-,   ,-| ·· |-,    ,-| OO |-,    '-| ^^ |-'       .{*}.
+ | |    | |     | |    | |   | |    | |    | |  o | |      |    |      ,-| -- |-,
+ U |____| U     U |____| U   U |____| U    U |____| U      |____|      U |____| U
+
+== robot ==
+-- hatchling
+rest          fidget A      fidget B      flinch        celebrate     sleep
+
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+    _|_            _|_          _*_         * _|_ *       \ _|_ /
+  |[·_·]|        |[·_·]|      |[·_·]|       |[O!O]|       |[^_^]|         _\_
+  d[___]b        d[___]b      d[___]b       d[___]b       d[___]b       _[-.-]_
+
+-- adult
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+    _||_           _||_         _|*_        * _||_ *        _||_          _||_
+  |[·][·]|       |[·][·]|     |[·][·]|      |[O][O]|    \ |[^][^]| /    |[-][-]|
+  | -==- |       | -==- |     | -==- |      | -!!- |      | \__/ |      | .... |
+  d[____]b       d[____]b     d[____]b      d[____]b      d[____]b     _d[____]b_
+
+-- elder
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+    _|/_           _|/_         _*/_        * _|/_ *        _|/_          _|/_
+  |[·][·]%       |[·][·]%     |[·][·]%      |[O][O]%    \ |[^][^]% /    |[-][-]%
+  |%-==- |       |%-==- |     |%-==- |      |%-!!- |      |%\__/ |      |%.... |
+  d[_|#|]b       d[_|#|]b     d[_|#|]b      d[_|#|]b      d[_|#|]b     _d[_|#|]b_
+
+== rabbit ==
+-- hatchling
+rest          fidget A      fidget B      flinch        celebrate     sleep
+
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+   (\ /)          (\ /)        (\ _)        (| |) !        (\ /)
+  =(·.·)=        =(·.·)=      =(·.·)=      =(OoO)=        \(^w^)/        __ __
+   (" ")          (" ")        (" ")        (" ")          (' ')        =(-.-)=
+
+-- adult
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+   (\  /)         (\  /)       (\  _)        ||  || !      (\  /)
+  ( ·  · )       ( ·  · )     ( ·  · )      ( O  O )     \( ^  ^ )/     __    __
+ =(  w  )=      =(  w  )=    =(  w  )=     =(  o  )=     =(  w  )=      ( -  - )
+  (")-(")        (")-(")      (")-(")       (")-(")       ('')('')     =(__w__)=
+
+-- elder
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+  (\ ,-.         (\ ,-.       (\ ,-'        || ,-.  !     (\ ,-.
+ ( ·  · )__     ( ·  · )__   ( ·  · )__    ( O  O )__   \( ^  ^ )__    __  ,-.  _
+=(  w  )= |    =(  w  )= |  =(  w  )= |   =(  o  )= |   =(  w  )= |    ( -  - ) |
+ (")v(") _|     (")v(") _|   (")v(") _|    (")v(") _|    (")v(") _|   =(__w__)=_|
+
+== mushroom ==
+-- hatchling
+rest          fidget A      fidget B      flinch        celebrate     sleep
+
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+   .o-.           .o-.         .o-. .       .o-.           .o-.
+  (____)         (____)       (____)       (____) !       (____)         .o-.
+   |··|           |··|         |··|          |OO|         \|^^|/        (_--_)
+
+-- adult
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+  .-o--o-.       .-o--o-.     .-o--o-. .   .-o--o-. .     .-o--o-.
+ (________)     (________)   (________)   (________) !   (________)     .-o--o-.
+   | ·· |         | ·· |       | ·· |        | OO |      \ | ^^ | /    (________)
+   (____)         (____)       (____)        (____)        (____)        (_--_)
+
+-- elder
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+  .-o--o-.       .-o--o-.     .-o--o-. .   .-o--o-.  !    .-o--o-.
+ /o      o\     /o      o\   /o      o\   /o      o\     /o      o\     .-o--o-.
+ '-| ·· |-'     '-| ·· |-'   '-| ·· |-'   '-| OO |-'     \-| ^^ |-/    /o      o\
+   \||||/         \||||/       \||||/       /||||\         \||||/      '-(_--_)-'
+
+== chonk ==
+-- hatchling
+rest          fidget A      fidget B      flinch        celebrate     sleep
+
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+  /\__/\         /\__/\       /\__/\       /\__/\ !       /\__/\
+ ( ·  · )       ( ·  · )     ( ·  · )     ( O  O )       \(^  ^)/       /\__/\
+ (__ww__)       (__ww__)    ~(__ww__)     /(_oo_)\       (__ww__)      (_-ww-_)
+
+-- adult
+rest          fidget A      fidget B      flinch        celebrate     sleep
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+  /\____/\       /\____/\     /\____/\      /\____/\ !    /\____/\
+ (  ·  ·  )     (  ·  ·  )   (  ·  ·  )    (  O  O  )   \(  ^  ^  )/    /\____/\
+ (   ww   )     (   ww   )   (   ww   )~   (   oo   )    (   ww   )    (  -  -  )
+  (______)       (______)     (______)     /(______)\     (______)     (________)~
+
+-- elder
+rest          fidget A      fidget B      flinch        celebrate     sleep
+
+   .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
+  /\____/\       /\____/\     /\____/\      /\____/\ !    /\____/\
+ (  ·  ·  )     (  ·  ·  )   (  ·  ·  )    (  O  O  )   \(  ^  ^  )/    /\____/\
+ (_\vwwv/_)     (_\vwwv/_)   (_\vwwv/_)~  /(_\voov/_)\   (_\vwwv/_)    (_-vwwv-_)~

@@ -1,11 +1,15 @@
 // The saved record and the /buddy subcommands. Pure: no $.
-import type { Buddy, Counts, Mode, MoodEvent, Saved, SavedV1, Soul, TurnFacts } from '../types'
+import type { Buddy, Counts, Mode, MoodEvent, Saved, SavedV1, Soul, Stage, TurnFacts } from '../types'
+import { earn } from './achievements'
 import { addMoments, awayMoment, bestsOf, milestones, noticeTurns } from './journal'
 import { addCounts, localDay, visit, zeroCounts } from './ledger'
 import { applyMood, sulkFor, withSulk } from './mood'
+import { STAGES, grewMoments } from './progress'
+import { rollBones } from './roll'
 
 export const STORE_KEY = 'buddy'
-export const USAGE = 'Usage: /buddy [pet | card | journal | mute | unmute | off | reroll [confirm]]'
+export const USAGE =
+  'Usage: /buddy [pet | card [who] | journal [who] | dex | swap <who> | mute | unmute | off | reroll [confirm]]'
 
 // What the store holds, as this build reads it (Foundation spec section 1).
 export type Stored =
@@ -17,13 +21,36 @@ export type Stored =
 export function classify(raw: unknown): Stored {
   if (raw === undefined || raw === null) return { kind: 'none' }
   const schema = typeof raw === 'object' ? (raw as { schema?: unknown }).schema : undefined
-  if (schema === 1) return { kind: 'ok', saved: migrate(raw as SavedV1) }
+  if (schema === 1) return { kind: 'ok', saved: printable(migrate(raw as SavedV1)) }
   if (schema === 2) {
     const saved = raw as Saved
     const intact = Array.isArray(saved.buddies) && saved.buddies.some(b => b.seed === saved.active)
-    return intact ? { kind: 'ok', saved } : { kind: 'damaged' }
+    return intact ? { kind: 'ok', saved: printable(saved) } : { kind: 'damaged' }
   }
   return { kind: 'foreign', schema: schema === undefined ? 'unknown' : String(schema) }
+}
+
+// C0 and C1 control characters, which a terminal acts on rather than shows.
+const CONTROL = /[\u0000-\u001f\u007f-\u009f]/g
+
+// The record with every buddy's name and personality fit to show. A hatch never saves a control
+// character, so only a store edited by hand carries one; it is dropped, and a name left empty
+// reads as "Buddy". Returns `saved` itself when nothing needed it.
+function printable(saved: Saved): Saved {
+  let changed = false
+  const buddies = saved.buddies.map(b => {
+    const soul: unknown = b.soul
+    if (typeof soul !== 'object' || soul === null) return b
+    const { name, personality } = soul as Partial<Soul>
+    const clean = {
+      name: typeof name === 'string' ? name.replace(CONTROL, '') || 'Buddy' : name,
+      personality: typeof personality === 'string' ? personality.replace(CONTROL, '') : personality,
+    }
+    if (clean.name === name && clean.personality === personality) return b
+    changed = true
+    return { ...b, soul: { ...b.soul, ...clean } as Soul }
+  })
+  return changed ? { ...saved, buddies } : saved
 }
 
 function fresh(seed: string, soul: Soul, rerolls: number): Saved {
@@ -58,6 +85,8 @@ export type Change =
       turns?: Readonly<Record<string, readonly TurnFacts[]>>
     }
   | { kind: 'visit' }
+  // A retired buddy made active again (Progression spec section 7).
+  | { kind: 'swap'; seed: string }
 
 // Today's visit (Foundation spec section 3). A new day after two or more missed ones leaves the
 // active buddy sulking (Alive spec section 2), and after three or more it goes in that buddy's
@@ -81,6 +110,21 @@ function arrive(saved: Saved, now: number): Saved {
         )
       : saved.buddies
   return { ...saved, you, buddies }
+}
+
+// A retired buddy coming back (Progression spec section 7): out of retirement, sulking for the
+// days it was left, and with "away" in its journal after three or more missed days, as a visit
+// gives. A retirement time that doesn't parse leaves neither.
+function welcomeBack(b: Buddy, today: string, now: number): Buddy {
+  const left = b.retiredAt !== null && Number.isFinite(Date.parse(b.retiredAt)) ? localDay(Date.parse(b.retiredAt)) : null
+  const sulk = sulkFor(left, today)
+  const away = awayMoment(left, today, now)
+  return {
+    ...b,
+    retiredAt: null,
+    ...(sulk > 0 ? { mood: withSulk(b.mood, sulk, now) } : {}),
+    ...(away ? { journal: addMoments(b.journal, [away]) } : {}),
+  }
 }
 
 // One change, made on the stored object itself so fields a newer build wrote are kept.
@@ -127,7 +171,7 @@ export function applyChange(saved: Saved | null, change: Change, now: number): S
         // Records are judged against what is stored, before this save's counts are added.
         const counts = more ? addCounts(b.counts, more) : b.counts
         const noticed = noticeTurns(facts, bestsOf(b), b.counts.longestTurnMs, now)
-        const moments = [...noticed.moments, ...milestones(b.counts, counts, now)]
+        const moments = [...noticed.moments, ...milestones(b.counts, counts, now), ...grewMoments(b.counts, counts, now)]
         return {
           ...b,
           ...(more ? { counts } : {}),
@@ -136,34 +180,117 @@ export function applyChange(saved: Saved | null, change: Change, now: number): S
           ...(moments.length > 0 ? { journal: addMoments(b.journal, moments) } : {}),
         }
       })
-      return added || arrived !== saved ? { ...arrived, buddies } : null
+      // Achievements are judged last, on every buddy's new totals (Progression spec section 4).
+      return added || arrived !== saved ? earn({ ...arrived, buddies }, now) : null
     }
     case 'visit': {
       if (!saved) return null
       const arrived = arrive(saved, now)
-      return arrived !== saved ? arrived : null
+      return arrived !== saved ? earn(arrived, now) : null
+    }
+    case 'swap': {
+      if (!saved || change.seed === saved.active || !saved.buddies.some(b => b.seed === change.seed)) return null
+      // The visit comes first, so a sulk from days away lands on the buddy left alone. It earns
+      // nothing, as a hatch earns nothing: news isn't told across a change of buddy, so a streak
+      // achievement this visit meets is earned, and announced, at the next flush.
+      const arrived = arrive(saved, now)
+      const retiredAt = new Date(now).toISOString()
+      return {
+        ...arrived,
+        mode: 'on',
+        active: change.seed,
+        buddies: arrived.buddies.map(b =>
+          b.seed === arrived.active ? { ...b, retiredAt } : b.seed === change.seed ? welcomeBack(b, today, now) : b,
+        ),
+      }
     }
   }
 }
 
-export type Sub =
-  | 'show' | 'pet' | 'card' | 'journal' | 'mute' | 'unmute' | 'off' | 'reroll' | 'reroll-confirm' | 'debug' | 'debug-off'
-  | 'usage'
+type Plain = 'show' | 'pet' | 'dex' | 'mute' | 'unmute' | 'off' | 'reroll' | 'reroll-confirm' | 'debug-off' | 'usage'
+export type Sub = Plain | 'card' | 'journal' | 'swap' | 'debug'
 
-const SIMPLE: readonly string[] = ['pet', 'card', 'journal', 'mute', 'unmute', 'off']
+// A /buddy command as parsed: the subcommand, and what it was given (Progression spec section 7).
+export type Parsed =
+  | { sub: Plain }
+  | { sub: 'card' | 'journal'; target?: string }
+  | { sub: 'swap'; target: string }
+  | { sub: 'debug'; stage?: Stage }
 
-export function parseSub(args: string): Sub {
-  const words = args.trim().toLowerCase().split(/\s+/).filter(Boolean)
-  const [first, second] = words
-  if (first === undefined) return 'show'
+const SIMPLE: readonly string[] = ['pet', 'dex', 'mute', 'unmute', 'off']
+// Subcommands that can name one buddy after them.
+const TARGETED: readonly string[] = ['card', 'journal']
+
+// Subcommand words match in any case; anything after them keeps the case it was typed in.
+export function parseSub(args: string): Parsed {
+  const words = args.trim().split(/\s+/).filter(Boolean)
+  const first = words[0]?.toLowerCase()
+  const second = words[1]?.toLowerCase()
+  if (first === undefined) return { sub: 'show' }
   if (first === 'reroll') {
-    if (words.length === 1) return 'reroll'
-    return words.length === 2 && second === 'confirm' ? 'reroll-confirm' : 'usage'
+    if (words.length === 1) return { sub: 'reroll' }
+    return { sub: words.length === 2 && second === 'confirm' ? 'reroll-confirm' : 'usage' }
   }
   // Hidden: left out of USAGE, the argument hint and the README on purpose.
   if (first === 'debug') {
-    if (words.length === 1) return 'debug'
-    return words.length === 2 && second === 'off' ? 'debug-off' : 'usage'
+    if (words.length === 1) return { sub: 'debug' }
+    if (words.length !== 2 || second === undefined) return { sub: 'usage' }
+    if (second === 'off') return { sub: 'debug-off' }
+    const stage = STAGES.find(s => s === second)
+    return stage ? { sub: 'debug', stage } : { sub: 'usage' }
   }
-  return words.length === 1 && SIMPLE.includes(first) ? (first as Sub) : 'usage'
+  if (first === 'swap') return words.length === 2 ? { sub: 'swap', target: words[1]! } : { sub: 'usage' }
+  if (TARGETED.includes(first)) {
+    const sub = first as 'card' | 'journal'
+    if (words.length === 1) return { sub }
+    return words.length === 2 ? { sub, target: words[1]! } : { sub: 'usage' }
+  }
+  return { sub: words.length === 1 && SIMPLE.includes(first) ? (first as Plain) : 'usage' }
+}
+
+// A buddy asked for by name, in any case, or by its dex number: "#5" or "5".
+export type Found = { kind: 'one'; seed: string } | { kind: 'many'; numbers: number[] } | { kind: 'none' }
+
+const NUMBER = /^#?(\d+)$/
+
+export function findBuddy(saved: Saved, who: string): Found {
+  const number = NUMBER.exec(who)
+  if (number) {
+    const b = saved.buddies[Number(number[1]) - 1]
+    return b ? { kind: 'one', seed: b.seed } : { kind: 'none' }
+  }
+  const name = who.toLowerCase()
+  const numbers = saved.buddies.flatMap((b, i) => (b.soul.name.toLowerCase() === name ? [i + 1] : []))
+  if (numbers.length > 1) return { kind: 'many', numbers }
+  const one = numbers[0]
+  return one === undefined ? { kind: 'none' } : { kind: 'one', seed: saved.buddies[one - 1]!.seed }
+}
+
+// The answer when `who` names no one buddy, with `command` in the hint.
+export function notFound(saved: Saved, who: string, found: Exclude<Found, { kind: 'one' }>, command: string): string {
+  if (found.kind === 'none') {
+    const number = NUMBER.exec(who)
+    return number ? `No buddy #${Number(number[1])} in the dex.` : `No buddy named ${who} in the dex.`
+  }
+  const each = found.numbers.map(n => `#${n} ${rollBones(saved.buddies[n - 1]!.seed).species}`)
+  const name = saved.buddies[found.numbers[0]! - 1]!.soul.name
+  return `${found.numbers.length} buddies are named ${name}: ${each.join(', ')}. Run /buddy ${command} #${found.numbers.at(-1)}.`
+}
+
+// What a card or journal asks to show: null for the active buddy, which a pane then follows
+// through a swap, or the line to answer with when `who` names no one buddy.
+export function targetOf(
+  saved: Saved,
+  who: string | undefined,
+  command: string,
+): { seed: string | null } | { reply: string } {
+  if (who === undefined) return { seed: null }
+  const found = findBuddy(saved, who)
+  if (found.kind !== 'one') return { reply: notFound(saved, who, found, command) }
+  return { seed: found.seed === saved.active ? null : found.seed }
+}
+
+// The buddy a pane shows: the one with `seed`, or the active one when that is null or gone.
+export function shownBuddy(saved: Saved, seed: string | null): Buddy {
+  return saved.buddies.find(b => b.seed === seed) ?? activeBuddy(saved)
 }
