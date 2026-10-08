@@ -2,16 +2,18 @@ import { expect, test } from 'claude-code/testing'
 
 import { rollBones } from './roll'
 import {
-  BUBBLE_TICKS, FALLBACK_NAMES, MAX_SAY, QUIP_COOLDOWN_MS, RESERVED_NAMES, SAY_GOAL, bubbleTicks, cannedLine, cleanSay,
-  fallbackSoul, hatchRequest, matchAddress, parseSoul, personaSystem, reactionPrompt, shouldGreet, shouldQuip,
-  streakGreeting, withArticle,
+  BUBBLE_TICKS, FAIL_PLAIN, FAIL_SNARKY, FALLBACK_NAMES, MAX_SAY, QUIP_COOLDOWN_MS, RESERVED_NAMES, SAY_GOAL,
+  bubbleTicks, cannedLine, cleanSay, failLine, fallbackSoul, hatchRequest, matchAddress, parseSoul, personaSystem,
+  quipChance, quipCooldownMs, reactionPrompt, shouldFlag, shouldGreet, shouldQuip, streakGreeting, withArticle,
 } from './voice'
 import type { TurnSummary } from './voice'
 
 const CALM: TurnSummary = { reason: 'answer', durationMs: 4_000, tools: { Read: 2 }, failed: [] }
 const ROUGH: TurnSummary = { reason: 'answer', durationMs: 4_000, tools: { Bash: 2 }, failed: ['Bash'] }
 const NOW = 1_000_000
-const base = { mode: 'on' as const, inFlight: false, now: NOW, lastQuipAt: 0, summary: CALM, roll: 0.9 }
+// CHAOS 40 and PATIENCE 0 give the base build's flat 0.25 chance and 3-minute cooldown.
+const STATS = { DEBUGGING: 50, PATIENCE: 0, CHAOS: 40, WISDOM: 50, SNARK: 50 }
+const base = { mode: 'on' as const, inFlight: false, now: NOW, lastQuipAt: 0, summary: CALM, roll: 0.9, stats: STATS }
 
 test('the speak-or-not rule', () => {
   expect(shouldQuip({ ...base, summary: ROUGH })).toBe(true)
@@ -119,10 +121,61 @@ test('the reaction prompt carries the event summary and nothing else', () => {
   expect(p).toContain('Took 4s.')
 })
 
-test('canned lines come from the peak stat pool', () => {
+test('canned lines come from the peak stat pool, or the SNARK pool when the roll is under SNARK', () => {
+  const rolled = rollBones('voice-seed')
+  const bones = { ...rolled, peak: 'WISDOM' as const, stats: { ...rolled.stats, SNARK: 30 } }
+  const wise = cannedLine(bones, 0, 0.9)
+  expect(wise.length).toBeGreaterThan(0)
+  expect(cannedLine(bones, 3, 0.9)).toBe(wise)
+  expect(cannedLine(bones, 0, 0.3)).toBe(wise)
+  expect(cannedLine(bones, 0, 0.29)).not.toBe(wise)
+  expect(cannedLine(bones, 0, 0.29)).toBe(cannedLine({ ...bones, peak: 'SNARK' }, 0, 0.9))
+})
+
+test('CHAOS sets the quip chance and PATIENCE the cooldown', () => {
+  const at = (n: number) => ({ ...STATS, CHAOS: n, PATIENCE: n })
+  expect(quipChance(at(1))).toBe(0.1525)
+  expect(quipChance(at(50))).toBe(0.275)
+  expect(quipChance(at(100))).toBe(0.4)
+  expect(quipCooldownMs(at(1))).toBe(181_800)
+  expect(quipCooldownMs(at(50))).toBe(270_000)
+  expect(quipCooldownMs(at(100))).toBe(360_000)
+  // A chaotic buddy speaks after an ordinary turn on a roll a calm one would not.
+  expect(shouldQuip({ ...base, roll: 0.35, stats: { ...STATS, CHAOS: 100 } })).toBe(true)
+  expect(shouldQuip({ ...base, roll: 0.35, stats: { ...STATS, CHAOS: 1 } })).toBe(false)
+  // A patient one waits longer, even after a notable turn.
+  const fourMinutesAgo = NOW - 240_000
+  expect(shouldQuip({ ...base, summary: ROUGH, lastQuipAt: fourMinutesAgo, stats: { ...STATS, PATIENCE: 1 } })).toBe(true)
+  expect(shouldQuip({ ...base, summary: ROUGH, lastQuipAt: fourMinutesAgo, stats: { ...STATS, PATIENCE: 100 } })).toBe(false)
+})
+
+test('DEBUGGING decides whether a failed tool call is said out loud at once', () => {
+  const flag = { mode: 'on' as const, bubbleUp: false, flagged: false, roll: 0.5, stats: { ...STATS, DEBUGGING: 60 } }
+  expect(shouldFlag(flag)).toBe(true)
+  expect(shouldFlag({ ...flag, roll: 0.6 })).toBe(false)
+  expect(shouldFlag({ ...flag, roll: 0.999, stats: { ...STATS, DEBUGGING: 100 } })).toBe(true)
+  expect(shouldFlag({ ...flag, bubbleUp: true })).toBe(false)
+  expect(shouldFlag({ ...flag, flagged: true })).toBe(false)
+  expect(shouldFlag({ ...flag, mode: 'muted' })).toBe(false)
+  expect(shouldFlag({ ...flag, mode: 'off' })).toBe(false)
+})
+
+test('failure lines come in a plain half and a snarky half, picked by SNARK', () => {
+  expect(FAIL_PLAIN).toHaveLength(4)
+  expect(FAIL_SNARKY).toHaveLength(4)
+  const bones = { ...rollBones('voice-seed'), stats: { ...STATS, SNARK: 40 } }
+  expect(FAIL_SNARKY).toContain(failLine(bones, 0, 0.39))
+  expect(FAIL_PLAIN).toContain(failLine(bones, 0, 0.4))
+  expect(failLine(bones, 5, 0.9)).toBe(FAIL_PLAIN[1])
+})
+
+test('the persona hears the extra lines between the stats and the reply rules', () => {
   const bones = rollBones('voice-seed')
-  expect(cannedLine(bones, 0).length).toBeGreaterThan(0)
-  expect(cannedLine(bones, 3)).toBe(cannedLine(bones, 0))
+  const soul = { name: 'Pip', personality: 'Counts semicolons.', hatchedAt: '2026-10-07T00:00:00.000Z' }
+  const lines = personaSystem(soul, bones, ['Mood: smug.', 'Today is Easter.']).split('\n')
+  expect(lines.slice(3, 5)).toEqual(['Mood: smug.', 'Today is Easter.'])
+  expect(lines.at(-1)).toMatch(/^Reply with one line/)
+  expect(personaSystem(soul, bones).split('\n')).toHaveLength(4)
 })
 
 test('the streak greeting comes from a pool of four and greets only a new day of a streak', () => {

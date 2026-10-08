@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import type { Counts } from '../types'
 import {
-  addCounts, countEvent, localDay, mergePending, prevDay, toolGroup, totalCalls, visit, zeroCounts,
+  addCounts, countEvent, daysBetween, localDay, mergePending, prevDay, toolGroup, totalCalls, visit, zeroCounts,
 } from './ledger'
 
 test('every tool lands in its group', () => {
@@ -92,4 +92,12 @@ test('the visit rule', () => {
   expect(visit(second, '2026-10-11')).toEqual({ lastDay: '2026-10-11', streak: 1, bestStreak: 2, days: 3 })
   const yearEnd = { lastDay: '2026-12-31', streak: 4, bestStreak: 4, days: 9 }
   expect(visit(yearEnd, '2027-01-01')).toMatchObject({ streak: 5, bestStreak: 5, days: 10 })
+})
+
+test('days between two dates count calendar days, across a month, a year and a clock change', () => {
+  expect(daysBetween('2026-10-07', '2026-10-07')).toBe(0)
+  expect(daysBetween('2026-10-06', '2026-10-07')).toBe(1)
+  expect(daysBetween('2026-10-31', '2026-11-02')).toBe(2)
+  expect(daysBetween('2026-12-30', '2027-01-02')).toBe(3)
+  expect(daysBetween('2026-03-07', '2026-03-09')).toBe(2)
 })

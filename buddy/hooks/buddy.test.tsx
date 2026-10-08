@@ -5,7 +5,8 @@ import type { Engine } from 'claude-code/testing'
 import type { Saved } from '../types'
 import { SHIMMER } from './layout'
 import { zeroCounts } from './ledger'
-import { FALLBACK_NAMES } from './voice'
+import { TOUR_TICKS } from './tour'
+import { FAIL_PLAIN, FAIL_SNARKY, FALLBACK_NAMES } from './voice'
 
 const ZERO = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
 const ok = (text: string): ModelCompleteResult => ({ isAnswered: true, text, usage: ZERO })
@@ -46,10 +47,14 @@ const pane = (bodyColumns = 60) => ({
   },
 })
 
+// Local noon on Wednesday 2026-10-07 in any time zone: not a holiday and not night, so the
+// band's calendar stays out of every test that doesn't ask for it.
+const NOON = new Date(2026, 9, 7, 12).getTime()
+
 // The world beneath the plugin: a clock, a store, the command registry, session
 // start, a pane placer, and a stand-in for the engine's own band so a pass-through is visible.
 // A null store leaves $.store to the test, which answers store.get and store.set itself.
-function world(on: On, store: Record<string, unknown> | null = {}, placesPanes = true, now = 1_000_000) {
+function world(on: On, store: Record<string, unknown> | null = {}, placesPanes = true, now = NOON) {
   const clock = mock.clock(on, { now })
   if (store) mock.store(on, store)
   on('command.register', async (_$, e) => ({ value: { command: e.name } }))
@@ -629,10 +634,11 @@ test("a subagent's failed tool doesn't leak into the main turn's reaction", asyn
   expect(reactions[0]).toContain('Failed tools: none.')
 })
 
-// One tour step is a 16-tick animation cycle at 500 ms a tick: 4 s plain, then 4 s shiny.
+// One tour step is 28 ticks at 500 ms a tick: 4 s plain, 4 s shiny, then 6 s of poses.
 const HALF_STEP_MS = 4_000
+const STEP_MS = 14_000
 
-test('the debug tour shows each species plain, then shiny, and never writes the store', async ($, on) => {
+test('the debug tour shows each species plain, shiny, then flinching, and never writes the store', async ($, on) => {
   const writes: unknown[] = []
   on('store.get', async () => ({ value: RECORD }))
   on('store.set', async (_$, e) => {
@@ -644,7 +650,9 @@ test('the debug tour shows each species plain, then shiny, and never writes the 
   // The session's visit is its own write; the tour adds none.
   await clock.settle()
   const visits = writes.length
-  expect(await runner($)('debug')).toBe('Touring all 18 species, plain then shiny. Run /buddy debug off to stop.')
+  expect(await runner($)('debug')).toBe(
+    'Touring all 18 species with their reactions, then the holidays and moods. Run /buddy debug off to stop.',
+  )
   const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
   const shimmering = async () => (await spriteTexts(ui)).every(t => t.props.bold === true)
   expect(await ui.find({ type: 'Text', text: /tour 1\/18  common duck  $/ })).toBeDefined()
@@ -653,6 +661,9 @@ test('the debug tour shows each species plain, then shiny, and never writes the 
   expect(await ui.find({ type: 'Text', text: /tour 1\/18  common duck \(shiny\)  $/ })).toBeDefined()
   expect(await shimmering()).toBe(true)
   await clock.advance(HALF_STEP_MS)
+  // The duck's flinch, wide-eyed.
+  expect(await ui.find({ type: 'Text', text: /<\(O \)___/ })).toBeDefined()
+  await clock.advance(STEP_MS - 2 * HALF_STEP_MS)
   expect(await ui.find({ type: 'Text', text: /tour 2\/18  uncommon goose  $/ })).toBeDefined()
   const desktop = await $.ui.mount({ plugin: 'buddy', surface: 'desktop', ...band() })
   expect(await desktop.find({ type: 'Text', text: /tour 2\/18/ })).toBeDefined()
@@ -670,13 +681,13 @@ test('debug off ends the tour', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: /Pip/ })).toBeDefined()
 })
 
-test('the tour ends by itself after the last species', async ($, on) => {
+test('the tour ends by itself after the last mood', async ($, on) => {
   const clock = world(on, { buddy: RECORD })
   await $.session.start(START)
   await runner($)('debug')
   const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
-  await clock.advance(18 * 2 * HALF_STEP_MS - 500)
-  expect(await ui.find({ type: 'Text', text: /tour 18\/18/ })).toBeDefined()
+  await clock.advance(TOUR_TICKS * 500 - 500)
+  expect(await ui.find({ type: 'Text', text: /tour: sulky/ })).toBeDefined()
   await clock.advance(500)
   expect(await ui.find({ type: 'Text', text: /tour/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /Pip/ })).toBeDefined()
@@ -765,9 +776,6 @@ test('a record that turns damaged during a hatch is not written over, and nobody
   expect(shared.writes).toBe(0)
   expect(shared.row).toEqual({ schema: 2, active: 'gone', buddies: [] })
 })
-
-// Local noon, so the local date is 2026-10-07 in any time zone.
-const NOON = new Date(2026, 9, 7, 12).getTime()
 
 const SAVED: Saved = {
   schema: 2,
@@ -946,4 +954,304 @@ test('saves in one session run one at a time: two turns in a row both keep their
   await clock.settle()
   await idle()
   expect(activeOf(store.shared.row)?.counts.turns).toBe(2)
+})
+
+// A terminal band's elements, as much of them as these tests read.
+type Drawn = { findAll: (q: { type: string }) => Promise<{ text?: string; props: Record<string, unknown> }[]> }
+
+// The five sprite rows a terminal band drew, as text: the Text elements carrying a `bold` prop.
+const drawnSprite = async (ui: Drawn) =>
+  (await ui.findAll({ type: 'Text' })).filter(t => 'bold' in t.props).map(t => t.text ?? '')
+
+// Local noon on Independence Day 2026.
+const JULY4_NOON = new Date(2026, 6, 4, 12).getTime()
+
+test('on the Fourth of July a quiet buddy wears the hat and holds the flag; a bubble takes its place', async ($, on) => {
+  const clock = world(on, { buddy: RECORD }, true, JULY4_NOON)
+  model(on, null, 'Fireworks later?')
+  await $.session.start(START)
+  await clock.settle()
+  const terminal = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect((await drawnSprite(terminal))[0]).toContain('_|**|_')
+  expect((await terminal.find({ type: 'Text', text: /^\*:\*:$/ }))?.props.color).toBe('blue')
+  expect((await terminal.find({ type: 'Text', text: /^=====$/ }))?.props.color).toBe('red')
+  const desktop = await $.ui.mount({ plugin: 'buddy', surface: 'desktop', ...band() })
+  expect(String((await desktop.find({ type: 'Svg' }))?.props.source)).toContain('<tspan class="paint-blue">*:*:</tspan>')
+  const short = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band(3, 80) })
+  expect((await short.findAll({ type: 'Text' })).map(t => t.text).join('')).not.toContain('*:*:')
+  await runner($)('pet')
+  await clock.settle()
+  expect(await terminal.find({ type: 'Text', text: /Fireworks later\?/ })).toBeDefined()
+  expect(await terminal.find({ type: 'Text', text: /^\*:\*:$/ })).toBeUndefined()
+})
+
+test('the card keeps the rolled hat on a holiday', async ($, on) => {
+  // 'tint-11' rolls a rare penguin in a wizard hat.
+  const clock = world(on, { buddy: { ...RECORD, seed: 'tint-11' } }, true, JULY4_NOON)
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect((await drawnSprite(ui))[0]).toContain('_|**|_')
+  const card = await cardText($)
+  expect(card).toContain('/*\\')
+  expect(card).not.toContain('_|**|_')
+})
+
+test('a buddy left alone for 10 minutes falls asleep, and a prompt wakes it', async ($, on) => {
+  const clock = world(on, { buddy: RECORD })
+  engineBelow(on)
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  await clock.advance(599_000)
+  expect((await drawnSprite(ui))[0]).not.toMatch(/z$/)
+  await clock.advance(1_000)
+  expect((await drawnSprite(ui))[0]).toMatch(/z$/)
+  // The ghost's sleep frame, eyes shut.
+  expect((await drawnSprite(ui)).join('\n')).toContain('/ -  - \\')
+  await $.prompt.submit({ text: 'run the tests', wait: false, origin: { kind: 'composer' } })
+  await clock.settle()
+  expect((await drawnSprite(ui))[0]).not.toMatch(/z$/)
+})
+
+test('at night the buddy dozes off after a minute', async ($, on) => {
+  const clock = world(on, { buddy: RECORD }, true, new Date(2026, 9, 7, 0, 30).getTime())
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  await clock.advance(59_500)
+  expect((await drawnSprite(ui))[0]).not.toMatch(/z$/)
+  await clock.advance(500)
+  expect((await drawnSprite(ui))[0]).toMatch(/z$/)
+})
+
+test('the tour dresses the real buddy for each holiday, then shows each mood', async ($, on) => {
+  const clock = world(on, { buddy: RECORD })
+  await $.session.start(START)
+  await runner($)('debug')
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  // Independence Day is the eighth decoration.
+  await clock.advance((18 * 28 + 7 * 8) * 500)
+  expect(await ui.find({ type: 'Text', text: /tour: Independence Day  common ghost/ })).toBeDefined()
+  expect((await ui.find({ type: 'Text', text: /^\*:\*:$/ }))?.props.color).toBe('blue')
+  await clock.advance(8 * 8 * 500)
+  expect(await ui.find({ type: 'Text', text: /tour: anxious/ })).toBeDefined()
+  expect((await drawnSprite(ui)).join('\n')).toContain('/ ;  ; \\')
+})
+
+// The bubble's words on a terminal band, '' when there is none.
+const bubbleOf = async (ui: Drawn) =>
+  (await ui.findAll({ type: 'Text' }))
+    .map(t => t.text ?? '')
+    .filter(text => /^ [<|] /.test(text))
+    .map(text => text.slice(3, -2).trim())
+    .filter(Boolean)
+    .join(' ')
+
+test('a failed tool call makes the buddy flinch for 2 seconds', async ($, on) => {
+  const clock = world(on, { buddy: RECORD })
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  await clock.settle()
+  // The ghost's flinch frame, wide-eyed.
+  expect((await drawnSprite(ui)).join('\n')).toContain(' / O  O  \\')
+  await clock.advance(2_000)
+  expect((await drawnSprite(ui)).join('\n')).not.toContain('O  O')
+})
+
+test('two failed turns make the buddy anxious, and the turn-end save keeps the mood', async ($, on) => {
+  const shared = sharedStore(on, RECORD)
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  await $.turn.complete({ ...TURN, reason: 'error' })
+  await clock.settle()
+  // A record from before this build had no mood; the first save with events gives it one.
+  expect(activeOf(shared.row)?.mood).toEqual({ meter: -1, sulk: 0, at: new Date(NOON).toISOString() })
+  await $.turn.complete({ ...TURN, turnId: 't2', reason: 'error' })
+  await clock.settle()
+  expect(activeOf(shared.row)?.mood?.meter).toBe(-2)
+  // Past the flinch, the ghost's eyes are anxious.
+  await clock.advance(2_000)
+  expect((await drawnSprite(ui)).join('\n')).toContain('/ ;  ; \\')
+})
+
+test('a long clean turn makes the buddy celebrate under confetti', async ($, on) => {
+  const clock = world(on, { buddy: RECORD })
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  await $.turn.complete({ ...TURN, durationMs: 130_000 })
+  await clock.settle()
+  const rows = await drawnSprite(ui)
+  expect([' *  .  *  . ', ' .  *  .  * ']).toContain(rows[0])
+  expect(rows.join('\n')).toContain('\\ / ^  ^ \\ /')
+  await clock.advance(3_000)
+  expect((await drawnSprite(ui))[0]?.trim()).toBe('')
+})
+
+test("another session's mood survives this session's save", async ($, on) => {
+  const shared = sharedStore(on, RECORD)
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  // Mid-turn, another session saves a run of failures of its own.
+  const theirs = JSON.parse(JSON.stringify(shared.row)) as Saved
+  theirs.buddies[0]!.mood = { meter: -3, sulk: 0, at: new Date(NOON).toISOString() }
+  shared.row = theirs
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(activeOf(shared.row)?.mood?.meter).toBe(-4)
+})
+
+test('back after days away, the buddy sulks until it is petted', async ($, on) => {
+  // 2026-10-04 to 2026-10-07 misses two days: sulk 1.
+  const shared = sharedStore(on, { ...SAVED, you: { ...SAVED.you, lastDay: '2026-10-04' } })
+  const clock = world(on, null)
+  model(on, null, 'Hmph.')
+  await $.session.start(START)
+  await clock.settle()
+  expect(activeOf(shared.row)?.mood?.sulk).toBe(1)
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect((await drawnSprite(ui)).join('\n')).toContain('/ =  = \\')
+  await runner($)('pet')
+  await clock.settle()
+  expect(activeOf(shared.row)?.mood?.sulk).toBe(0)
+  expect((await drawnSprite(ui)).join('\n')).toContain('/ ✦  ✦ \\')
+})
+
+// 'debug-142' rolls an epic mushroom with DEBUGGING 100.
+const KEEN = { ...RECORD, seed: 'debug-142' }
+
+test('a buddy with DEBUGGING 100 speaks up once a turn when a tool fails, never when muted, and calls no model', async ($, on) => {
+  const clock = world(on, { buddy: KEEN })
+  engineBelow(on)
+  const prompts = model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  const lines = [...FAIL_PLAIN, ...FAIL_SNARKY]
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  await clock.settle()
+  expect(lines).toContain(await bubbleOf(ui))
+  // Once that bubble is gone, a second failure in the same turn stays quiet.
+  await clock.advance(13_000)
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  await clock.settle()
+  expect(await bubbleOf(ui)).toBe('')
+  // A new turn may speak again.
+  await $.turn.complete(TURN)
+  await clock.settle()
+  await clock.advance(13_000)
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  await clock.settle()
+  expect(lines).toContain(await bubbleOf(ui))
+  // Muted, it says nothing.
+  await runner($)('mute')
+  await $.turn.complete({ ...TURN, turnId: 't3' })
+  await clock.settle()
+  await clock.advance(13_000)
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  await clock.settle()
+  expect(await bubbleOf(ui)).toBe('')
+  // The only model calls were turn-end reactions.
+  expect(prompts.filter(p => !p.startsWith('Claude just finished a turn'))).toEqual([])
+})
+
+test("the persona hears the buddy's mood and the day", async ($, on) => {
+  const clock = world(on, { buddy: RECORD }, true, JULY4_NOON)
+  engineBelow(on)
+  const systems: string[] = []
+  on('model.complete', async (_$, e) => {
+    systems.push(e.system ?? '')
+    return { value: ok('Boom.') }
+  })
+  await $.session.start(START)
+  await clock.settle()
+  await $.turn.complete({ ...TURN, reason: 'error' })
+  await $.turn.complete({ ...TURN, turnId: 't2', reason: 'error' })
+  await clock.settle()
+  await runner($)('pet')
+  await clock.settle()
+  const pet = systems.at(-1) ?? ''
+  expect(pet).toContain('Mood: anxious, after a run of failures. Let it color the line.')
+  expect(pet).toContain('Today is Independence Day.')
+})
+
+// A pet and a talk each take one step off the sulk before the buddy answers.
+const SOOTHERS: [string, ($: Engine) => Promise<unknown>][] = [
+  ['a pet', $ => runner($)('pet')],
+  ['a talk', $ => $.prompt.submit({ text: 'Pip, sorry I was away.', wait: false, origin: { kind: 'composer' } })],
+]
+
+for (const [what, soothe] of SOOTHERS) {
+  test(`the answer to ${what} hears the sulk it eased, even while its save is slow`, async ($, on) => {
+    // 2026-10-04 to 2026-10-07 misses two days: sulk 1, which one soothe takes away.
+    const store = heldStore(on, { ...SAVED, you: { ...SAVED.you, lastDay: '2026-10-04' } })
+    const clock = world(on, null)
+    engineBelow(on)
+    const systems: string[] = []
+    on('model.complete', async (_$, e) => {
+      systems.push(e.system ?? '')
+      return { value: ok('Fine.') }
+    })
+    await $.session.start(START)
+    await clock.settle()
+    await soothe($)
+    // The save the soothe starts is held at the store, as a slow disk would hold it.
+    store.shared.held = true
+    await clock.settle()
+    await idle()
+    store.release()
+    await clock.settle()
+    await idle()
+    expect(activeOf(store.shared.row)?.mood?.sulk).toBe(0)
+    expect(systems).toHaveLength(1)
+    expect(systems[0]).not.toContain('Mood: sulky')
+  })
+}
+
+test('a reply cancels a reaction still waiting on the model, and the reaction never shows', async ($, on) => {
+  const clock = world(on, { buddy: RECORD })
+  engineBelow(on)
+  // Reactions wait for the test; replies answer at once.
+  let release!: () => void
+  const gate = new Promise<void>(resolve => {
+    release = resolve
+  })
+  const prompts: string[] = []
+  on('model.complete', async (_$, e) => {
+    prompts.push(e.prompt)
+    if (!e.prompt.startsWith('Claude just finished a turn')) return { value: ok('Hello there.') }
+    await gate
+    return { value: ok('Ouch.') }
+  })
+  await $.session.start(START)
+  await clock.settle()
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  await $.turn.complete(TURN)
+  await clock.advance(10)
+  for (let i = 0; i < 100 && prompts.length === 0; i++) await Promise.resolve()
+  expect(prompts).toHaveLength(1)
+  await $.prompt.submit({ text: 'Pip, how are you?', wait: false, origin: { kind: 'composer' } })
+  await clock.advance(10)
+  for (let i = 0; i < 100 && prompts.length === 1; i++) await Promise.resolve()
+  release()
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await ui.find({ text: /Hello there\./ })).toBeDefined()
+  expect(await ui.find({ text: /Ouch\./ })).toBeUndefined()
+  expect(prompts.filter(p => p.startsWith('Claude just finished a turn'))).toHaveLength(1)
 })

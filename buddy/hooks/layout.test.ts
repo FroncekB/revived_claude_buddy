@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import {
   MAX_BUBBLE_W, MIN_FULL_COLS, SHIMMER, bandRows, bubbleRows, bubbleWidth, cardLines, compactLine, isCompact, nameLine,
-  pageAt, spriteTint, streakLine, wrap,
+  pageAt, paintRuns, rightRuns, spriteTint, streakLine, wrap,
 } from './layout'
 import { zeroCounts } from './ledger'
 import { rollBones } from './roll'
@@ -188,4 +188,23 @@ test('the streak line counts with commas, agrees in number, and keeps the text c
   expect(streakLine(twelve, { ...zeroCounts(), turns: 1_234_567 })).toContain('1,234,567 turns')
   const card = [...cardLines(SOUL, rollBones('layout-seed'), 2), streakLine(twelve, many)]
   expect(card.length).toBeLessThanOrEqual(12)
+})
+
+test('a painted row splits into runs by color, and unpainted columns keep the text color', () => {
+  expect(paintRuns('|*:*==', ' bbbrr')).toEqual([{ text: '|' }, { text: '*:*', color: 'blue' }, { text: '==', color: 'red' }])
+  expect(paintRuns('|----', ' bb')).toEqual([{ text: '|' }, { text: '--', color: 'blue' }, { text: '--' }])
+  expect(paintRuns('plain')).toEqual([{ text: 'plain' }])
+})
+
+test('the right-hand column: the bubble when there is one, else the prop after a 2-column gap', () => {
+  const prop = { art: ['|*=', '|='], paint: [' br'] }
+  const quiet = rightRuns(['', '', '', '', ''], prop)
+  expect(quiet[0]).toEqual([{ text: '  ' }, { text: '|' }, { text: '*', color: 'blue' }, { text: '=', color: 'red' }])
+  expect(quiet[1]).toEqual([{ text: '  ' }, { text: '|=' }])
+  expect(quiet[2]).toEqual([{ text: ' ' }])
+  const talking = bandRows(SPRITE, 'Hello there.', 80, 0)
+  expect(rightRuns(talking.bubble, prop).map(row => row.map(r => r.text).join(''))).toEqual(
+    talking.bubble.map(row => ' ' + row),
+  )
+  expect(rightRuns(['', '', '', '', ''], null)).toEqual(Array.from({ length: 5 }, () => [{ text: ' ' }]))
 })

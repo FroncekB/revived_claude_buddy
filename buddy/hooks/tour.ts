@@ -1,32 +1,76 @@
-// The hidden /buddy debug tour: every species for one animation cycle, plain
-// for the first half and shiny for the second, so both fidgets and the blink
-// show across the pair. Hats, rarities and eyes rotate; some combinations
-// (a common in a crown) can never roll. Pure: no $.
+// The hidden /buddy debug tour (Alive spec section 7). First a step for every species: plain,
+// then shiny, then its flinch, celebrate and sleep. Then the real buddy wears each holiday's
+// hat and prop, hatch day last, then each mood. Hats, rarities and eyes rotate; some
+// combinations (a common in a crown) can never roll. Pure: no $.
+import { HOLIDAYS, hatchDay } from './calendar'
+import type { Holiday } from './calendar'
+import type { MoodName } from './mood'
 import { EYES, HATS, RARITIES, SPECIES } from './roll'
 import type { Bones } from './roll'
+import type { Pose } from './sprites'
 
-export const TOUR_STEP_TICKS = 16
+export const TOUR_STEP_TICKS = 28
 export const TOUR_STEPS = SPECIES.length
+export const DECOR_TICKS = 8
+export const MOOD_TICKS = 4
+export const TOUR_DECORATIONS: readonly Holiday[] = [
+  ...HOLIDAYS.map(({ id, name, line }) => ({ id, name, line })),
+  hatchDay(1),
+]
+export const TOUR_MOODS: readonly MoodName[] = ['anxious', 'smug', 'sulky']
+export const TOUR_TICKS =
+  TOUR_STEPS * TOUR_STEP_TICKS + TOUR_DECORATIONS.length * DECOR_TICKS + TOUR_MOODS.length * MOOD_TICKS
+
+// Within a species step: plain until tick 8, shiny until 16, then 4 ticks of each pose.
+const SHINY_FROM = 8
+const POSES_FROM = 16
+const POSE_TICKS = 4
+const STEP_POSES: readonly Pose[] = ['flinch', 'celebrate', 'sleep']
 
 const SHINY_HATS = ['none', ...HATS] as const
 
 export type TourLook = Pick<Bones, 'rarity' | 'species' | 'eye' | 'hat' | 'shiny'>
 
+export type TourAt = {
+  name: string
+  // Ticks into this step, for the animation.
+  tick: number
+  // The species phase's dressing; empty in the later phases, which show the real buddy.
+  look: Partial<TourLook>
+  pose: Pose | null
+  holiday: Holiday | null
+  mood: MoodName
+}
+
 // `elapsed` is ticks since the tour started; null once it is over.
-export function tourAt(elapsed: number): { step: number; tick: number; look: TourLook } | null {
-  if (elapsed < 0 || elapsed >= TOUR_STEPS * TOUR_STEP_TICKS) return null
-  const step = Math.floor(elapsed / TOUR_STEP_TICKS)
-  const tick = elapsed % TOUR_STEP_TICKS
-  const shiny = tick >= TOUR_STEP_TICKS / 2
-  return {
-    step,
-    tick,
-    look: {
-      rarity: RARITIES[step % RARITIES.length]!,
-      species: SPECIES[step]!,
-      eye: EYES[step % EYES.length]!,
-      hat: shiny ? SHINY_HATS[step % SHINY_HATS.length]! : 'none',
-      shiny,
-    },
+export function tourAt(elapsed: number): TourAt | null {
+  if (elapsed < 0 || elapsed >= TOUR_TICKS) return null
+  const speciesTicks = TOUR_STEPS * TOUR_STEP_TICKS
+  if (elapsed < speciesTicks) {
+    const step = Math.floor(elapsed / TOUR_STEP_TICKS)
+    const tick = elapsed % TOUR_STEP_TICKS
+    const shiny = tick >= SHINY_FROM && tick < POSES_FROM
+    return {
+      name: `tour ${step + 1}/${TOUR_STEPS}`,
+      tick,
+      look: {
+        rarity: RARITIES[step % RARITIES.length]!,
+        species: SPECIES[step]!,
+        eye: EYES[step % EYES.length]!,
+        hat: shiny ? SHINY_HATS[step % SHINY_HATS.length]! : 'none',
+        shiny,
+      },
+      pose: tick >= POSES_FROM ? STEP_POSES[Math.floor((tick - POSES_FROM) / POSE_TICKS)]! : null,
+      holiday: null,
+      mood: 'neutral',
+    }
   }
+  const into = elapsed - speciesTicks
+  const decorTicks = TOUR_DECORATIONS.length * DECOR_TICKS
+  if (into < decorTicks) {
+    const holiday = TOUR_DECORATIONS[Math.floor(into / DECOR_TICKS)]!
+    return { name: `tour: ${holiday.name}`, tick: into % DECOR_TICKS, look: {}, pose: null, holiday, mood: 'neutral' }
+  }
+  const mood = TOUR_MOODS[Math.floor((into - decorTicks) / MOOD_TICKS)]!
+  return { name: `tour: ${mood}`, tick: (into - decorTicks) % MOOD_TICKS, look: {}, pose: null, holiday: null, mood }
 }
