@@ -311,6 +311,8 @@ export function dexSvg(rows: readonly DexRow[]): string {
     const mid = x + TILE_W / 2
     const tint = FILL[row.bones.rarity]
     const outline = row.active ? ` stroke="${tint}" stroke-width="2"` : ''
+    // A span with a year ("Oct 7, 2025 – Nov 2, 2025") is wider than the tile, so squeeze it in.
+    const fit = row.dates.length > 19 ? ` textLength="${TILE_W - 10}" lengthAdjust="spacingAndGlyphs"` : ''
     marks.push(
       `<rect x="${x}" y="${y}" width="${TILE_W}" height="${TILE_H}" rx="10" fill="${tint}" fill-opacity="0.08"${outline}/>`,
     )
@@ -324,7 +326,7 @@ export function dexSvg(rows: readonly DexRow[]): string {
       `<text x="${mid}" y="${y + 86}" text-anchor="middle" font-size="11" font-weight="700" fill="${tint}">${esc(`#${row.number} ${row.name}`)}</text>`,
       `<text x="${mid}" y="${y + 101}" text-anchor="middle" font-size="11" fill="${tint}">${'★'.repeat(RARITY[row.bones.rarity].stars)} Lv ${row.level}</text>`,
       `<text x="${mid}" y="${y + 115}" text-anchor="middle" font-size="11" fill="${INK}">${row.stage} ${row.bones.species}</text>`,
-      `<text x="${mid}" y="${y + 129}" text-anchor="middle" font-size="10" fill="${INK}">${esc(row.dates)}</text>`,
+      `<text x="${mid}" y="${y + 129}" text-anchor="middle" font-size="10"${fit} fill="${INK}">${esc(row.dates)}</text>`,
     )
   })
   return framed(color, DEX_TOP + Math.max(1, Math.ceil(rows.length / 3)) * TILE_ROW + 14, marks)

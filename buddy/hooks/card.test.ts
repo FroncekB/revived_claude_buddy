@@ -245,3 +245,11 @@ test('the dex is a tile per buddy, three across, the active one outlined; its al
       'Number 2, Mochi, level 12 adult common axolotl, Nov 2 to now.',
   )
 })
+
+test('a dex date span from another year is squeezed to fit its tile; a short one is left alone', () => {
+  const row = dexRows(DEX_RECORD, NOV3)[0]!
+  const dateText = (dates: string) => dexSvg([{ ...row, dates }]).match(new RegExp(`<text[^>]*>${dates}</text>`))?.[0]
+  expect(dateText('Oct 7, 2025 – Nov 2, 2025')).toContain('textLength="108"')
+  expect(dateText('Oct 7 – now')).toBeDefined()
+  expect(dateText('Oct 7 – now')).not.toContain('textLength')
+})
