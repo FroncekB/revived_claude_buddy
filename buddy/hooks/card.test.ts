@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { cardAlt, cardSvg, meter, radarPoint, statAlt } from './card'
+import { cardAlt, cardSvg, journalAlt, journalSvg, meter, radarPoint, statAlt } from './card'
 import { zeroCounts } from './ledger'
 import type { Bones } from './roll'
 
@@ -135,4 +135,24 @@ test('given the history, the card adds a streak row 20 px lower and the alt text
   expect(cardAlt(SOUL, BONES, 0, history)).toBe(
     `${cardAlt(SOUL, BONES, 0)} Streak 12 days (best 30) · 340 turns · 2,104 tool calls.`,
   )
+})
+
+test("the journal is drawn in the card's frame, a row per moment, growing with them; its alt reads them out", () => {
+  const rows = [
+    { age: 'yesterday  ', text: 'a clean turn after 4 rough ones' },
+    { age: '2 weeks ago', text: 'Claude failed <18> shell commands in a row' },
+  ]
+  const svg = journalSvg('Nib', BONES, rows)
+  expect(svg).toContain('>Nib&#39;s journal</text>')
+  expect(svg).toContain('>yesterday</text>')
+  expect(svg).toContain('>Claude failed &lt;18&gt; shell commands in a row</text>')
+  expect(svg).toContain('width="420" height="122"')
+  expect(journalSvg('Nib', BONES, Array.from({ length: 20 }, () => rows[0]!))).toContain('width="420" height="518"')
+  const empty = journalSvg('Nib', BONES, [])
+  expect(empty).toContain('width="420" height="100"')
+  expect(empty).toContain('>Nothing in Nib&#39;s journal yet.</text>')
+  expect(journalAlt('Nib', rows)).toBe(
+    "Nib's journal. Yesterday: a clean turn after 4 rough ones. 2 weeks ago: Claude failed <18> shell commands in a row.",
+  )
+  expect(journalAlt('Nib', [])).toBe("Nothing in Nib's journal yet.")
 })
