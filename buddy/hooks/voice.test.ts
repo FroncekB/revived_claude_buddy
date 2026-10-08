@@ -4,7 +4,7 @@ import { rollBones } from './roll'
 import {
   BUBBLE_TICKS, FAIL_PLAIN, FAIL_SNARKY, FALLBACK_NAMES, MAX_SAY, QUIP_COOLDOWN_MS, RESERVED_NAMES, SAY_GOAL,
   bubbleTicks, cannedLine, cleanSay, failLine, fallbackSoul, hatchRequest, matchAddress, parseSoul, personaSystem,
-  quipChance, quipCooldownMs, reactionPrompt, shouldFlag, shouldGreet, shouldQuip, streakGreeting, withArticle,
+  quipChance, quipCooldownMs, reactionPrompt, shouldFlag, shouldGreet, shouldQuip, streakGreeting, talkPrompt, withArticle,
 } from './voice'
 import type { TurnSummary } from './voice'
 
@@ -188,4 +188,14 @@ test('the streak greeting comes from a pool of four and greets only a new day of
   expect(shouldGreet({ mode: 'muted', dayBefore: '2026-10-06', you })).toBe(false)
   expect(shouldGreet({ mode: 'on', dayBefore: '2026-10-07', you })).toBe(false)
   expect(shouldGreet({ mode: 'on', dayBefore: null, you: { ...you, streak: 1 } })).toBe(false)
+})
+
+test('a quip prompt carries its memory just before the ask, and a talk prompt its memories', () => {
+  const line = 'A memory (yesterday): back after 9 days away. Bring it up if it fits, as "remember when...", without a date.'
+  expect(reactionPrompt(ROUGH)).not.toContain('A memory')
+  expect(reactionPrompt(ROUGH, line).split('\n').slice(-2)).toEqual([line, 'React in one line.'])
+  expect(talkPrompt('hi')).toBe('The developer says to you: hi\nReply in one line.')
+  expect(talkPrompt('hi', ['Your memories, newest first:', '- today: x', 'Mention one only if it fits what they said.'])).toBe(
+    'The developer says to you: hi\nYour memories, newest first:\n- today: x\nMention one only if it fits what they said.\nReply in one line.',
+  )
 })

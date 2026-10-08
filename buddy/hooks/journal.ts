@@ -1,7 +1,9 @@
 // The journal (Memory spec): notable moments in a buddy's life, how a session's turns become
 // them, and how they read. Pure: no $.
 import type { Bests, Buddy, Counts, Moment, MomentKind, ToolGroup, TurnFacts } from '../types'
-import { daysBetween, totalCalls } from './ledger'
+import { daysBetween, localDay, totalCalls, withCommas } from './ledger'
+import type { StatName } from './roll'
+import { LONG_TURN_MS } from './voice'
 
 export const MAX_MOMENTS = 20
 export const MAX_QUEUED_TURNS = 20
@@ -15,6 +17,26 @@ export const ROUGH_FLOOR = 3
 export const AWAY_FLOOR_DAYS = 4
 export const TURN_MARKS: readonly number[] = [100, 1_000, 10_000]
 export const CALL_MARKS: readonly number[] = [1_000, 10_000, 100_000]
+
+// A quip only remembers a moment this old, so a record its own turn just set isn't "remembered".
+export const RECALL_AGE_MS = 60 * 60_000
+// A turn with this many calls echoes a busyTurn memory.
+export const BUSY_RECALL = 25
+export const TALK_MEMORIES = 3
+
+const KINDS: readonly string[] = ['failRun', 'longTurn', 'busyTurn', 'turns', 'calls', 'comeback', 'away']
+
+const NOUN: Record<ToolGroup, string> = {
+  shell: 'shell commands',
+  edit: 'edits',
+  read: 'file reads',
+  web: 'web fetches',
+  agent: 'agent calls',
+  mcp: 'MCP calls',
+  other: 'tool calls',
+}
+
+type Stats = Readonly<Record<StatName, number>>
 
 const iso = (ms: number) => new Date(ms).toISOString()
 
@@ -130,4 +152,98 @@ export function mergeTurns(
     merged[seed] = queueTurns(older[seed], newer[seed] ?? [])
   }
   return merged
+}
+
+// The moments this build can read, oldest first. A newer build's kind, or a damaged entry, is
+// skipped: kept in the journal, never shown or recalled.
+export function readable(journal: readonly Moment[] | undefined): Moment[] {
+  return (journal ?? []).filter(
+    m => KINDS.includes(m.kind) && Number.isFinite(m.n) && Number.isFinite(Date.parse(m.at)),
+  )
+}
+
+// A moment's words, with no date: "Claude failed 18 shell commands in a row".
+export function momentText(m: Moment): string {
+  const n = withCommas(m.n)
+  switch (m.kind) {
+    case 'failRun':
+      return `Claude failed ${n} ${NOUN[m.group ?? 'other'] ?? NOUN.other} in a row`
+    case 'longTurn':
+      return `a ${n}-minute turn, the longest yet`
+    case 'busyTurn':
+      return `${n} tool calls in one turn`
+    case 'turns':
+      return `${n} turns together`
+    case 'calls':
+      return `${n} tool calls together`
+    case 'comeback':
+      return `a clean turn after ${n} rough ones`
+    case 'away':
+      return `back after ${n} days away`
+  }
+}
+
+// How long ago `at` was, in calendar days between the local dates, so daylight saving can't move it.
+export function ageText(at: string, now: number): string {
+  const then = Date.parse(at)
+  const days = Number.isFinite(then) ? Math.max(0, daysBetween(localDay(then), localDay(now))) : 0
+  if (days === 0) return 'today'
+  if (days === 1) return 'yesterday'
+  if (days < 7) return `${days} days ago`
+  if (days < 14) return 'last week'
+  if (days < 60) return `${Math.floor(days / 7)} weeks ago`
+  if (days < 730) return `${Math.floor(days / 30)} months ago`
+  return `${Math.floor(days / 365)} years ago`
+}
+
+// WISDOM 1 to 100 gives a chance from 0.0525 to 0.30 that a quip with nothing to echo remembers anyway.
+export function recallChance(stats: Stats): number {
+  return 0.05 + (0.25 * stats.WISDOM) / 100
+}
+
+// The kinds of memory a finished turn echoes, the most telling first.
+function echoes(f: TurnFacts): MomentKind[] {
+  const kinds: MomentKind[] = []
+  if (f.failRun > 0) kinds.push('failRun')
+  if (f.durationMs > LONG_TURN_MS) kinds.push('longTurn')
+  if (f.calls >= BUSY_RECALL) kinds.push('busyTurn')
+  if (isClean(f) && f.afterRough >= 1) kinds.push('comeback')
+  return kinds
+}
+
+// The one memory a quip carries, or null (Memory spec section 4). Only memories an hour old or
+// more count. One the turn echoes comes first: the largest of its kind, the newest on a tie.
+// Otherwise, when `roll` comes in under WISDOM's chance, `pick` chooses one.
+export function recall(o: {
+  journal: readonly Moment[] | undefined
+  facts: TurnFacts
+  now: number
+  stats: Stats
+  roll: number
+  pick: number
+}): Moment | null {
+  const old = readable(o.journal).filter(m => o.now - Date.parse(m.at) >= RECALL_AGE_MS)
+  for (const kind of echoes(o.facts)) {
+    let best: Moment | null = null
+    for (const m of old) if (m.kind === kind && (!best || m.n >= best.n)) best = m
+    if (best) return best
+  }
+  if (old.length === 0 || o.roll >= recallChance(o.stats)) return null
+  return old[Math.min(old.length - 1, Math.floor(o.pick * old.length))] ?? null
+}
+
+// The quip prompt's line for a recalled memory.
+export function memoryLine(m: Moment, now: number): string {
+  return `A memory (${ageText(m.at, now)}): ${momentText(m)}. Bring it up if it fits, as "remember when...", without a date.`
+}
+
+// The talk prompt's lines: the newest TALK_MEMORIES memories, newest first; none for an empty journal.
+export function talkMemories(journal: readonly Moment[] | undefined, now: number): string[] {
+  const newest = readable(journal).slice(-TALK_MEMORIES).reverse()
+  if (newest.length === 0) return []
+  return [
+    'Your memories, newest first:',
+    ...newest.map(m => `- ${ageText(m.at, now)}: ${momentText(m)}`),
+    'Mention one only if it fits what they said.',
+  ]
 }

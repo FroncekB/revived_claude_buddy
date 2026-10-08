@@ -114,19 +114,22 @@ export function personaSystem(soul: Soul, b: Bones, extra: readonly string[] = [
   ].join('\n')
 }
 
-export function reactionPrompt(s: TurnSummary): string {
+// `memory` is a journal line the quip may call back to (Memory spec section 4).
+export function reactionPrompt(s: TurnSummary, memory: string | null = null): string {
   const tools = Object.entries(s.tools).map(([tool, n]) => `${tool} x${n}`).join(', ') || 'none'
   return [
     'Claude just finished a turn for the developer.',
     `Outcome: ${s.reason}. Took ${Math.round(s.durationMs / 1000)}s.`,
     `Tools used: ${tools}.`,
     `Failed tools: ${s.failed.length ? s.failed.join(', ') : 'none'}.`,
+    ...(memory ? [memory] : []),
     'React in one line.',
   ].join('\n')
 }
 
-export function talkPrompt(message: string): string {
-  return `The developer says to you: ${message.slice(0, 500)}\nReply in one line.`
+// `memories` are the journal lines a talk may draw on (Memory spec section 4).
+export function talkPrompt(message: string, memories: readonly string[] = []): string {
+  return [`The developer says to you: ${message.slice(0, 500)}`, ...memories, 'Reply in one line.'].join('\n')
 }
 
 export function hatchRequest(b: Bones): { system: string; prompt: string } {
