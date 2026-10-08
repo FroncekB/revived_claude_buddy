@@ -24,7 +24,12 @@ test('subcommands', () => {
   expect(parseSub('card #2')).toEqual({ sub: 'card', target: '#2' })
   expect(parseSub('Journal Pip')).toEqual({ sub: 'journal', target: 'Pip' })
   expect(sub('card Pip twice')).toBe('usage')
-  expect(USAGE).toBe('Usage: /buddy [pet | card [who] | journal [who] | dex | mute | unmute | off | reroll [confirm]]')
+  expect(parseSub('swap #2')).toEqual({ sub: 'swap', target: '#2' })
+  expect(sub('swap')).toBe('usage')
+  expect(sub('swap Pip now')).toBe('usage')
+  expect(USAGE).toBe(
+    'Usage: /buddy [pet | card [who] | journal [who] | dex | swap <who> | mute | unmute | off | reroll [confirm]]',
+  )
   expect(sub('mute')).toBe('mute')
   expect(sub('unmute')).toBe('unmute')
   expect(sub('off')).toBe('off')
@@ -299,4 +304,42 @@ test('a card or journal target is one buddy, the active one as null, or the reas
   expect(shownBuddy(THREE, 'test-seed').soul.name).toBe('Bix')
   expect(shownBuddy(THREE, null).seed).toBe('swap-2')
   expect(shownBuddy(THREE, 'gone').seed).toBe('swap-2')
+})
+
+// Two buddies: a, retired at `retiredAt`, and b, here now, last visited on `lastDay`.
+const pair = (retiredAt: string, lastDay = '2026-10-06'): Saved => ({
+  ...migrate(V1),
+  rerolls: 1,
+  active: 'b',
+  buddies: [
+    { seed: 'a', soul: SOUL, retiredAt, counts: zeroCounts() },
+    { seed: 'b', soul: { ...SOUL, name: 'Bix' }, retiredAt: null, counts: zeroCounts() },
+  ],
+  you: { lastDay, streak: 1, bestStreak: 1, days: 1 },
+})
+const YESTERDAY = new Date(2026, 9, 6, 12).toISOString()
+
+test('a swap retires the active buddy, brings the other back on, and leaves the reroll count alone', () => {
+  const saved = applyChange({ ...pair(YESTERDAY), mode: 'off' }, { kind: 'swap', seed: 'a' }, NOON)!
+  expect(saved).toMatchObject({ active: 'a', mode: 'on', rerolls: 1 })
+  expect(saved.buddies.map(b => [b.seed, b.retiredAt])).toEqual([
+    ['a', null],
+    ['b', AT],
+  ])
+  // A day in retirement is no reason to sulk.
+  expect(saved.buddies[0]?.mood).toBeUndefined()
+  expect(saved.buddies[0]?.journal).toBeUndefined()
+  expect(applyChange(pair(YESTERDAY), { kind: 'swap', seed: 'b' }, NOON)).toBeNull()
+  expect(applyChange(pair(YESTERDAY), { kind: 'swap', seed: 'gone' }, NOON)).toBeNull()
+  expect(applyChange(null, { kind: 'swap', seed: 'a' }, NOON)).toBeNull()
+})
+
+test('a buddy back after five days retired sulks and remembers being away; the one left keeps the visit sulk', () => {
+  const saved = applyChange(pair(new Date(2026, 9, 2, 12).toISOString(), '2026-10-04'), { kind: 'swap', seed: 'a' }, NOON)!
+  expect(saved.buddies[0]?.mood).toEqual({ meter: 0, sulk: 3, at: AT })
+  expect(saved.buddies[0]?.journal).toEqual([{ at: AT, kind: 'away', n: 5 }])
+  // 2026-10-04 to 2026-10-07 misses two days: the buddy left alone sulks 1.
+  expect(saved.buddies[1]?.mood?.sulk).toBe(1)
+  // A damaged retirement time leaves no sulk.
+  expect(applyChange(pair('never'), { kind: 'swap', seed: 'a' }, NOON)?.buddies[0]?.mood).toBeUndefined()
 })

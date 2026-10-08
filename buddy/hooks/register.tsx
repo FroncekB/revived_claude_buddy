@@ -20,7 +20,9 @@ import { MAX_QUEUED_MOOD, applyMood, moodLine, moodOf, turnMood } from './mood'
 import type { MoodName } from './mood'
 import { bonesFor, levelOf } from './progress'
 import { mergeQueues, queueNewest } from './queue'
-import { STORE_KEY, USAGE, activeBuddy, applyChange, classify, parseSub, shownBuddy, targetOf } from './record'
+import {
+  STORE_KEY, USAGE, activeBuddy, applyChange, classify, findBuddy, notFound, parseSub, shownBuddy, targetOf,
+} from './record'
 import type { Change, Parsed, Stored } from './record'
 import { RARITY, STATS, rollBones } from './roll'
 import type { Bones } from './roll'
@@ -586,6 +588,22 @@ async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | un
       return `This retires ${who}. Run /buddy reroll confirm.`
     case 'reroll-confirm':
       return hatch($, 'reroll')
+    case 'swap': {
+      if (await read($, hatching)) return 'Wait for the egg to hatch.'
+      const who = parsed.target!
+      const found = findBuddy(saved, who)
+      if (found.kind !== 'one') return notFound(saved, who, found, 'swap')
+      if (found.seed === saved.active) return `${name} is already here.`
+      // The returning buddy is shown as itself, not mid-tour.
+      await update($, tourStart, () => null)
+      const note = await commit($, { kind: 'swap', seed: found.seed })
+      // Refused: nothing was written or adopted, so nobody is back to say hello.
+      if (note !== null && note !== SAVE_FAILED) return note
+      const back = shownBuddy((await read($, record)) ?? saved, found.seed)
+      await update($, bubble, () => null)
+      later($, () => reply($, back, HELLO_PROMPT))
+      return note ?? `${back.soul.name} is back.`
+    }
     case 'debug': {
       if (saved.mode === 'off') return hidden
       const now = await read($, tick)
@@ -690,7 +708,7 @@ export const register: Register = on => {
       await $.command.register({
         name: 'buddy',
         description: 'Hatch, pet, or manage your terminal buddy',
-        argumentHint: '[pet | card [who] | journal [who] | dex | mute | unmute | off | reroll [confirm]]',
+        argumentHint: '[pet | card [who] | journal [who] | dex | swap <who> | mute | unmute | off | reroll [confirm]]',
         immediate: true,
       })
     } catch {

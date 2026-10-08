@@ -8,7 +8,8 @@ import { grewMoments } from './progress'
 import { rollBones } from './roll'
 
 export const STORE_KEY = 'buddy'
-export const USAGE = 'Usage: /buddy [pet | card [who] | journal [who] | dex | mute | unmute | off | reroll [confirm]]'
+export const USAGE =
+  'Usage: /buddy [pet | card [who] | journal [who] | dex | swap <who> | mute | unmute | off | reroll [confirm]]'
 
 // What the store holds, as this build reads it (Foundation spec section 1).
 export type Stored =
@@ -61,6 +62,8 @@ export type Change =
       turns?: Readonly<Record<string, readonly TurnFacts[]>>
     }
   | { kind: 'visit' }
+  // A retired buddy made active again (Progression spec section 7).
+  | { kind: 'swap'; seed: string }
 
 // Today's visit (Foundation spec section 3). A new day after two or more missed ones leaves the
 // active buddy sulking (Alive spec section 2), and after three or more it goes in that buddy's
@@ -84,6 +87,21 @@ function arrive(saved: Saved, now: number): Saved {
         )
       : saved.buddies
   return { ...saved, you, buddies }
+}
+
+// A retired buddy coming back (Progression spec section 7): out of retirement, sulking for the
+// days it was left, and with "away" in its journal after three or more missed days, as a visit
+// gives. A retirement time that doesn't parse leaves neither.
+function welcomeBack(b: Buddy, today: string, now: number): Buddy {
+  const left = b.retiredAt !== null && Number.isFinite(Date.parse(b.retiredAt)) ? localDay(Date.parse(b.retiredAt)) : null
+  const sulk = sulkFor(left, today)
+  const away = awayMoment(left, today, now)
+  return {
+    ...b,
+    retiredAt: null,
+    ...(sulk > 0 ? { mood: withSulk(b.mood, sulk, now) } : {}),
+    ...(away ? { journal: addMoments(b.journal, [away]) } : {}),
+  }
 }
 
 // One change, made on the stored object itself so fields a newer build wrote are kept.
@@ -147,12 +165,26 @@ export function applyChange(saved: Saved | null, change: Change, now: number): S
       const arrived = arrive(saved, now)
       return arrived !== saved ? earn(arrived, now) : null
     }
+    case 'swap': {
+      if (!saved || change.seed === saved.active || !saved.buddies.some(b => b.seed === change.seed)) return null
+      // The visit comes first, so a sulk from days away lands on the buddy left alone.
+      const arrived = arrive(saved, now)
+      const retiredAt = new Date(now).toISOString()
+      return {
+        ...arrived,
+        mode: 'on',
+        active: change.seed,
+        buddies: arrived.buddies.map(b =>
+          b.seed === arrived.active ? { ...b, retiredAt } : b.seed === change.seed ? welcomeBack(b, today, now) : b,
+        ),
+      }
+    }
   }
 }
 
 export type Sub =
-  | 'show' | 'pet' | 'card' | 'journal' | 'dex' | 'mute' | 'unmute' | 'off' | 'reroll' | 'reroll-confirm' | 'debug'
-  | 'debug-off' | 'usage'
+  | 'show' | 'pet' | 'card' | 'journal' | 'dex' | 'swap' | 'mute' | 'unmute' | 'off' | 'reroll' | 'reroll-confirm'
+  | 'debug' | 'debug-off' | 'usage'
 
 // A /buddy command as parsed: the subcommand, and what it was given (Progression spec section 7).
 export type Parsed = { sub: Sub; target?: string }
@@ -176,6 +208,7 @@ export function parseSub(args: string): Parsed {
     if (words.length === 1) return { sub: 'debug' }
     return { sub: words.length === 2 && second === 'off' ? 'debug-off' : 'usage' }
   }
+  if (first === 'swap') return words.length === 2 ? { sub: 'swap', target: words[1]! } : { sub: 'usage' }
   if (TARGETED.includes(first)) {
     if (words.length === 1) return { sub: first as Sub }
     return words.length === 2 ? { sub: first as Sub, target: words[1]! } : { sub: 'usage' }
