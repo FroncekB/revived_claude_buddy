@@ -1,6 +1,6 @@
 # `buddy` Memory — Design Spec
 
-**Status:** designed 2026-10-08; not built.
+**Status:** built 2026-10-08; live check pending. Plan: [`2026-10-08-buddy-memory-plan.md`](2026-10-08-buddy-memory-plan.md); its "Deliberate deviations" section lists six small departures from this spec.
 **Author:** Brandon Froncek + Claude
 **Date:** 2026-10-08
 **Builds on:** [`2026-10-07-buddy-mod-design.md`](2026-10-07-buddy-mod-design.md) (the base spec), [`2026-10-07-buddy-foundation-design.md`](2026-10-07-buddy-foundation-design.md) (Foundation) and [`2026-10-07-buddy-alive-design.md`](2026-10-07-buddy-alive-design.md) (Alive). Section numbers below that start with "base", "Foundation" or "Alive" point there.
