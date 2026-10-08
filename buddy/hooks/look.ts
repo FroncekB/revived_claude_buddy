@@ -1,11 +1,12 @@
 // What the band shows at one moment (Alive spec section 6): the body frame, the eyes, the hat
 // row, the compact face and a prop, each by its own order of what wins. Pure: no $.
+import type { Stage } from '../types'
 import type { Holiday } from './calendar'
 import { MOOD_EYE } from './mood'
 import type { MoodName } from './mood'
 import type { Bones } from './roll'
 import { HOLIDAY_HATS, POSE_EYE, PROPS, faceFor, frameAt, spriteRows, topRow } from './sprites'
-import type { Pose, Prop } from './sprites'
+import type { Pose, Prop, Wearable } from './sprites'
 
 export const FLINCH_TICKS = 4
 export const CELEBRATE_TICKS = 6
@@ -14,7 +15,10 @@ export const DAY_SLEEP_TICKS = 1_200
 export const NIGHT_SLEEP_TICKS = 120
 
 export type Scene = {
-  bones: Pick<Bones, 'species' | 'eye' | 'hat' | 'shiny'>
+  // The hat may be an earned one: the debug tour shows them.
+  bones: Pick<Bones, 'species' | 'eye' | 'shiny'> & { hat: Wearable | 'none' }
+  // The stage the body is drawn at (Progression spec section 5).
+  stage: Stage
   tick: number
   mood: MoodName
   // A flinch or celebrate still running. Only the debug tour poses 'sleep'; otherwise sleep
@@ -50,7 +54,7 @@ export function draw(s: Scene): Drawn {
     holidayHat: s.holiday ? (HOLIDAY_HATS[s.holiday.id] ?? null) : null,
   })
   return {
-    sprite: spriteRows({ species: s.bones.species, eye, frame: pose ?? frame, top }),
+    sprite: spriteRows({ species: s.bones.species, stage: s.stage, eye, frame: pose ?? frame, top }),
     face: faceFor(s.bones.species, eye) + (asleep ? ' zZ' : ''),
     prop: s.holiday && !s.saying ? (PROPS[s.holiday.id] ?? null) : null,
     asleep,
@@ -59,8 +63,17 @@ export function draw(s: Scene): Drawn {
 
 // The card's portrait: who the buddy is, with its fidgets and blink but none of the moment's
 // pose, sleep, mood, hearts or holiday.
-export function portrait(bones: Scene['bones'], tick: number): string[] {
+export function portrait(bones: Scene['bones'], stage: Stage, tick: number): string[] {
   return draw({
-    bones, tick, mood: 'neutral', pose: null, idleTicks: 0, night: false, holiday: null, heartsFrame: null, saying: false,
+    bones,
+    stage,
+    tick,
+    mood: 'neutral',
+    pose: null,
+    idleTicks: 0,
+    night: false,
+    holiday: null,
+    heartsFrame: null,
+    saying: false,
   }).sprite
 }

@@ -139,6 +139,8 @@ declare module 'claude-code' {
       // The buddy the card and journal panes show; null for the active one (Progression spec section 7).
       cardSeed: string | null
       journalSeed: string | null
+      // The stage /buddy debug tours (Progression spec section 5).
+      tourStage: Stage
     }
   }
 }

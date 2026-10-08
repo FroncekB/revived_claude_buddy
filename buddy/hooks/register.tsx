@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Buddy, Counts, Moment, MoodEvent, Saved, TurnFacts } from '../types'
+import type { Buddy, Counts, Moment, MoodEvent, Saved, Stage, TurnFacts } from '../types'
 import { newsOf } from './achievements'
 import { dayInfo } from './calendar'
 import { cardAlt, cardSvg, dexAlt, dexSvg, journalAlt, journalSvg, meter } from './card'
@@ -18,7 +18,7 @@ import { CELEBRATE_TICKS, FLINCH_TICKS, draw, portrait } from './look'
 import type { Scene } from './look'
 import { MAX_QUEUED_MOOD, applyMood, moodLine, moodOf, turnMood } from './mood'
 import type { MoodName } from './mood'
-import { bonesFor, levelOf } from './progress'
+import { bonesFor, levelOf, stageOf } from './progress'
 import { mergeQueues, queueNewest } from './queue'
 import {
   STORE_KEY, USAGE, activeBuddy, applyChange, classify, findBuddy, notFound, parseSub, shownBuddy, targetOf,
@@ -72,6 +72,7 @@ const pendingMood = atom({ plugin: 'buddy', key: 'pendingMood' } as const, {})
 const pendingTurns = atom({ plugin: 'buddy', key: 'pendingTurns' } as const, {})
 const cardSeed = atom({ plugin: 'buddy', key: 'cardSeed' } as const, null)
 const journalSeed = atom({ plugin: 'buddy', key: 'journalSeed' } as const, null)
+const tourStage = atom({ plugin: 'buddy', key: 'tourStage' } as const, 'adult')
 
 const CARD = 'card'
 const JOURNAL = 'journal'
@@ -606,9 +607,11 @@ async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | un
     }
     case 'debug': {
       if (saved.mode === 'off') return hidden
+      const stage = parsed.stage ?? 'adult'
       const now = await read($, tick)
+      await update($, tourStage, () => stage)
       await update($, tourStart, () => now)
-      return `Touring all ${TOUR_STEPS} species with their reactions, then the holidays and moods. Run /buddy debug off to stop.`
+      return `Touring all ${TOUR_STEPS} species as ${stage}s with their reactions, then the holidays and moods. Run /buddy debug off to stop.`
     }
     case 'debug-off':
       await update($, tourStart, () => null)
@@ -638,6 +641,7 @@ async function liveScene(
   $: EngineInterface,
   buddy: Buddy,
   bones: Bones,
+  stage: Stage,
   t: number,
   heartsFrame: number | null,
   saying: boolean,
@@ -647,6 +651,7 @@ async function liveScene(
   const posed = await read($, posing)
   return {
     bones,
+    stage,
     tick: t,
     mood: await moodNow($, buddy, now),
     pose: posed && t < posed.untilTick ? posed.kind : null,
@@ -662,9 +667,11 @@ async function buddyLook($: EngineInterface, saved: Saved, t: number): Promise<L
   const buddy = activeBuddy(saved)
   // A running /buddy debug tour dresses the real buddy up; nothing saved changes.
   const started = await read($, tourStart)
-  const tour = started === null ? null : tourAt(t - started)
+  const tour = started === null ? null : tourAt(t - started, await read($, tourStage))
   const own = bonesFor(buddy)
   const bones = tour ? { ...own, ...tour.look } : own
+  // The tour draws the stage it was asked for; otherwise the buddy is drawn at its own.
+  const stage = tour ? tour.stage : stageOf(levelOf(buddy.counts))
   const name = tour ? tour.name : buddy.soul.name
   const animTick = tour ? tour.tick : t
   const heartsUntilTick = await read($, heartsUntil)
@@ -674,6 +681,7 @@ async function buddyLook($: EngineInterface, saved: Saved, t: number): Promise<L
   const scene: Scene = tour
     ? {
         bones,
+        stage,
         tick: animTick,
         mood: tour.mood,
         pose: tour.pose,
@@ -683,7 +691,7 @@ async function buddyLook($: EngineInterface, saved: Saved, t: number): Promise<L
         heartsFrame,
         saying,
       }
-    : await liveScene($, buddy, bones, t, heartsFrame, saying)
+    : await liveScene($, buddy, own, stage, t, heartsFrame, saying)
   const drawn = draw(scene)
   const { label, stars } = nameLine(name, bones, tour ? null : levelOf(buddy.counts))
   const sprite = spriteTint(bones, animTick)
@@ -917,7 +925,7 @@ export const register: Register = on => {
       const cells = Math.max(8, Math.min(30, e.props.bodyColumns - 18))
       return (
         <Box flexDirection="column">
-          {portrait(bones, t).map(row => (
+          {portrait(bones, progress.stage, t).map(row => (
             <Text {...tint(sprite.color)} bold={sprite.bold}>
               {row}
             </Text>

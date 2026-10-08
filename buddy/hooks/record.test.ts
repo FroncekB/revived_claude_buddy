@@ -40,10 +40,14 @@ test('subcommands', () => {
   expect(sub('dance')).toBe('usage')
 })
 
-test('debug is a subcommand the usage line never mentions', () => {
+test('debug is a subcommand the usage line never mentions, and can tour one stage', () => {
   expect(parseSub('debug')).toEqual({ sub: 'debug' })
   expect(parseSub(' DEBUG off ')).toEqual({ sub: 'debug-off' })
+  expect(parseSub('debug Hatchling')).toEqual({ sub: 'debug', stage: 'hatchling' })
+  expect(parseSub('debug adult')).toEqual({ sub: 'debug', stage: 'adult' })
+  expect(parseSub('debug elder')).toEqual({ sub: 'debug', stage: 'elder' })
   expect(parseSub('debug now')).toEqual({ sub: 'usage' })
+  expect(parseSub('debug elder off')).toEqual({ sub: 'usage' })
   expect(USAGE).not.toMatch(/debug/)
 })
 

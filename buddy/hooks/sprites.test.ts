@@ -1,22 +1,28 @@
 import { expect, test } from 'claude-code/testing'
 
-import { EYES, HATS, SPECIES } from './roll'
+import { ADULT } from './art-adult'
+import { ELDER } from './art-elder'
+import { HATCHLING } from './art-hatchling'
+import { STAGES } from './progress'
+import { EYES, HATS, SPECIES, fnv1a32 } from './roll'
 import {
   BLANK, CONFETTI, EARNED_HATS, EARNED_HAT_ART, HAT_ART, HEARTS, HOLIDAY_HATS, POSES, POSE_EYE, PROPS, PROP_ROWS, PROP_W,
-  SPRITE_W, ZZZ, bodyRows, eggRows, faceFor, fillEyes, frameAt, hatArt, spriteRows, topRow,
+  SPRITE_W, ZZZ, bodyRows, eggRows, faceFor, fillEyes, frameAt, hatArt, headRow, spriteRows, topRow,
 } from './sprites'
 import type { Prop } from './sprites'
 
-test('every species frame is 4 body rows of at most 12 columns for every eye', () => {
+test('every frame at every stage is 4 body rows of at most 12 columns for every eye', () => {
   const over: string[] = []
-  for (const species of SPECIES) {
-    for (const frame of [0, 1, 2] as const) {
-      const rows = bodyRows(species, frame)
-      if (rows.length !== 4) over.push(`${species} frame ${frame}: ${rows.length} rows`)
-      for (const eye of [...EYES, '-']) {
-        for (const row of rows) {
-          const drawn = fillEyes(row, eye)
-          if (drawn.length > SPRITE_W) over.push(`${species} frame ${frame}: "${drawn}"`)
+  for (const stage of STAGES) {
+    for (const species of SPECIES) {
+      for (const frame of [0, 1, 2] as const) {
+        const rows = bodyRows(species, stage, frame)
+        if (rows.length !== 4) over.push(`${stage} ${species} frame ${frame}: ${rows.length} rows`)
+        for (const eye of [...EYES, '-']) {
+          for (const row of rows) {
+            const drawn = fillEyes(row, eye)
+            if (drawn.length > SPRITE_W) over.push(`${stage} ${species} frame ${frame}: "${drawn}"`)
+          }
         }
       }
     }
@@ -24,13 +30,15 @@ test('every species frame is 4 body rows of at most 12 columns for every eye', (
   expect(over).toEqual([])
 })
 
-test('a drawn sprite is exactly 5 rows of 12 columns with the hat row on top', () => {
-  for (const species of SPECIES) {
-    for (const frame of [0, 1, 2] as const) {
-      const rows = spriteRows({ species, eye: '·', frame, top: BLANK })
-      expect(rows).toHaveLength(5)
-      expect(rows.every(r => r.length === SPRITE_W)).toBe(true)
-      expect(rows[0]).toBe(BLANK)
+test('a drawn sprite is exactly 5 rows of 12 columns at every stage', () => {
+  for (const stage of STAGES) {
+    for (const species of SPECIES) {
+      for (const frame of [0, 1, 2] as const) {
+        const rows = spriteRows({ species, stage, eye: '·', frame, top: BLANK })
+        expect(rows).toHaveLength(5)
+        expect(rows.every(r => r.length === SPRITE_W)).toBe(true)
+        expect(rows[0]).toBe(BLANK)
+      }
     }
   }
 })
@@ -65,31 +73,34 @@ test('the 16-tick cycle rests, fidgets twice and blinks once', () => {
   expect(frameAt(16)).toEqual(frameAt(0))
 })
 
-test('every species has a flinch, celebrate and sleep frame of 4 rows within 12 columns, each with an eye', () => {
+test('every species has a flinch, celebrate and sleep frame at every stage, 4 rows within 12 columns, each with an eye', () => {
   const bad: string[] = []
-  for (const species of SPECIES) {
-    for (const pose of POSES) {
-      const rows = bodyRows(species, pose)
-      if (rows.length !== 4) bad.push(`${species} ${pose}: ${rows.length} rows`)
-      if (!rows.some(row => row.includes('{E}'))) bad.push(`${species} ${pose}: no eye`)
-      for (const row of rows) {
-        const drawn = fillEyes(row, POSE_EYE[pose])
-        if (drawn.length > SPRITE_W) bad.push(`${species} ${pose}: "${drawn}"`)
+  for (const stage of STAGES) {
+    for (const species of SPECIES) {
+      for (const pose of POSES) {
+        const rows = bodyRows(species, stage, pose)
+        if (rows.length !== 4) bad.push(`${stage} ${species} ${pose}: ${rows.length} rows`)
+        if (!rows.some(row => row.includes('{E}'))) bad.push(`${stage} ${species} ${pose}: no eye`)
+        for (const row of rows) {
+          const drawn = fillEyes(row, POSE_EYE[pose])
+          if (drawn.length > SPRITE_W) bad.push(`${stage} ${species} ${pose}: "${drawn}"`)
+        }
       }
     }
   }
   expect(bad).toEqual([])
 })
 
-test('a posed sprite is 5 rows of 12 with the hat row on top, and differs from the rest frame', () => {
-  for (const species of SPECIES) {
-    const rest = spriteRows({ species, eye: '·', frame: 0, top: BLANK })
-    for (const pose of POSES) {
-      const rows = spriteRows({ species, eye: POSE_EYE[pose], frame: pose, top: BLANK })
-      expect(rows).toHaveLength(5)
-      expect(rows.every(r => r.length === SPRITE_W)).toBe(true)
-      expect(rows[0]).toBe(BLANK)
-      expect(rows).not.toEqual(rest)
+test('a posed sprite is 5 rows of 12 at every stage, and differs from its rest frame', () => {
+  for (const stage of STAGES) {
+    for (const species of SPECIES) {
+      const rest = spriteRows({ species, stage, eye: '·', frame: 0, top: BLANK })
+      for (const pose of POSES) {
+        const rows = spriteRows({ species, stage, eye: POSE_EYE[pose], frame: pose, top: BLANK })
+        expect(rows).toHaveLength(5)
+        expect(rows.every(r => r.length === SPRITE_W)).toBe(true)
+        expect(rows).not.toEqual(rest)
+      }
     }
   }
 })
@@ -136,4 +147,56 @@ test('an earned hat is worn on the hat row like a rolled one, and no roll gives 
   expect(topRow({ hat: 'hardhat', heartsFrame: null, sparkle: null })).toBe(EARNED_HAT_ART.hardhat.padEnd(SPRITE_W))
   expect(hatArt('crown')).toBe(HAT_ART.crown)
   for (const hat of EARNED_HATS) expect(HATS as readonly string[]).not.toContain(hat)
+})
+
+test('the adult art is the art every buddy had before 0.5, moved unchanged', () => {
+  expect(fnv1a32(SPECIES.map(s => ADULT[s]).join('\n'))).toBe(0x2e0b7210)
+})
+
+test('the top row sits just above the head: row 0 for every adult', () => {
+  expect(headRow(['    __', '  <(· )___', '   ( ._> /', "    '---'"])).toBe(0)
+  expect(headRow(['', '    ,_', '   (·>', '  (__)'])).toBe(1)
+  expect(headRow(['', '', '', ''])).toBe(0)
+  for (const species of SPECIES) {
+    const rows = spriteRows({ species, stage: 'adult', eye: '·', frame: 0, top: 'HAT' })
+    expect([species, rows[0]]).toEqual([species, 'HAT'.padEnd(SPRITE_W)])
+  }
+})
+
+test('nothing is drawn above the head in any frame, at any stage', () => {
+  const bad: string[] = []
+  for (const stage of STAGES) {
+    for (const species of SPECIES) {
+      const head = headRow(bodyRows(species, stage, 0))
+      for (const frame of [0, 1, 2, ...POSES] as const) {
+        const above = bodyRows(species, stage, frame).slice(0, head)
+        if (above.some(row => row.trim() !== '')) bad.push(`${stage} ${species} ${frame}`)
+      }
+    }
+  }
+  expect(bad).toEqual([])
+})
+
+test('every hatchling drawn is small: at most 3 rows and 9 columns in every frame', () => {
+  const bad: string[] = []
+  for (const species of SPECIES.filter(s => HATCHLING[s] !== undefined)) {
+    // Fidget A, the rest frame a column to the right, may reach 10.
+    for (const frame of [0, 2, ...POSES] as const) {
+      const rows = bodyRows(species, 'hatchling', frame).map(row => fillEyes(row, '·'))
+      if (rows.filter(row => row.trim() !== '').length > 3) bad.push(`${species} ${frame}: over 3 rows`)
+      if (rows.some(row => row.trimEnd().length > 9)) bad.push(`${species} ${frame}: over 9 columns`)
+    }
+  }
+  expect(bad).toEqual([])
+})
+
+test('every elder drawn is drawn new: no frame is a copy of its adult frame', () => {
+  const copied: string[] = []
+  for (const species of SPECIES.filter(s => ELDER[s] !== undefined)) {
+    for (const frame of [0, 2, ...POSES] as const) {
+      const elder = bodyRows(species, 'elder', frame).join('\n')
+      if (elder === bodyRows(species, 'adult', frame).join('\n')) copied.push(`${species} ${frame}`)
+    }
+  }
+  expect(copied).toEqual([])
 })

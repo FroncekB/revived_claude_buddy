@@ -1,7 +1,7 @@
 // The card pane's drawings: the whole card as one SVG where the surface draws SVG,
 // solid stat meters on the terminal.
 
-import type { Counts, Soul, You } from '../types'
+import type { Counts, Soul, Stage, You } from '../types'
 import { ACHIEVEMENTS } from './achievements'
 import { countsText, emptyJournal, journalHeader, longDate, streakLine, streakText, wrap } from './layout'
 import type { CardProgress, DexRow, JournalRow } from './layout'
@@ -112,9 +112,9 @@ function chips(bones: Bones): string[] {
 }
 
 // A still portrait: the resting frame, hat on, eyes open. The card and the dex draw it.
-function stillRows(bones: Pick<Bones, 'species' | 'eye' | 'hat'>): string[] {
+function stillRows(bones: Pick<Bones, 'species' | 'eye' | 'hat'>, stage: Stage): string[] {
   const top = topRow({ hat: bones.hat, heartsFrame: null, sparkle: null })
-  return spriteRows({ species: bones.species, eye: bones.eye, frame: 0, top })
+  return spriteRows({ species: bones.species, stage, eye: bones.eye, frame: 0, top })
 }
 
 // The whole card, top to bottom: name and stars, kind, portrait, quote, chips, radar, history.
@@ -127,7 +127,7 @@ export function cardSvg(soul: Soul, bones: Bones, rerolls: number, history?: Car
     `<rect x="${PAD}" y="80" width="${W - 2 * PAD}" height="104" rx="10" fill="${color}" fill-opacity="0.1"/>`,
   ]
 
-  stillRows(bones).forEach((row, i) =>
+  stillRows(bones, progress?.stage ?? 'adult').forEach((row, i) =>
     marks.push(
       `<text x="${MID}" y="${101 + i * 18}" text-anchor="middle" xml:space="preserve" ` +
         `font-family="ui-monospace, Consolas, monospace" font-size="15" fill="${bones.shiny ? SHINY : INK}">${esc(row)}</text>`,
@@ -316,7 +316,7 @@ export function dexSvg(rows: readonly DexRow[]): string {
     marks.push(
       `<rect x="${x}" y="${y}" width="${TILE_W}" height="${TILE_H}" rx="10" fill="${tint}" fill-opacity="0.08"${outline}/>`,
     )
-    stillRows(row.bones).forEach((line, j) =>
+    stillRows(row.bones, row.stage).forEach((line, j) =>
       marks.push(
         `<text x="${mid}" y="${y + 18 + j * 12}" text-anchor="middle" xml:space="preserve" ` +
           `font-family="ui-monospace, Consolas, monospace" font-size="11" fill="${row.bones.shiny ? SHINY : tint}">${esc(line)}</text>`,

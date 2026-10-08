@@ -1,5 +1,5 @@
 // The saved record and the /buddy subcommands. Pure: no $.
-import type { Buddy, Counts, Mode, MoodEvent, Saved, SavedV1, Soul, TurnFacts } from '../types'
+import type { Buddy, Counts, Mode, MoodEvent, Saved, SavedV1, Soul, Stage, TurnFacts } from '../types'
 import { earn } from './achievements'
 import { addMoments, awayMoment, bestsOf, milestones, noticeTurns } from './journal'
 import { addCounts, localDay, visit, zeroCounts } from './ledger'
@@ -187,7 +187,9 @@ export type Sub =
   | 'debug' | 'debug-off' | 'usage'
 
 // A /buddy command as parsed: the subcommand, and what it was given (Progression spec section 7).
-export type Parsed = { sub: Sub; target?: string }
+export type Parsed = { sub: Sub; target?: string; stage?: Stage }
+
+const STAGE_WORDS: readonly string[] = ['hatchling', 'adult', 'elder']
 
 const SIMPLE: readonly string[] = ['pet', 'dex', 'mute', 'unmute', 'off']
 // Subcommands that can name one buddy after them.
@@ -206,7 +208,9 @@ export function parseSub(args: string): Parsed {
   // Hidden: left out of USAGE, the argument hint and the README on purpose.
   if (first === 'debug') {
     if (words.length === 1) return { sub: 'debug' }
-    return { sub: words.length === 2 && second === 'off' ? 'debug-off' : 'usage' }
+    if (words.length !== 2 || second === undefined) return { sub: 'usage' }
+    if (second === 'off') return { sub: 'debug-off' }
+    return STAGE_WORDS.includes(second) ? { sub: 'debug', stage: second as Stage } : { sub: 'usage' }
   }
   if (first === 'swap') return words.length === 2 ? { sub: 'swap', target: words[1]! } : { sub: 'usage' }
   if (TARGETED.includes(first)) {

@@ -2,6 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import { HOLIDAYS } from './calendar'
 import { EYES, HATS, RARITIES, SPECIES } from './roll'
+import { EARNED_HATS } from './sprites'
 import { DECOR_TICKS, MOOD_TICKS, TOUR_DECORATIONS, TOUR_STEPS, TOUR_STEP_TICKS, TOUR_TICKS, tourAt } from './tour'
 
 const SPECIES_TICKS = TOUR_STEPS * TOUR_STEP_TICKS
@@ -44,7 +45,7 @@ test('the tour runs 636 ticks, and is over before it starts and after its last m
   expect(tourAt(TOUR_TICKS)).toBeNull()
 })
 
-test('plain ticks wear no hat; shiny ticks show every hat and no hat', () => {
+test('plain ticks wear no hat; shiny ticks show every hat, earned ones too, and no hat', () => {
   const plainHats = new Set<string | undefined>()
   const shinyHats = new Set<string | undefined>()
   for (let step = 0; step < TOUR_STEPS; step++) {
@@ -53,7 +54,7 @@ test('plain ticks wear no hat; shiny ticks show every hat and no hat', () => {
     shinyHats.add(tourAt(step * TOUR_STEP_TICKS + 8)!.look.hat)
   }
   expect([...plainHats]).toEqual(['none'])
-  expect([...shinyHats].sort()).toEqual(['none', ...HATS].sort())
+  expect([...shinyHats].sort()).toEqual(['none', ...HATS, ...EARNED_HATS].sort())
 })
 
 test('every rarity and eye shows up, including a shiny legendary', () => {
@@ -63,4 +64,12 @@ test('every rarity and eye shows up, including a shiny legendary', () => {
   const shinyLegendary = Array.from({ length: TOUR_STEPS }, (_, step) => tourAt(step * TOUR_STEP_TICKS + 8)!.look)
     .filter(l => l.shiny && l.rarity === 'legendary')
   expect(shinyLegendary.length).toBeGreaterThan(0)
+})
+
+test('the tour draws every phase at the stage it was asked for, adults when not asked', () => {
+  for (const elapsed of [0, SPECIES_TICKS, SPECIES_TICKS + TOUR_DECORATIONS.length * DECOR_TICKS]) {
+    expect(tourAt(elapsed)?.stage).toBe('adult')
+    expect(tourAt(elapsed, 'hatchling')?.stage).toBe('hatchling')
+    expect(tourAt(elapsed, 'elder')?.stage).toBe('elder')
+  }
 })

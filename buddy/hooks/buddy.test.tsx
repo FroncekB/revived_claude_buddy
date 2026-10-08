@@ -651,7 +651,7 @@ test('the debug tour shows each species plain, shiny, then flinching, and never 
   await clock.settle()
   const visits = writes.length
   expect(await runner($)('debug')).toBe(
-    'Touring all 18 species with their reactions, then the holidays and moods. Run /buddy debug off to stop.',
+    'Touring all 18 species as adults with their reactions, then the holidays and moods. Run /buddy debug off to stop.',
   )
   const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
   const shimmering = async () => (await spriteTexts(ui)).every(t => t.props.bold === true)
@@ -785,6 +785,17 @@ const SAVED: Saved = {
   buddies: [{ seed: 'test-seed', soul: RECORD.soul, retiredAt: null, counts: zeroCounts() }],
   you: { lastDay: '2026-10-06', streak: 3, bestStreak: 3, days: 3 },
 }
+
+// RECORD's buddy grown to exactly level 10, the first adult level, so the tests below that read
+// sprite rows read the adult art. A common's floor at level 10 is 4, under every stat 'test-seed'
+// rolled, so its stats stay as rolled; Grown up is already earned, so nothing is announced.
+const ADULT: Saved = {
+  ...SAVED,
+  buddies: [{ ...SAVED.buddies[0]!, counts: { ...zeroCounts(), turns: 810 } }],
+  you: { lastDay: null, streak: 0, bestStreak: 0, days: 0, earned: { grownUp: '2026-10-01T12:00:00.000Z' } },
+}
+// ADULT, with another seed's buddy.
+const adultAs = (seed: string): Saved => ({ ...ADULT, active: seed, buddies: [{ ...ADULT.buddies[0]!, seed }] })
 
 test('a main turn saves its counts when it completes; a denied call is not counted', async ($, on) => {
   const shared = sharedStore(on, RECORD)
@@ -967,7 +978,7 @@ const drawnSprite = async (ui: Drawn) =>
 const JULY4_NOON = new Date(2026, 6, 4, 12).getTime()
 
 test('on the Fourth of July a quiet buddy wears the hat and holds the flag; a bubble takes its place', async ($, on) => {
-  const clock = world(on, { buddy: RECORD }, true, JULY4_NOON)
+  const clock = world(on, { buddy: ADULT }, true, JULY4_NOON)
   model(on, null, 'Fireworks later?')
   await $.session.start(START)
   await clock.settle()
@@ -987,7 +998,7 @@ test('on the Fourth of July a quiet buddy wears the hat and holds the flag; a bu
 
 test('the card keeps the rolled hat on a holiday', async ($, on) => {
   // 'tint-11' rolls a rare penguin in a wizard hat.
-  const clock = world(on, { buddy: { ...RECORD, seed: 'tint-11' } }, true, JULY4_NOON)
+  const clock = world(on, { buddy: adultAs('tint-11') }, true, JULY4_NOON)
   await $.session.start(START)
   await clock.settle()
   const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
@@ -998,7 +1009,7 @@ test('the card keeps the rolled hat on a holiday', async ($, on) => {
 })
 
 test('a buddy left alone for 10 minutes falls asleep, and a prompt wakes it', async ($, on) => {
-  const clock = world(on, { buddy: RECORD })
+  const clock = world(on, { buddy: ADULT })
   engineBelow(on)
   await $.session.start(START)
   await clock.settle()
@@ -1015,7 +1026,7 @@ test('a buddy left alone for 10 minutes falls asleep, and a prompt wakes it', as
 })
 
 test('at night the buddy dozes off after a minute', async ($, on) => {
-  const clock = world(on, { buddy: RECORD }, true, new Date(2026, 9, 7, 0, 30).getTime())
+  const clock = world(on, { buddy: ADULT }, true, new Date(2026, 9, 7, 0, 30).getTime())
   await $.session.start(START)
   await clock.settle()
   const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
@@ -1049,7 +1060,7 @@ const bubbleOf = async (ui: Drawn) =>
     .join(' ')
 
 test('a failed tool call makes the buddy flinch for 2 seconds', async ($, on) => {
-  const clock = world(on, { buddy: RECORD })
+  const clock = world(on, { buddy: ADULT })
   engineBelow(on)
   model(on, null, null)
   await $.session.start(START)
@@ -1064,7 +1075,7 @@ test('a failed tool call makes the buddy flinch for 2 seconds', async ($, on) =>
 })
 
 test('two failed turns make the buddy anxious, and the turn-end save keeps the mood', async ($, on) => {
-  const shared = sharedStore(on, RECORD)
+  const shared = sharedStore(on, ADULT)
   const clock = world(on, null)
   engineBelow(on)
   model(on, null, null)
@@ -1084,7 +1095,7 @@ test('two failed turns make the buddy anxious, and the turn-end save keeps the m
 })
 
 test('a long clean turn makes the buddy celebrate under confetti', async ($, on) => {
-  const clock = world(on, { buddy: RECORD })
+  const clock = world(on, { buddy: ADULT })
   engineBelow(on)
   model(on, null, null)
   await $.session.start(START)
@@ -1118,7 +1129,7 @@ test("another session's mood survives this session's save", async ($, on) => {
 
 test('back after days away, the buddy sulks until it is petted', async ($, on) => {
   // 2026-10-04 to 2026-10-07 misses two days: sulk 1.
-  const shared = sharedStore(on, { ...SAVED, you: { ...SAVED.you, lastDay: '2026-10-04' } })
+  const shared = sharedStore(on, { ...ADULT, you: { ...ADULT.you, lastDay: '2026-10-04' } })
   const clock = world(on, null)
   model(on, null, 'Hmph.')
   await $.session.start(START)
@@ -1917,4 +1928,18 @@ test('calls counted before a swap land on the buddy that made them, and the turn
   const [pip, mochi] = (shared.row as Saved).buddies
   expect(mochi?.counts).toMatchObject({ turns: 0, failedCalls: 1, calls: { shell: 1 } })
   expect(pip?.counts).toMatchObject({ turns: 1, failedCalls: 0 })
+})
+
+test('debug can tour the hatchlings or the elders, and says which', async ($, on) => {
+  const clock = world(on, { buddy: RECORD })
+  await $.session.start(START)
+  await clock.settle()
+  const run = runner($)
+  expect(await run('debug hatchling')).toBe(
+    'Touring all 18 species as hatchlings with their reactions, then the holidays and moods. Run /buddy debug off to stop.',
+  )
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await ui.find({ type: 'Text', text: /tour 1\/18  common duck  $/ })).toBeDefined()
+  expect(await run('debug elder')).toMatch(/ as elders with /)
+  expect(await run('debug baby')).toMatch(/^Usage: /)
 })

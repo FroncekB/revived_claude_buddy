@@ -7,7 +7,9 @@ import type { Holiday } from './calendar'
 import type { MoodName } from './mood'
 import { EYES, HATS, RARITIES, SPECIES } from './roll'
 import type { Bones } from './roll'
-import type { Pose } from './sprites'
+import type { Stage } from '../types'
+import { EARNED_HATS } from './sprites'
+import type { Pose, Wearable } from './sprites'
 
 export const TOUR_STEP_TICKS = 28
 export const TOUR_STEPS = SPECIES.length
@@ -27,9 +29,10 @@ const POSES_FROM = 16
 const POSE_TICKS = 4
 const STEP_POSES: readonly Pose[] = ['flinch', 'celebrate', 'sleep']
 
-const SHINY_HATS = ['none', ...HATS] as const
+// The shiny pass rotates every hat a buddy can wear, earned ones too (Progression spec section 5).
+const SHINY_HATS = ['none', ...HATS, ...EARNED_HATS] as const
 
-export type TourLook = Pick<Bones, 'rarity' | 'species' | 'eye' | 'hat' | 'shiny'>
+export type TourLook = Pick<Bones, 'rarity' | 'species' | 'eye' | 'shiny'> & { hat: Wearable | 'none' }
 
 export type TourAt = {
   name: string
@@ -40,10 +43,12 @@ export type TourAt = {
   pose: Pose | null
   holiday: Holiday | null
   mood: MoodName
+  // The stage every phase is drawn at.
+  stage: Stage
 }
 
 // `elapsed` is ticks since the tour started; null once it is over.
-export function tourAt(elapsed: number): TourAt | null {
+export function tourAt(elapsed: number, stage: Stage = 'adult'): TourAt | null {
   if (elapsed < 0 || elapsed >= TOUR_TICKS) return null
   const speciesTicks = TOUR_STEPS * TOUR_STEP_TICKS
   if (elapsed < speciesTicks) {
@@ -63,14 +68,15 @@ export function tourAt(elapsed: number): TourAt | null {
       pose: tick >= POSES_FROM ? STEP_POSES[Math.floor((tick - POSES_FROM) / POSE_TICKS)]! : null,
       holiday: null,
       mood: 'neutral',
+      stage,
     }
   }
   const into = elapsed - speciesTicks
   const decorTicks = TOUR_DECORATIONS.length * DECOR_TICKS
   if (into < decorTicks) {
     const holiday = TOUR_DECORATIONS[Math.floor(into / DECOR_TICKS)]!
-    return { name: `tour: ${holiday.name}`, tick: into % DECOR_TICKS, look: {}, pose: null, holiday, mood: 'neutral' }
+    return { name: `tour: ${holiday.name}`, tick: into % DECOR_TICKS, look: {}, pose: null, holiday, mood: 'neutral', stage }
   }
   const mood = TOUR_MOODS[Math.floor((into - decorTicks) / MOOD_TICKS)]!
-  return { name: `tour: ${mood}`, tick: (into - decorTicks) % MOOD_TICKS, look: {}, pose: null, holiday: null, mood }
+  return { name: `tour: ${mood}`, tick: (into - decorTicks) % MOOD_TICKS, look: {}, pose: null, holiday: null, mood, stage }
 }
