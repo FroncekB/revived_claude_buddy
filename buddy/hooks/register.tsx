@@ -3,9 +3,12 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { Buddy, Counts, Moment, MoodEvent, Saved, TurnFacts } from '../types'
 import { dayInfo } from './calendar'
-import { cardAlt, cardSvg, meter } from './card'
+import { cardAlt, cardSvg, journalAlt, journalSvg, meter } from './card'
 import { addCall, isRough, memoryLine, mergeTurns, noCalls, queueTurns, recall, talkMemories, turnFacts } from './journal'
-import { bandRows, cardLines, compactLine, isCompact, nameLine, rightRuns, spriteTint, streakLine } from './layout'
+import {
+  bandRows, cardLines, compactLine, emptyJournal, isCompact, journalHeader, journalLines, journalRows, nameLine, rightRuns,
+  spriteTint, streakLine,
+} from './layout'
 import { addCounts, countEvent, mergePending, toolGroup, zeroCounts } from './ledger'
 import type { CountEvent } from './ledger'
 import { CELEBRATE_TICKS, FLINCH_TICKS, draw, portrait } from './look'
@@ -61,6 +64,7 @@ const pendingMood = atom({ plugin: 'buddy', key: 'pendingMood' } as const, {})
 const pendingTurns = atom({ plugin: 'buddy', key: 'pendingTurns' } as const, {})
 
 const CARD = 'card'
+const JOURNAL = 'journal'
 const NO_BUDDY = 'No buddy yet. Run /buddy to hatch one.'
 const SAVE_FAILED = 'Could not save your buddy; it lives for this session only.'
 
@@ -492,6 +496,12 @@ async function runBuddy($: EngineInterface, sub: Sub): Promise<string | undefine
       if (opened.isPlaced) return undefined
       return [...cardLines(buddy.soul, bones, saved.rerolls), streakLine(saved.you, await countsOf($, buddy))].join('\n')
     }
+    case 'journal': {
+      const opened = await $.ui.open({ id: JOURNAL, title: 'Journal', closeOnEscape: true })
+      // A surface that places no panes gets the newest ten as text instead.
+      if (opened.isPlaced) return undefined
+      return journalLines(name, buddy.journal, await $.clock.now()).join('\n')
+    }
     case 'mute':
       return (await commit($, { kind: 'mode', mode: 'muted' })) ?? `${name} will stay quiet unless spoken to.`
     case 'unmute':
@@ -605,7 +615,7 @@ export const register: Register = on => {
       await $.command.register({
         name: 'buddy',
         description: 'Hatch, pet, or manage your terminal buddy',
-        argumentHint: '[pet | card | mute | unmute | off | reroll [confirm]]',
+        argumentHint: '[pet | card | journal | mute | unmute | off | reroll [confirm]]',
         immediate: true,
       })
     } catch {
@@ -828,6 +838,39 @@ export const register: Register = on => {
           <Text> </Text>
           {footer}
           <Text dimColor>{streakLine(history.you, history.counts)}</Text>
+        </Box>
+      )
+    } catch {
+      return next(e)
+    }
+  })
+
+  // The journal pane (Memory spec section 5): the active buddy's saved moments, newest first.
+  on('ui.render', { component: 'Pane', requestId: JOURNAL }, async ($, e, next) => {
+    try {
+      const { Box, Text } = $.ui.resolve(e)
+      const saved = await read($, record)
+      if (!saved) return <Text dimColor>{NO_BUDDY}</Text>
+
+      const buddy = activeBuddy(saved)
+      const name = buddy.soul.name
+      const rows = journalRows(buddy.journal, await $.clock.now())
+      if (e.surface !== 'terminal') {
+        const { Svg } = $.ui.resolve(e)
+        return <Svg source={journalSvg(name, rollBones(buddy.seed), rows)} alt={journalAlt(name, rows)} />
+      }
+
+      return (
+        <Box flexDirection="column">
+          <Text bold>{journalHeader(name)}</Text>
+          {rows.length === 0
+            ? [<Text dimColor>{emptyJournal(name)}</Text>]
+            : rows.map(row => (
+                <Box>
+                  <Text dimColor>{row.age + '   '}</Text>
+                  <Text>{row.text}</Text>
+                </Box>
+              ))}
         </Box>
       )
     } catch {

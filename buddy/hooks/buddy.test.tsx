@@ -1432,3 +1432,47 @@ test('a failed write keeps a new moment for the next save', async ($, on) => {
   await clock.settle()
   expect(activeOf(shared.row)?.journal).toEqual([{ at: new Date(NOON).toISOString(), kind: 'failRun', n: 5, group: 'shell' }])
 })
+
+const journalPane = () => ({ ...pane(), requestId: 'journal', props: { ...pane().props, title: 'Journal' } })
+
+test('journal opens a pane listing the moments newest first, even while the buddy is off, and prints nothing', async ($, on) => {
+  const saved = remembering([
+    { at: LAST_WEEK, kind: 'away', n: 9 },
+    { at: LAST_WEEK, kind: 'failRun', n: 18, group: 'shell' },
+  ])
+  const clock = world(on, { buddy: { ...saved, mode: 'off' } })
+  await $.session.start(START)
+  await clock.settle()
+  expect(await runner($)('journal')).toBeUndefined()
+  const terminal = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...journalPane() })
+  const text = (await terminal.findAll({ type: 'Text' })).map(t => t.text).join('|')
+  expect(text).toMatch(/^Pip's journal\|6 days ago *\|Claude failed 18 shell commands in a row\|6 days ago *\|back after 9 days away$/)
+  const desktop = await $.ui.mount({ plugin: 'buddy', surface: 'desktop', ...journalPane() })
+  const svgs = await desktop.findAll({ type: 'Svg' })
+  expect(svgs).toHaveLength(1)
+  expect(svgs[0]?.props.alt).toBe(
+    "Pip's journal. 6 days ago: Claude failed 18 shell commands in a row. 6 days ago: back after 9 days away.",
+  )
+  expect(String(svgs[0]?.props.source)).toContain('>back after 9 days away</text>')
+})
+
+test('where no pane can be placed, journal prints its header and the newest ten', async ($, on) => {
+  const journal: Moment[] = Array.from({ length: 12 }, (_, i) => ({ at: LAST_WEEK, kind: 'turns' as const, n: i + 1 }))
+  const clock = world(on, { buddy: remembering(journal) }, false)
+  await $.session.start(START)
+  await clock.settle()
+  const lines = ((await runner($)('journal')) ?? '').split('\n')
+  expect(lines).toHaveLength(11)
+  expect(lines[0]).toBe("Pip's journal")
+  expect(lines[1]).toBe('6 days ago   12 turns together')
+  expect(lines[10]).toBe('6 days ago   3 turns together')
+})
+
+test('an empty journal says so, as text and on the pane', async ($, on) => {
+  const clock = world(on, { buddy: SAVED }, false)
+  await $.session.start(START)
+  await clock.settle()
+  expect(await runner($)('journal')).toBe("Pip's journal\nNothing in Pip's journal yet.")
+  const terminal = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...journalPane() })
+  expect(await terminal.find({ text: "Nothing in Pip's journal yet." })).toBeDefined()
+})

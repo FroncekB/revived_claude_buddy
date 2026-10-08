@@ -5,7 +5,7 @@ import { addCounts, localDay, visit, zeroCounts } from './ledger'
 import { applyMood, sulkFor, withSulk } from './mood'
 
 export const STORE_KEY = 'buddy'
-export const USAGE = 'Usage: /buddy [pet | card | mute | unmute | off | reroll [confirm]]'
+export const USAGE = 'Usage: /buddy [pet | card | journal | mute | unmute | off | reroll [confirm]]'
 
 // What the store holds, as this build reads it (Foundation spec section 1).
 export type Stored =
@@ -147,9 +147,10 @@ export function applyChange(saved: Saved | null, change: Change, now: number): S
 }
 
 export type Sub =
-  | 'show' | 'pet' | 'card' | 'mute' | 'unmute' | 'off' | 'reroll' | 'reroll-confirm' | 'debug' | 'debug-off' | 'usage'
+  | 'show' | 'pet' | 'card' | 'journal' | 'mute' | 'unmute' | 'off' | 'reroll' | 'reroll-confirm' | 'debug' | 'debug-off'
+  | 'usage'
 
-const SIMPLE: readonly string[] = ['pet', 'card', 'mute', 'unmute', 'off']
+const SIMPLE: readonly string[] = ['pet', 'card', 'journal', 'mute', 'unmute', 'off']
 
 export function parseSub(args: string): Sub {
   const words = args.trim().toLowerCase().split(/\s+/).filter(Boolean)
