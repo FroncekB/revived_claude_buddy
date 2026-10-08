@@ -12,21 +12,22 @@ export const ELDER_LEVEL = 30
 export const MAX_FLOOR = 60
 export const STAGES: readonly Stage[] = ['hatchling', 'adult', 'elder']
 
-const n = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
-const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null
+// A stored value as a number: anything that isn't a finite number reads as 0.
+export const asNumber = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
+export const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null
 
 // Counts as numbers, whatever was stored: a missing or damaged field reads as 0.
 export function safeCounts(stored: unknown): Counts {
   const c = isObject(stored) ? stored : {}
   const calls = isObject(c.calls) ? c.calls : {}
   return {
-    turns: n(c.turns),
-    failedTurns: n(c.failedTurns),
-    longestTurnMs: n(c.longestTurnMs),
-    calls: Object.fromEntries(TOOL_GROUPS.map(g => [g, n(calls[g])])) as Counts['calls'],
-    failedCalls: n(c.failedCalls),
-    pets: n(c.pets),
-    talks: n(c.talks),
+    turns: asNumber(c.turns),
+    failedTurns: asNumber(c.failedTurns),
+    longestTurnMs: asNumber(c.longestTurnMs),
+    calls: Object.fromEntries(TOOL_GROUPS.map(g => [g, asNumber(calls[g])])) as Counts['calls'],
+    failedCalls: asNumber(c.failedCalls),
+    pets: asNumber(c.pets),
+    talks: asNumber(c.talks),
   }
 }
 
@@ -39,6 +40,11 @@ export function xpOf(counts: unknown): number {
 // The XP that reaches `level`: 0 for level 1, 100 for 2, 8,100 for 10.
 export function xpForLevel(level: number): number {
   return 100 * (level - 1) ** 2
+}
+
+// The XP that reaches the level after `level`; null at the top level, where there is none.
+export function nextLevelXp(level: number): number | null {
+  return level < MAX_LEVEL ? xpForLevel(level + 1) : null
 }
 
 // The largest level from 1 to 99 whose XP is reached, counted up in whole numbers so no float

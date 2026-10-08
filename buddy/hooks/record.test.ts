@@ -1,6 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { Bests, Saved, TurnFacts } from '../types'
+import { newsOf } from './achievements'
 import { countEvent, zeroCounts } from './ledger'
 import { USAGE, activeBuddy, applyChange, classify, findBuddy, migrate, parseSub, shownBuddy, targetOf } from './record'
 import type { Change } from './record'
@@ -61,6 +62,25 @@ test('schemas 1 and 2 are ours; a schema 2 record without its active buddy is da
   expect(classify({ schema: 2 })).toEqual({ kind: 'damaged' })
   expect(classify({ schema: 3, seed: 'x' })).toEqual({ kind: 'foreign', schema: '3' })
   expect(classify('junk')).toEqual({ kind: 'foreign', schema: 'unknown' })
+})
+
+test('a name or personality edited to carry control characters is read without them', () => {
+  const soulOf = (raw: unknown) => {
+    const stored = classify(raw)
+    return stored.kind === 'ok' ? activeBuddy(stored.saved).soul : null
+  }
+  const saved = migrate(V1)
+  const clean = classify(saved)
+  expect(clean.kind === 'ok' && clean.saved).toBe(saved)
+  const edited = (soul: object): Saved => ({ ...saved, buddies: [{ ...saved.buddies[0]!, soul: { ...SOUL, ...soul } }] })
+  expect(soulOf(edited({ name: 'P\u001b[2Jip\u009b', personality: 'Bold\u001b]52;c;aGk=\u0007 one.' }))).toEqual({
+    ...SOUL,
+    name: 'P[2Jip',
+    personality: 'Bold]52;c;aGk= one.',
+  })
+  // A name of nothing but control characters reads as "Buddy", in either schema.
+  expect(soulOf(edited({ name: '\u001b\u0007' }))?.name).toBe('Buddy')
+  expect(soulOf({ ...V1, soul: { ...SOUL, name: '\u009b' } })?.name).toBe('Buddy')
 })
 
 test('migration keeps the buddy and starts its counts and the streak at zero', () => {
@@ -346,4 +366,13 @@ test('a buddy back after five days retired sulks and remembers being away; the o
   expect(saved.buddies[1]?.mood?.sulk).toBe(1)
   // A damaged retirement time leaves no sulk.
   expect(applyChange(pair('never'), { kind: 'swap', seed: 'a' }, NOON)?.buddies[0]?.mood).toBeUndefined()
+})
+
+test('a swap on a new day keeps the streak but earns nothing; the next flush earns it, and so announces it', () => {
+  const six: Saved = { ...pair(YESTERDAY), you: { lastDay: '2026-10-06', streak: 6, bestStreak: 6, days: 6 } }
+  const swapped = applyChange(six, { kind: 'swap', seed: 'a' }, NOON)!
+  expect(swapped.you).toEqual({ lastDay: '2026-10-07', streak: 7, bestStreak: 7, days: 7 })
+  const flushed = applyChange(swapped, { kind: 'flush', pending: { a: ONE_TURN } }, NOON + 1_000)!
+  expect(flushed.you.earned).toEqual({ regular: new Date(NOON + 1_000).toISOString() })
+  expect(newsOf(swapped, flushed)?.earned).toEqual(['regular'])
 })

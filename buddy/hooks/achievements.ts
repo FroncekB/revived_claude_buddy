@@ -3,7 +3,7 @@
 // earned; everything else here is worked out from the record. Pure: no $.
 import type { Counts, Saved, Stage, You } from '../types'
 import { addCounts, zeroCounts } from './ledger'
-import { ADULT_LEVEL, ELDER_LEVEL, levelOf, safeCounts, stageOf } from './progress'
+import { ADULT_LEVEL, ELDER_LEVEL, asNumber, isObject, levelOf, safeCounts, stageOf } from './progress'
 import type { EarnedHat } from './sprites'
 
 export type AchievementId =
@@ -57,24 +57,22 @@ export const EARNED_HAT_NAME: Record<EarnedHat, string> = {
   laurel: 'a laurel',
 }
 
-const n = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
-
 export function lifetime(saved: Saved): Lifetime {
   let counts = zeroCounts()
   let rough = 0
   let topLevel = 1
   for (const b of saved.buddies) {
     counts = addCounts(counts, safeCounts(b.counts))
-    rough = Math.max(rough, n(b.bests?.rough))
+    rough = Math.max(rough, asNumber(b.bests?.rough))
     topLevel = Math.max(topLevel, levelOf(b.counts))
   }
-  return { counts, rough, topLevel, bestStreak: n(saved.you.bestStreak), buddies: saved.buddies.length }
+  return { counts, rough, topLevel, bestStreak: asNumber(saved.you.bestStreak), buddies: saved.buddies.length }
 }
 
 // Your earned achievements by id. A field that isn't a plain object reads as none.
 export function earnedOf(you: You): Readonly<Record<string, string>> {
   const e: unknown = you.earned
-  return typeof e === 'object' && e !== null && !Array.isArray(e) ? (e as Record<string, string>) : {}
+  return isObject(e) && !Array.isArray(e) ? (e as Record<string, string>) : {}
 }
 
 // Earns every achievement met and not yet earned, dated `now`. Returns `saved` itself when there

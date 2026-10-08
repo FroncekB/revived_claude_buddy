@@ -5,7 +5,7 @@ import { ageText, momentText, readable } from './journal'
 import { RARITY, STATS } from './roll'
 import type { Bones } from './roll'
 import { totalCalls, withCommas } from './ledger'
-import { MAX_LEVEL, bonesFor, levelOf, stageOf, xpForLevel, xpOf } from './progress'
+import { bonesFor, levelOf, nextLevelXp, stageOf, xpOf } from './progress'
 import { PAINT, faceFor } from './sprites'
 import type { Prop } from './sprites'
 
@@ -175,8 +175,8 @@ export function cardProgress(saved: Saved, buddy: Buddy): CardProgress {
 
 // "Lv 12 adult · 12,345 / 14,400 xp": the XP so far over the XP for the next level.
 export function levelText(p: Pick<CardProgress, 'level' | 'stage' | 'xp'>): string {
-  const next = p.level < MAX_LEVEL ? ` / ${withCommas(xpForLevel(p.level + 1))}` : ''
-  return `Lv ${p.level} ${p.stage} · ${withCommas(p.xp)}${next} xp`
+  const next = nextLevelXp(p.level)
+  return `Lv ${p.level} ${p.stage} · ${withCommas(p.xp)}${next !== null ? ` / ${withCommas(next)}` : ''} xp`
 }
 
 export function achievementsText(earned: number): string {

@@ -1,8 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
 import { ADULT } from './art-adult'
-import { ELDER } from './art-elder'
-import { HATCHLING } from './art-hatchling'
 import { STAGES } from './progress'
 import { EYES, HATS, SPECIES, fnv1a32 } from './roll'
 import {
@@ -179,7 +177,7 @@ test('nothing is drawn above the head in any frame, at any stage', () => {
 
 test('every hatchling drawn is small: at most 3 rows and 9 columns in every frame', () => {
   const bad: string[] = []
-  for (const species of SPECIES.filter(s => HATCHLING[s] !== undefined)) {
+  for (const species of SPECIES) {
     // Fidget A, the rest frame a column to the right, may reach 10.
     for (const frame of [0, 2, ...POSES] as const) {
       const rows = bodyRows(species, 'hatchling', frame).map(row => fillEyes(row, '·'))
@@ -192,7 +190,7 @@ test('every hatchling drawn is small: at most 3 rows and 9 columns in every fram
 
 test('every elder drawn is drawn new: no frame is a copy of its adult frame', () => {
   const copied: string[] = []
-  for (const species of SPECIES.filter(s => ELDER[s] !== undefined)) {
+  for (const species of SPECIES) {
     for (const frame of [0, 2, ...POSES] as const) {
       const elder = bodyRows(species, 'elder', frame).join('\n')
       if (elder === bodyRows(species, 'adult', frame).join('\n')) copied.push(`${species} ${frame}`)

@@ -348,15 +348,16 @@ async function stir($: EngineInterface) {
   await update($, lastActive, () => now)
 }
 
-async function showBubble($: EngineInterface, text: string) {
+// `news` is the announcement the bubble carries, if any.
+async function showBubble($: EngineInterface, text: string, news?: string) {
   const now = await read($, tick)
-  await update($, bubble, () => ({ text, fromTick: now, untilTick: now + bubbleTicks(text) }))
+  await update($, bubble, () => ({ text, fromTick: now, untilTick: now + bubbleTicks(text), ...(news ? { news } : {}) }))
 }
 
-// An announcement is up: the bubble is news and still showing.
-async function newsUp($: EngineInterface): Promise<boolean> {
+// The announcement still showing, if one is.
+async function newsShowing($: EngineInterface): Promise<string | null> {
   const said = await read($, bubble)
-  return said !== null && said.news === true && (await read($, tick)) < said.untilTick
+  return said?.news !== undefined && (await read($, tick)) < said.untilTick ? said.news : null
 }
 
 // What a commit changed worth saying (Progression spec section 4): a celebration, and a canned
@@ -367,9 +368,8 @@ async function announce($: EngineInterface, before: Saved | null, after: Saved) 
     if (!news || after.mode === 'off') return
     await feel($, [], 'celebrate')
     if (after.mode !== 'on') return
-    const text = newsLine(news)
-    const now = await read($, tick)
-    await update($, bubble, () => ({ text, fromTick: now, untilTick: now + bubbleTicks(text), news: true as const }))
+    const line = newsLine(news)
+    await showBubble($, line, line)
   } catch {
     // Nothing to undo.
   }
@@ -383,7 +383,7 @@ async function visitToday($: EngineInterface) {
   await commit($, { kind: 'visit' })
   const after = await read($, record)
   // A visit that earned something has already said so.
-  if (after && shouldGreet({ mode: after.mode, dayBefore, you: after.you }) && !(await newsUp($))) {
+  if (after && shouldGreet({ mode: after.mode, dayBefore, you: after.you }) && (await newsShowing($)) === null) {
     await showBubble($, streakGreeting(after.you.streak))
   }
 }
@@ -418,14 +418,18 @@ async function ask(
   }
 }
 
-// Talk, pet and hello: answered even when muted, at most one model call per 5 s.
+// Talk, pet and hello: answered even when muted, at most one model call per 5 s. A reply that
+// lands on an announcement follows it in the same bubble, so a pet that earns Good friend still
+// says so (Progression spec section 4).
 async function reply($: EngineInterface, who: Who, prompt: string) {
   const bones = bonesFor(who)
   const now = await $.clock.now()
   const last = await read($, lastReplyAt)
   await update($, lastReplyAt, () => now)
   const text = now - last < REPLY_FLOOR_MS ? null : await ask($, who, bones, prompt, 'reply')
-  await showBubble($, text ?? cannedLine(bones, cannedCount++, Math.random()))
+  const line = text ?? cannedLine(bones, cannedCount++, Math.random())
+  const news = await newsShowing($)
+  await showBubble($, news === null ? line : `${news} ${line}`, news ?? undefined)
 }
 
 // A pet or a talk: counted and saved before the reply is asked for. A save in progress holds the
@@ -482,7 +486,7 @@ async function react($: EngineInterface, summary: TurnSummary, facts: TurnFacts)
   const memory = quipMemory(buddy.journal, facts, now, bones)
   const text = await ask($, buddy, bones, reactionPrompt(summary, memory), 'react')
   // An announcement keeps the bubble: a quip that comes back over one is dropped.
-  if (text && !(await newsUp($))) await showBubble($, text)
+  if (text && (await newsShowing($)) === null) await showBubble($, text)
 }
 
 async function hatch($: EngineInterface, kind: 'hatch' | 'reroll'): Promise<string> {
@@ -522,10 +526,9 @@ async function hatch($: EngineInterface, kind: 'hatch' | 'reroll'): Promise<stri
 }
 
 async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | undefined> {
-  const { sub } = parsed
-  if (sub === 'usage') return USAGE
+  if (parsed.sub === 'usage') return USAGE
   const stored = await current($)
-  if (stored.kind === 'none') return sub === 'show' ? hatch($, 'hatch') : NO_BUDDY
+  if (stored.kind === 'none') return parsed.sub === 'show' ? hatch($, 'hatch') : NO_BUDDY
   if (stored.kind !== 'ok') return refusal(stored) ?? undefined
   const saved = stored.saved
   // Another session may have changed the store since this one last looked.
@@ -535,7 +538,7 @@ async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | un
   const name = buddy.soul.name
   const who = `${name}, ${bones.rarity} ${bones.species}`
   const hidden = `${name} is hidden. Run /buddy to bring it back.`
-  switch (sub) {
+  switch (parsed.sub) {
     case 'show': {
       const note = await commit($, { kind: 'mode', mode: 'on' })
       later($, () => reply($, buddy, HELLO_PROMPT))
@@ -591,9 +594,8 @@ async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | un
       return hatch($, 'reroll')
     case 'swap': {
       if (await read($, hatching)) return 'Wait for the egg to hatch.'
-      const who = parsed.target!
-      const found = findBuddy(saved, who)
-      if (found.kind !== 'one') return notFound(saved, who, found, 'swap')
+      const found = findBuddy(saved, parsed.target)
+      if (found.kind !== 'one') return notFound(saved, parsed.target, found, 'swap')
       if (found.seed === saved.active) return `${name} is already here.`
       // The returning buddy is shown as itself, not mid-tour.
       await update($, tourStart, () => null)

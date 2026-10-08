@@ -6,7 +6,7 @@ import { ACHIEVEMENTS } from './achievements'
 import { countsText, emptyJournal, journalHeader, longDate, streakLine, streakText, wrap } from './layout'
 import type { CardProgress, DexRow, JournalRow } from './layout'
 import { withCommas } from './ledger'
-import { MAX_LEVEL, xpForLevel } from './progress'
+import { nextLevelXp, xpForLevel } from './progress'
 import { RARITY, STATS } from './roll'
 import type { Bones, Hat, Rarity } from './roll'
 import { spriteRows, topRow } from './sprites'
@@ -117,6 +117,17 @@ function stillRows(bones: Pick<Bones, 'species' | 'eye' | 'hat'>, stage: Stage):
   return spriteRows({ species: bones.species, stage, eye: bones.eye, frame: 0, top })
 }
 
+// A chip: `text` centred in a pill in `color`, its left edge at `x` and its top at `y`.
+const chipWidth = (text: string) => text.length * 7 + 20
+
+function chipMarks(x: number, y: number, text: string, color: string): string[] {
+  const w = chipWidth(text)
+  return [
+    `<rect x="${x.toFixed(1)}" y="${y}" width="${w}" height="22" rx="11" fill="${color}" fill-opacity="0.15"/>`,
+    `<text x="${(x + w / 2).toFixed(1)}" y="${y + 15}" text-anchor="middle" font-size="12" fill="${color}">${esc(text)}</text>`,
+  ]
+}
+
 // The whole card, top to bottom: name and stars, kind, portrait, quote, chips, radar, history.
 export function cardSvg(soul: Soul, bones: Bones, rerolls: number, history?: CardHistory, progress?: CardProgress): string {
   const color = FILL[bones.rarity]
@@ -145,15 +156,11 @@ export function cardSvg(soul: Soul, bones: Bones, rerolls: number, history?: Car
 
   const chipTop = 214 + Math.max(0, lines.length - 1) * 20 + 16
   const labels = chips(bones)
-  const widths = labels.map(text => text.length * 7 + 20)
+  const widths = labels.map(chipWidth)
   let x = MID - (widths.reduce((sum, w) => sum + w, 0) + 8 * (labels.length - 1)) / 2
   labels.forEach((text, i) => {
-    const w = widths[i]!
-    marks.push(
-      `<rect x="${x.toFixed(1)}" y="${chipTop}" width="${w}" height="22" rx="11" fill="${color}" fill-opacity="0.15"/>`,
-      `<text x="${(x + w / 2).toFixed(1)}" y="${chipTop + 15}" text-anchor="middle" font-size="12" fill="${color}">${esc(text)}</text>`,
-    )
-    x += w + 8
+    marks.push(...chipMarks(x, chipTop, text, color))
+    x += widths[i]! + 8
   })
 
   const chartTop = chipTop + 42
@@ -189,9 +196,9 @@ function growthMarks(marks: string[], color: string, p: CardProgress, last: numb
   const levelY = last + 30
   const barY = levelY + 10
   const from = xpForLevel(p.level)
-  const to = p.level < MAX_LEVEL ? xpForLevel(p.level + 1) : from
-  const filled = to > from ? Math.min(1, Math.max(0, (p.xp - from) / (to - from))) : 1
-  const label = p.level < MAX_LEVEL ? `${withCommas(p.xp)} / ${withCommas(to)} xp` : `${withCommas(p.xp)} xp`
+  const next = nextLevelXp(p.level)
+  const filled = next !== null ? Math.min(1, Math.max(0, (p.xp - from) / (next - from))) : 1
+  const label = next !== null ? `${withCommas(p.xp)} / ${withCommas(next)} xp` : `${withCommas(p.xp)} xp`
   marks.push(
     `<text x="${PAD}" y="${levelY}" font-size="13" font-weight="700" fill="${color}">Lv ${p.level} ${p.stage}</text>`,
     `<text x="${W - PAD}" y="${levelY}" text-anchor="end" font-size="12" fill="${INK}">${label}</text>`,
@@ -206,15 +213,12 @@ function growthMarks(marks: string[], color: string, p: CardProgress, last: numb
   let x = PAD
   let top = headY + 10
   for (const title of p.earned) {
-    const w = title.length * 7 + 20
+    const w = chipWidth(title)
     if (x > PAD && x + w > W - PAD) {
       x = PAD
       top += 30
     }
-    marks.push(
-      `<rect x="${x}" y="${top}" width="${w}" height="22" rx="11" fill="${color}" fill-opacity="0.15"/>`,
-      `<text x="${x + w / 2}" y="${top + 15}" text-anchor="middle" font-size="12" fill="${color}">${esc(title)}</text>`,
-    )
+    marks.push(...chipMarks(x, top, title, color))
     x += w + 8
   }
   return p.earned.length > 0 ? top + 22 : headY
@@ -271,8 +275,8 @@ export function cardAlt(soul: Soul, bones: Bones, rerolls: number, history?: Car
 
 // "Level 12, adult, 13,250 of 14,400 XP. 2 of 17 achievements: Marathon, Shell regular."
 function growthAlt(p: CardProgress): string {
-  const xp =
-    p.level < MAX_LEVEL ? `${withCommas(p.xp)} of ${withCommas(xpForLevel(p.level + 1))} XP` : `${withCommas(p.xp)} XP`
+  const next = nextLevelXp(p.level)
+  const xp = next !== null ? `${withCommas(p.xp)} of ${withCommas(next)} XP` : `${withCommas(p.xp)} XP`
   const earned = `${p.earned.length} of ${ACHIEVEMENTS.length} achievements${p.earned.length > 0 ? `: ${p.earned.join(', ')}` : ''}`
   return `Level ${p.level}, ${p.stage}, ${xp}. ${earned}.`
 }

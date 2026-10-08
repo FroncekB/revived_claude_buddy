@@ -1,4 +1,4 @@
-// Writes docs/art/stages.txt: every species at every stage drawn so far, its frames side by side,
+// Writes docs/art/stages.txt: every species at every stage, its frames side by side,
 // with a crown on the hat row so its place above the head shows. Run from the repo root:
 //   node tools/art-sheet.mjs
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -40,12 +40,7 @@ const lines = []
 for (const species of SPECIES) {
   lines.push(`== ${species} ==`)
   for (const [stage] of STAGES) {
-    const entry = art[stage][species]
-    if (!entry) {
-      lines.push(`-- ${stage}: not drawn yet`, '')
-      continue
-    }
-    const [rest, fidgetB, flinch, celebrate, sleep] = sections(entry)
+    const [rest, fidgetB, flinch, celebrate, sleep] = sections(art[stage][species])
     const frames = [rest, rest.map(r => ' ' + r), fidgetB, flinch, celebrate, sleep]
     const head = Math.max(0, rest.findIndex(r => r.trim() !== ''))
     lines.push(`-- ${stage}`, FRAMES.map(([name]) => name.padEnd(W)).join('  ').trimEnd())

@@ -4,7 +4,7 @@ import { earn } from './achievements'
 import { addMoments, awayMoment, bestsOf, milestones, noticeTurns } from './journal'
 import { addCounts, localDay, visit, zeroCounts } from './ledger'
 import { applyMood, sulkFor, withSulk } from './mood'
-import { grewMoments } from './progress'
+import { STAGES, grewMoments } from './progress'
 import { rollBones } from './roll'
 
 export const STORE_KEY = 'buddy'
@@ -21,13 +21,36 @@ export type Stored =
 export function classify(raw: unknown): Stored {
   if (raw === undefined || raw === null) return { kind: 'none' }
   const schema = typeof raw === 'object' ? (raw as { schema?: unknown }).schema : undefined
-  if (schema === 1) return { kind: 'ok', saved: migrate(raw as SavedV1) }
+  if (schema === 1) return { kind: 'ok', saved: printable(migrate(raw as SavedV1)) }
   if (schema === 2) {
     const saved = raw as Saved
     const intact = Array.isArray(saved.buddies) && saved.buddies.some(b => b.seed === saved.active)
-    return intact ? { kind: 'ok', saved } : { kind: 'damaged' }
+    return intact ? { kind: 'ok', saved: printable(saved) } : { kind: 'damaged' }
   }
   return { kind: 'foreign', schema: schema === undefined ? 'unknown' : String(schema) }
+}
+
+// C0 and C1 control characters, which a terminal acts on rather than shows.
+const CONTROL = /[\u0000-\u001f\u007f-\u009f]/g
+
+// The record with every buddy's name and personality fit to show. A hatch never saves a control
+// character, so only a store edited by hand carries one; it is dropped, and a name left empty
+// reads as "Buddy". Returns `saved` itself when nothing needed it.
+function printable(saved: Saved): Saved {
+  let changed = false
+  const buddies = saved.buddies.map(b => {
+    const soul: unknown = b.soul
+    if (typeof soul !== 'object' || soul === null) return b
+    const { name, personality } = soul as Partial<Soul>
+    const clean = {
+      name: typeof name === 'string' ? name.replace(CONTROL, '') || 'Buddy' : name,
+      personality: typeof personality === 'string' ? personality.replace(CONTROL, '') : personality,
+    }
+    if (clean.name === name && clean.personality === personality) return b
+    changed = true
+    return { ...b, soul: { ...b.soul, ...clean } as Soul }
+  })
+  return changed ? { ...saved, buddies } : saved
 }
 
 function fresh(seed: string, soul: Soul, rerolls: number): Saved {
@@ -167,7 +190,9 @@ export function applyChange(saved: Saved | null, change: Change, now: number): S
     }
     case 'swap': {
       if (!saved || change.seed === saved.active || !saved.buddies.some(b => b.seed === change.seed)) return null
-      // The visit comes first, so a sulk from days away lands on the buddy left alone.
+      // The visit comes first, so a sulk from days away lands on the buddy left alone. It earns
+      // nothing, as a hatch earns nothing: news isn't told across a change of buddy, so a streak
+      // achievement this visit meets is earned, and announced, at the next flush.
       const arrived = arrive(saved, now)
       const retiredAt = new Date(now).toISOString()
       return {
@@ -182,14 +207,15 @@ export function applyChange(saved: Saved | null, change: Change, now: number): S
   }
 }
 
-export type Sub =
-  | 'show' | 'pet' | 'card' | 'journal' | 'dex' | 'swap' | 'mute' | 'unmute' | 'off' | 'reroll' | 'reroll-confirm'
-  | 'debug' | 'debug-off' | 'usage'
+type Plain = 'show' | 'pet' | 'dex' | 'mute' | 'unmute' | 'off' | 'reroll' | 'reroll-confirm' | 'debug-off' | 'usage'
+export type Sub = Plain | 'card' | 'journal' | 'swap' | 'debug'
 
 // A /buddy command as parsed: the subcommand, and what it was given (Progression spec section 7).
-export type Parsed = { sub: Sub; target?: string; stage?: Stage }
-
-const STAGE_WORDS: readonly string[] = ['hatchling', 'adult', 'elder']
+export type Parsed =
+  | { sub: Plain }
+  | { sub: 'card' | 'journal'; target?: string }
+  | { sub: 'swap'; target: string }
+  | { sub: 'debug'; stage?: Stage }
 
 const SIMPLE: readonly string[] = ['pet', 'dex', 'mute', 'unmute', 'off']
 // Subcommands that can name one buddy after them.
@@ -210,14 +236,16 @@ export function parseSub(args: string): Parsed {
     if (words.length === 1) return { sub: 'debug' }
     if (words.length !== 2 || second === undefined) return { sub: 'usage' }
     if (second === 'off') return { sub: 'debug-off' }
-    return STAGE_WORDS.includes(second) ? { sub: 'debug', stage: second as Stage } : { sub: 'usage' }
+    const stage = STAGES.find(s => s === second)
+    return stage ? { sub: 'debug', stage } : { sub: 'usage' }
   }
   if (first === 'swap') return words.length === 2 ? { sub: 'swap', target: words[1]! } : { sub: 'usage' }
   if (TARGETED.includes(first)) {
-    if (words.length === 1) return { sub: first as Sub }
-    return words.length === 2 ? { sub: first as Sub, target: words[1]! } : { sub: 'usage' }
+    const sub = first as 'card' | 'journal'
+    if (words.length === 1) return { sub }
+    return words.length === 2 ? { sub, target: words[1]! } : { sub: 'usage' }
   }
-  return { sub: words.length === 1 && SIMPLE.includes(first) ? (first as Sub) : 'usage' }
+  return { sub: words.length === 1 && SIMPLE.includes(first) ? (first as Plain) : 'usage' }
 }
 
 // A buddy asked for by name, in any case, or by its dex number: "#5" or "5".

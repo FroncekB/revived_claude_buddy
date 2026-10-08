@@ -48,7 +48,7 @@ The schema stays at 2. As Foundation section 1 requires, a commit changes only t
 | `journalSeed` | `string \| null` | The buddy the journal pane shows; null for the active one |
 | `tourStage` | `Stage` | The stage the debug tour draws (section 5) |
 
-`Bubble` gains `news?: true`, set on an announcement (section 4).
+`Bubble` gains `news?: string`, the announcement's line, set on an announcement and kept on a reply that follows one (section 4).
 
 ```ts
 type Stage = 'hatchling' | 'adult' | 'elder'
@@ -177,7 +177,7 @@ A throw while working out or showing the news costs only the announcement.
 - A quip whose reply comes back while a `news` bubble is up is dropped. `lastQuipAt` still moves, since the call was made.
 - The fail line already never shows over a bubble (Alive section 3).
 - The streak greeting isn't shown while a `news` bubble is up, so a visit that earns Regular says that instead.
-- A pet, talk or hello reply replaces it, since the person asked.
+- A pet, talk or hello reply follows it in the same bubble, still `news`, since the person asked and the news shouldn't be lost: a pet that earns Good friend says so, then answers. A reply over that bubble follows the news line, not the last reply.
 
 ## 5. Evolution
 
@@ -292,7 +292,7 @@ Replies, with the command's own name in the hint:
 | { kind: 'swap'; seed: string }
 ```
 In `applyChange`, against the fresh store:
-1. **The visit** (`arrive`) runs first, as with a reroll, so a sulk or `away` from days off lands on the buddy you left (Memory section 3).
+1. **The visit** (`arrive`) runs first, as with a reroll, so a sulk or `away` from days off lands on the buddy you left (Memory section 3). It earns nothing, as a hatch earns nothing: news isn't told across a change of buddy, so a streak achievement it meets is earned, and announced, at the next flush.
 2. **The swap.** The current active buddy gets `retiredAt = now`. The target's `retiredAt` becomes `null`, `active` becomes its seed, and `mode` becomes `on`. `rerolls` is unchanged.
 3. **It missed you.** From `localDay(retiredAt)` to today, the returning buddy gets `withSulk(mood, sulkFor(...), now)` (Alive section 2, at most 3) and, at 4 days or more, an `away` moment (Memory section 2), as a visit would give.
 
@@ -340,6 +340,7 @@ As base section 9 and the later specs:
 - A throw while drawing the dex pane falls back to `next(e)`, as the card and journal panes do.
 - A swap's refused or failed write answers as other commands do; a failed store write keeps the swap in this session's copy, marked unsaved (Foundation section 2).
 - A `cardSeed` or `journalSeed` with no entry (another session's record replaced this one) shows the active buddy.
+- Retired buddies' names now reach the terminal, in the dex and the swap replies. `classify` drops control characters from every buddy's name and personality, which only a hand-edited store can carry, so none reaches the terminal; a name left empty reads as `Buddy`.
 
 **Cost:**
 - Announcements, achievements and growth add no model calls.
@@ -391,7 +392,7 @@ All with `claude plugin test` (base section 11).
   - the band's sprite after it is the adult's, and the name line reads `Lv 10`
   - `muted`: the pose, no bubble; `off`: neither
   - a second session that adopts the record announces nothing
-- **Over an announcement:** a quip reply landing while it's up is dropped and `lastQuipAt` moves; a pet reply replaces it; a visit that earns `regular` skips the streak greeting.
+- **Over an announcement:** a quip reply landing while it's up is dropped and `lastQuipAt` moves; a pet reply follows it; a pet that earns Good friend shows the news, then the reply; once the news has gone, a quip shows again; a visit that earns `regular` skips the streak greeting.
 - **Floors:** a buddy whose counts put it at level 40 quips by its grown CHAOS, checked through the roll it is given.
 - **Dex:** `/buddy dex` opens the pane and draws it in the terminal and as SVG; without a placed pane it returns the text fallback; it works in mode `off`.
 - **Targets:** `/buddy card #1` and `/buddy journal Pip` draw a retired buddy; a name shared by two buddies answers with the numbers.

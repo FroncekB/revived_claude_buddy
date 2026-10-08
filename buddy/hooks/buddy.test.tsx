@@ -1678,6 +1678,23 @@ test('the level shows on the name line, and the persona hears the stats the budd
   expect(systems.at(-1)).toContain('Stats: DEBUGGING 34, PATIENCE 34, CHAOS 34, WISDOM 59, SNARK 34.')
 })
 
+test('a quip hears the stats the buddy grew into, too', async ($, on) => {
+  const clock = world(on, { buddy: ELDERLY })
+  engineBelow(on)
+  const asked: { prompt: string; system: string }[] = []
+  on('model.complete', async (_$, e) => {
+    asked.push({ prompt: e.prompt, system: e.system ?? '' })
+    return { value: ok('Hm.') }
+  })
+  await $.session.start(START)
+  await clock.settle()
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  await $.turn.complete(TURN)
+  await clock.settle()
+  const quip = asked.find(a => a.prompt.startsWith('Claude just finished a turn'))
+  expect(quip?.system).toContain('Stats: DEBUGGING 34, PATIENCE 34, CHAOS 34, WISDOM 59, SNARK 34.')
+})
+
 // SAVED's buddy one turn short of level 10, on its first visit, so no streak greeting takes the bubble.
 const NEARLY: Saved = {
   ...SAVED,
@@ -1744,7 +1761,7 @@ test('a level another session reached is not announced here', async ($, on) => {
   expect(CONFETTI_ROWS).not.toContain((await drawnSprite(ui))[0])
 })
 
-test('a quip that comes back over an announcement is dropped; a pet reply is not', async ($, on) => {
+test('a quip that comes back over an announcement is dropped; a pet reply follows it', async ($, on) => {
   const clock = world(on, { buddy: NEARLY })
   engineBelow(on)
   const prompts = model(on, null, 'Nice.')
@@ -1761,7 +1778,52 @@ test('a quip that comes back over an announcement is dropped; a pet reply is not
   expect(await bubbleOf(ui)).toBe(NEWS_10)
   await runner($)('pet')
   await clock.settle()
+  expect(await bubbleOf(ui)).toBe(`${NEWS_10} Nice.`)
+})
+
+test('once an announcement has gone, a quip shows again', async ($, on) => {
+  const clock = world(on, { buddy: NEARLY })
+  engineBelow(on)
+  model(on, null, 'Nice.')
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  // Aborted turns are notable, so each asks for a quip, and no failed call can put up a fail line.
+  await $.turn.complete({ ...TURN, reason: 'aborted' })
+  await clock.settle()
+  expect(await bubbleOf(ui)).toBe(NEWS_10)
+  // Past the bubble and the quip cooldown: 180 s, and 1.8 s for each of Pip's 30 PATIENCE.
+  await clock.advance(300_000)
+  await $.turn.complete({ ...TURN, turnId: 't2', reason: 'aborted' })
+  await clock.settle()
   expect(await bubbleOf(ui)).toBe('Nice.')
+})
+
+test('a pet that earns Good friend says so, then answers, in one bubble', async ($, on) => {
+  const fond: Saved = { ...SAVED, buddies: [{ ...SAVED.buddies[0]!, counts: { ...zeroCounts(), pets: 99 } }] }
+  const clock = world(on, { buddy: fond })
+  model(on, null, 'Purr.')
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  await runner($)('pet')
+  await clock.settle()
+  expect(await bubbleOf(ui)).toBe('Earned Good friend, and a flower crown. Purr.')
+})
+
+test('an announcement shows even when its save fails', async ($, on) => {
+  const shared = sharedStore(on, NEARLY)
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  shared.refuse = true
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(await bubbleOf(ui)).toBe(NEWS_10)
+  expect(activeOf(shared.row)?.counts.turns).toBe(809)
 })
 
 test('a visit that earns something says so in place of the streak greeting', async ($, on) => {
@@ -1952,6 +2014,106 @@ test('calls counted before a swap land on the buddy that made them, and the turn
   expect(pip?.counts).toMatchObject({ turns: 1, failedCalls: 0 })
 })
 
+test('a swap while the egg is out is told to wait, and swaps nobody', async ($, on) => {
+  const shared = sharedStore(on, TWO)
+  const clock = world(on, null)
+  let release!: () => void
+  const gate = new Promise<void>(resolve => {
+    release = resolve
+  })
+  on('model.complete', async () => {
+    await gate
+    return { value: failed() }
+  })
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  const run = runner($)
+  const rerolled = run('reroll confirm')
+  for (let i = 0; i < 100 && !(await ui.find({ text: /hatching/ })); i++) await Promise.resolve()
+  expect(await run('swap pip')).toBe('Wait for the egg to hatch.')
+  release()
+  await rerolled
+  await clock.settle()
+  expect(activeOf(shared.row)?.seed).not.toBe('swap-1')
+  expect((shared.row as Saved).buddies[0]?.retiredAt).toBe(TWO.buddies[0]!.retiredAt)
+})
+
+test('a swap ends a running tour, so the buddy back is drawn as itself', async ($, on) => {
+  const clock = world(on, { buddy: TWO })
+  model(on, null, 'Hi.')
+  await $.session.start(START)
+  await clock.settle()
+  const run = runner($)
+  await run('debug')
+  expect(await run('swap pip')).toBe('Pip is back.')
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await ui.find({ type: 'Text', text: /tour/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: '  Pip  Lv 1  common dragon  ' })).toBeDefined()
+})
+
+test("a swap clears the bubble, so the hello never follows the last buddy's news", async ($, on) => {
+  // TWO, with Mochi one turn short of level 10 and no visit yet, so no greeting takes the bubble.
+  const nearlyTwo: Saved = {
+    ...TWO,
+    buddies: [TWO.buddies[0]!, { ...TWO.buddies[1]!, counts: { ...zeroCounts(), turns: 809 } }],
+    you: NEARLY.you,
+  }
+  const clock = world(on, { buddy: nearlyTwo })
+  engineBelow(on)
+  model(on, null, 'Missed you.')
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(await bubbleOf(ui)).toBe('Level 10! I grew into an adult. Earned Grown up.')
+  expect(await runner($)('swap pip')).toBe('Pip is back.')
+  await clock.settle()
+  expect(await bubbleOf(ui)).toBe('Missed you.')
+})
+
+test('a swap the store will not take lasts the session, and still says hello', async ($, on) => {
+  const shared = sharedStore(on, TWO)
+  const clock = world(on, null)
+  const prompts = model(on, null, 'Missed you.')
+  await $.session.start(START)
+  await clock.settle()
+  shared.refuse = true
+  expect(await runner($)('swap pip')).toBe('Could not save your buddy; it lives for this session only.')
+  await clock.settle()
+  expect(activeOf(shared.row)?.seed).toBe('swap-2')
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await ui.find({ type: 'Text', text: '  Pip  Lv 1  common dragon  ' })).toBeDefined()
+  expect(await bubbleOf(ui)).toBe('Missed you.')
+  expect(prompts.filter(p => p.includes('called you over'))).toHaveLength(1)
+})
+
+test('a swap onto a record another session made unreadable is refused, and nobody says hello', async ($, on) => {
+  let row: unknown = TWO
+  let laterReadsForeign = false
+  on('store.get', async () => {
+    const value = row
+    if (laterReadsForeign) row = { schema: 3 }
+    return { value }
+  })
+  on('store.set', async (_$, e) => {
+    row = e.value
+    return { value: undefined }
+  })
+  const clock = world(on, null)
+  const prompts = model(on, null, 'Missed you.')
+  await $.session.start(START)
+  await clock.settle()
+  // A newer build writes its record between the command's read and the swap's.
+  laterReadsForeign = true
+  expect(await runner($)('swap pip')).toBe('Saved buddy uses schema 3; this mod knows 1 and 2.')
+  await clock.settle()
+  expect(row).toEqual({ schema: 3 })
+  expect(prompts).toEqual([])
+})
+
 test('debug can tour the hatchlings or the elders, and says which', async ($, on) => {
   const clock = world(on, { buddy: RECORD })
   await $.session.start(START)
@@ -1985,6 +2147,18 @@ test('a new buddy is a hatchling, its hat just above its head, and the tour can 
   // The tour's first step is a plain common duck with · eyes.
   await runner($)('debug hatchling')
   const duck = bodyRows('duck', 'hatchling', 0)
+  expect((await drawnSprite(ui)).slice(headRow(duck) + 1)).toEqual(bodyBelowHead(duck, '·'))
+})
+
+test('a plain debug after an elder tour tours the adults again', async ($, on) => {
+  const clock = world(on, { buddy: RECORD })
+  await $.session.start(START)
+  await clock.settle()
+  const run = runner($)
+  await run('debug elder')
+  expect(await run('debug')).toMatch(/ as adults with /)
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  const duck = bodyRows('duck', 'adult', 0)
   expect((await drawnSprite(ui)).slice(headRow(duck) + 1)).toEqual(bodyBelowHead(duck, '·'))
 })
 
