@@ -1,11 +1,12 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Buddy, Counts, MoodEvent, Saved } from '../types'
+import type { Buddy, Counts, Moment, MoodEvent, Saved, TurnFacts } from '../types'
 import { dayInfo } from './calendar'
 import { cardAlt, cardSvg, meter } from './card'
+import { addCall, isRough, memoryLine, mergeTurns, noCalls, queueTurns, recall, talkMemories, turnFacts } from './journal'
 import { bandRows, cardLines, compactLine, isCompact, nameLine, rightRuns, spriteTint, streakLine } from './layout'
-import { addCounts, countEvent, mergePending, zeroCounts } from './ledger'
+import { addCounts, countEvent, mergePending, toolGroup, zeroCounts } from './ledger'
 import type { CountEvent } from './ledger'
 import { CELEBRATE_TICKS, FLINCH_TICKS, draw, portrait } from './look'
 import type { Scene } from './look'
@@ -57,6 +58,7 @@ const pending = atom({ plugin: 'buddy', key: 'pending' } as const, {})
 const posing = atom({ plugin: 'buddy', key: 'pose' } as const, null)
 const lastActive = atom({ plugin: 'buddy', key: 'lastActiveTick' } as const, 0)
 const pendingMood = atom({ plugin: 'buddy', key: 'pendingMood' } as const, {})
+const pendingTurns = atom({ plugin: 'buddy', key: 'pendingTurns' } as const, {})
 
 const CARD = 'card'
 const NO_BUDDY = 'No buddy yet. Run /buddy to hatch one.'
@@ -92,6 +94,10 @@ let cannedCount = 0
 // The current main turn's tool tally; reset when that turn completes.
 let tally: Record<string, number> = {}
 let failedTools: string[] = []
+// The current main turn's calls for the journal, and the rough turns in a row before it (Memory
+// spec section 3).
+let turnCalls = noCalls()
+let roughTurns = 0
 // Main turns completed in this module's life, and the last one the DEBUGGING line spoke in: a
 // failed call's line can run after its turn has ended, so it carries its turn's number.
 let turnNo = 0
@@ -205,15 +211,24 @@ async function feel($: EngineInterface, events: readonly MoodEvent[], kind: 'fli
   )
 }
 
-// Saves the unsaved counts and mood events with today's visit. A failed store write has already
-// taken them into this session's copy (commit adopts before it writes), so they go back only
-// when the commit failed before that.
+// Queues a finished main turn for the journal, under the rules for counting (Memory spec section 3).
+async function remember($: EngineInterface, facts: TurnFacts) {
+  const saved = await read($, record)
+  if (!saved || saved.mode === 'off' || (await read($, hatching))) return
+  const seed = saved.active
+  await update($, pendingTurns, p => ({ ...p, [seed]: queueTurns(p[seed], [facts]) }))
+}
+
+// Saves the unsaved counts, mood events and turns with today's visit. A failed store write has
+// already taken them into this session's copy (commit adopts before it writes), so they go back
+// only when the commit failed before that.
 async function flush($: EngineInterface) {
   const saved = await read($, record)
   if (!saved || saved.mode === 'off') return
   // Each taken and cleared in one update, so an event landing in between is never erased.
   let taken: Record<string, Counts> = {}
   let felt: Record<string, MoodEvent[]> = {}
+  let turns: Record<string, TurnFacts[]> = {}
   await update($, pending, p => {
     taken = p
     return {}
@@ -222,11 +237,16 @@ async function flush($: EngineInterface) {
     felt = p
     return {}
   })
+  await update($, pendingTurns, p => {
+    turns = p
+    return {}
+  })
   try {
-    await commit($, { kind: 'flush', pending: taken, mood: felt })
+    await commit($, { kind: 'flush', pending: taken, mood: felt, turns })
   } catch {
     await update($, pending, p => mergePending(taken, p))
     await update($, pendingMood, p => mergeMood(felt, p))
+    await update($, pendingTurns, p => mergeTurns(turns, p))
   }
 }
 
@@ -235,7 +255,11 @@ async function countAndFlush(
   event: CountEvent,
   events: readonly MoodEvent[] = [],
   kind: 'flinch' | 'celebrate' | null = null,
+  facts: TurnFacts | null = null,
 ) {
+  // Queued before the counts: a flush landing between the two awaits would otherwise save this
+  // turn's longestTurnMs without its facts, and the next flush would lose the long-turn moment.
+  if (facts) await remember($, facts)
   await count($, event)
   await feel($, events, kind)
   await flush($)
@@ -356,8 +380,29 @@ async function soothe($: EngineInterface, event: CountEvent, who: Who, prompt: s
   }
 }
 
-// A finished main turn: speak only when shouldQuip says so, never muted, never while a call is pending.
-async function react($: EngineInterface, summary: TurnSummary) {
+// The journal line a quip carries, if any (Memory spec section 4). A throw costs the memory,
+// never the quip.
+function memoryFor(journal: readonly Moment[] | undefined, facts: TurnFacts, now: number, bones: Bones): string | null {
+  try {
+    const m = recall({ journal, facts, now, stats: bones.stats, roll: Math.random(), pick: Math.random() })
+    return m ? memoryLine(m, now) : null
+  } catch {
+    return null
+  }
+}
+
+// The journal lines a talk carries (Memory spec section 4). A throw costs the memories, never the reply.
+async function memoriesFor($: EngineInterface, journal: readonly Moment[] | undefined): Promise<string[]> {
+  try {
+    return talkMemories(journal, await $.clock.now())
+  } catch {
+    return []
+  }
+}
+
+// A finished main turn: speak only when shouldQuip says so, never muted, never while a call is
+// pending. A quip may call back to a journal moment.
+async function react($: EngineInterface, summary: TurnSummary, facts: TurnFacts) {
   const saved = await read($, record)
   if (!saved || (await read($, hatching))) return
   const buddy = activeBuddy(saved)
@@ -374,7 +419,8 @@ async function react($: EngineInterface, summary: TurnSummary) {
   })
   if (!speak) return
   await update($, lastQuipAt, () => now)
-  const text = await ask($, buddy, bones, reactionPrompt(summary), 'react')
+  const memory = memoryFor(buddy.journal, facts, now, bones)
+  const text = await ask($, buddy, bones, reactionPrompt(summary, memory), 'react')
   if (text) await showBubble($, text)
 }
 
@@ -603,8 +649,11 @@ export const register: Register = on => {
         tally[e.tool] = (tally[e.tool] ?? 0) + 1
         const failed = ran.deny === undefined && ran.isError === true
         if (failed) failedTools.push(e.tool)
-        // A denied call never ran, so it isn't counted.
-        if (ran.deny === undefined) later($, () => count($, { kind: 'call', tool: e.tool, failed }))
+        // A denied call never ran, so it isn't counted, and it neither extends nor ends a run.
+        if (ran.deny === undefined) {
+          turnCalls = addCall(turnCalls, toolGroup(e.tool), failed)
+          later($, () => count($, { kind: 'call', tool: e.tool, failed }))
+        }
         if (failed) {
           const turn = turnNo
           later($, () => feel($, ['fail'], 'flinch'))
@@ -623,14 +672,17 @@ export const register: Register = on => {
       later($, () => stir($))
       if (e.agentId === undefined) {
         const summary: TurnSummary = { reason: e.reason, durationMs: e.durationMs, tools: tally, failed: failedTools }
+        const facts = turnFacts(e.reason, e.durationMs, turnCalls, roughTurns)
         tally = {}
         failedTools = []
+        turnCalls = noCalls()
+        roughTurns = isRough(facts) ? roughTurns + 1 : 0
         turnNo++
         const turn: CountEvent = { kind: 'turn', reason: e.reason, durationMs: e.durationMs }
         const felt = turnMood(e.reason, e.durationMs, summary.failed.length)
         const kind = e.reason === 'error' ? 'flinch' : felt === 'longClean' ? 'celebrate' : null
-        later($, () => countAndFlush($, turn, felt ? [felt] : [], kind))
-        later($, () => react($, summary))
+        later($, () => countAndFlush($, turn, felt ? [felt] : [], kind, facts))
+        later($, () => react($, summary, facts))
       }
     } catch {
       // A reaction is never worth breaking a turn over.
@@ -648,7 +700,7 @@ export const register: Register = on => {
       const bare = !e.attachments || e.attachments.length === 0
       const message = buddy && fromPerson && bare ? matchAddress(buddy.soul.name, e.text) : null
       if (buddy && message !== null) {
-        later($, () => soothe($, { kind: 'talk' }, buddy, talkPrompt(message)))
+        later($, async () => soothe($, { kind: 'talk' }, buddy, talkPrompt(message, await memoriesFor($, buddy.journal))))
         return { drop: `(to ${buddy.soul.name})` }
       }
     } catch {

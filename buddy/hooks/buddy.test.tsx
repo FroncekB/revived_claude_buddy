@@ -2,7 +2,7 @@ import type { ModelCompleteResult, On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import type { Saved } from '../types'
+import type { Moment, Saved } from '../types'
 import { SHIMMER } from './layout'
 import { zeroCounts } from './ledger'
 import { TOUR_TICKS } from './tour'
@@ -1254,4 +1254,179 @@ test('a reply cancels a reaction still waiting on the model, and the reaction ne
   expect(await ui.find({ text: /Hello there\./ })).toBeDefined()
   expect(await ui.find({ text: /Ouch\./ })).toBeUndefined()
   expect(prompts.filter(p => p.startsWith('Claude just finished a turn'))).toHaveLength(1)
+})
+
+// Six days before the test clock's noon.
+const LAST_WEEK = new Date(2026, 9, 1, 12).toISOString()
+
+// SAVED, with a journal on its buddy.
+const remembering = (journal: Moment[]): Saved => ({ ...SAVED, buddies: [{ ...SAVED.buddies[0]!, journal }] })
+
+// Beneath the plugin: Read succeeds, a `deny` command is refused, and every other call fails.
+function mixedEngine(on: On) {
+  on('tool.call', async (_$, e) =>
+    e.tool === 'Bash' && e.command === 'deny'
+      ? { deny: 'not here' }
+      : e.tool === 'Read'
+        ? { result: 'ok' }
+        : { isError: true as const, result: 'boom' },
+  )
+  on('turn.complete', async (_$, e) => ({ text: e.answer }))
+}
+
+test('five failed shell calls in a row go in the journal once, on a record from before the journal', async ($, on) => {
+  const shared = sharedStore(on, RECORD)
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  for (const turnId of ['t1', 't2']) {
+    for (let i = 0; i < 5; i++) await $.tool.call({ tool: 'Bash', command: 'false' })
+    await $.turn.complete({ ...TURN, turnId })
+    await clock.settle()
+  }
+  expect(activeOf(shared.row)?.journal).toEqual([{ at: new Date(NOON).toISOString(), kind: 'failRun', n: 5, group: 'shell' }])
+  expect(activeOf(shared.row)?.bests).toEqual({ failRun: 5, calls: 5 })
+})
+
+test('a denied call leaves a run of failures going, a success ends it, and a subagent is no part of it', async ($, on) => {
+  const shared = sharedStore(on, SAVED)
+  const clock = world(on, null)
+  mixedEngine(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  const fail = () => $.tool.call({ tool: 'Bash', command: 'false' })
+  // ToolCallReserved omits agentId, so a fresh literal fails the excess-property check; a hoisted const does not.
+  const fromSubagent = { tool: 'Bash', command: 'false', agentId: 'a1' } as const
+  // Three failures, a success, then three more with a subagent's failure among them: no run of five.
+  for (let i = 0; i < 3; i++) await fail()
+  await $.tool.call({ tool: 'Read', file_path: '/x' })
+  await fail()
+  await $.tool.call(fromSubagent)
+  await fail()
+  await fail()
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(activeOf(shared.row)?.journal).toBeUndefined()
+  // Three failures, a denied call, two more: a run of five.
+  for (let i = 0; i < 3; i++) await fail()
+  await $.tool.call({ tool: 'Bash', command: 'deny' })
+  await fail()
+  await fail()
+  await $.turn.complete({ ...TURN, turnId: 't2' })
+  await clock.settle()
+  expect(activeOf(shared.row)?.journal).toEqual([{ at: new Date(NOON).toISOString(), kind: 'failRun', n: 5, group: 'shell' }])
+})
+
+test('three rough turns, then a clean one, go in the journal as a comeback, even muted', async ($, on) => {
+  const shared = sharedStore(on, { ...SAVED, mode: 'muted' })
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  for (const turnId of ['t1', 't2', 't3']) {
+    await $.tool.call({ tool: 'Bash', command: 'false' })
+    await $.turn.complete({ ...TURN, turnId })
+  }
+  await $.turn.complete({ ...TURN, turnId: 't4' })
+  await clock.settle()
+  expect(activeOf(shared.row)?.journal).toEqual([{ at: new Date(NOON).toISOString(), kind: 'comeback', n: 3 }])
+})
+
+test('turn 100 goes in the journal once, even when another session got there first', async ($, on) => {
+  const shared = sharedStore(on, { ...SAVED, buddies: [{ ...SAVED.buddies[0]!, counts: { ...zeroCounts(), turns: 99 } }] })
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  // Mid-turn, another session saves turn 100 and its milestone.
+  const theirs = JSON.parse(JSON.stringify(shared.row)) as Saved
+  theirs.buddies[0]!.counts.turns = 100
+  theirs.buddies[0]!.journal = [{ at: new Date(NOON).toISOString(), kind: 'turns', n: 100 }]
+  shared.row = theirs
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(activeOf(shared.row)?.counts.turns).toBe(101)
+  expect(activeOf(shared.row)?.journal).toHaveLength(1)
+})
+
+test('a quip after a failed call remembers the worst run, and calls the model no more than before', async ($, on) => {
+  const clock = world(on, { buddy: remembering([{ at: LAST_WEEK, kind: 'failRun', n: 18, group: 'shell' }]) })
+  engineBelow(on)
+  const prompts = model(on, null, 'Not again.')
+  await $.session.start(START)
+  await clock.settle()
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(prompts).toHaveLength(1)
+  expect(prompts[0]).toContain('\nA memory (6 days ago): Claude failed 18 shell commands in a row. ')
+  expect(prompts[0]?.endsWith('\nReact in one line.')).toBe(true)
+})
+
+test("a talk's prompt carries the three newest memories", async ($, on) => {
+  const clock = world(on, {
+    buddy: remembering([
+      { at: LAST_WEEK, kind: 'away', n: 9 },
+      { at: LAST_WEEK, kind: 'turns', n: 100 },
+      { at: LAST_WEEK, kind: 'failRun', n: 18, group: 'shell' },
+      { at: LAST_WEEK, kind: 'comeback', n: 4 },
+    ]),
+  })
+  engineBelow(on)
+  const prompts = model(on, null, 'I remember.')
+  await $.session.start(START)
+  await clock.settle()
+  await $.prompt.submit({ text: 'Pip, remember anything?', wait: false, origin: { kind: 'composer' } })
+  await clock.settle()
+  expect(prompts).toEqual([
+    [
+      'The developer says to you: remember anything?',
+      'Your memories, newest first:',
+      '- 6 days ago: a clean turn after 4 rough ones',
+      '- 6 days ago: Claude failed 18 shell commands in a row',
+      '- 6 days ago: 100 turns together',
+      'Mention one only if it fits what they said.',
+      'Reply in one line.',
+    ].join('\n'),
+  ])
+})
+
+test('a buddy that is off keeps no journal, even once it is back', async ($, on) => {
+  const shared = sharedStore(on, { ...SAVED, mode: 'off' })
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  for (let i = 0; i < 5; i++) await $.tool.call({ tool: 'Bash', command: 'false' })
+  await $.turn.complete(TURN)
+  await clock.settle()
+  await runner($)('')
+  await $.turn.complete({ ...TURN, turnId: 't2' })
+  await clock.settle()
+  expect(activeOf(shared.row)?.counts.turns).toBe(1)
+  expect(activeOf(shared.row)?.journal).toBeUndefined()
+})
+
+test('a failed write keeps a new moment for the next save', async ($, on) => {
+  const shared = sharedStore(on, SAVED)
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  shared.refuse = true
+  for (let i = 0; i < 5; i++) await $.tool.call({ tool: 'Bash', command: 'false' })
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(activeOf(shared.row)?.journal).toBeUndefined()
+  shared.refuse = false
+  await $.turn.complete({ ...TURN, turnId: 't2' })
+  await clock.settle()
+  expect(activeOf(shared.row)?.journal).toEqual([{ at: new Date(NOON).toISOString(), kind: 'failRun', n: 5, group: 'shell' }])
 })

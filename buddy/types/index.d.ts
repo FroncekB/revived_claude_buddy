@@ -122,6 +122,8 @@ declare module 'claude-code' {
       lastActiveTick: number
       // Mood events not yet saved, by buddy seed (Alive spec section 2).
       pendingMood: Record<string, MoodEvent[]>
+      // Finished main turns not yet saved, by buddy seed (Memory spec section 3).
+      pendingTurns: Record<string, TurnFacts[]>
     }
   }
 }
