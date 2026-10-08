@@ -1,6 +1,8 @@
 // What the buddy says and when: prompts for Haiku, the speak-or-not rule,
 // reply cleanup, and fallbacks for when the model doesn't answer.
 import type { Mode, Soul, TurnReason, You } from '../types'
+import { ACHIEVEMENTS, EARNED_HAT_NAME } from './achievements'
+import type { News } from './achievements'
 import { STATS, rngFor } from './roll'
 import type { Bones, StatName, Stats } from './roll'
 
@@ -235,4 +237,24 @@ export function streakGreeting(streak: number): string {
 
 export function shouldGreet(o: { mode: Mode; dayBefore: string | null; you: You }): boolean {
   return o.mode === 'on' && o.you.lastDay !== o.dayBefore && o.you.streak >= 2
+}
+
+// "a", "a and b", "a, b and c".
+function listOf(items: readonly string[]): string {
+  return items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`
+}
+
+// An announcement, said with no model call (Progression spec section 4): the level, the stage it
+// brought, then what was earned and any hats it unlocked.
+export function newsLine(news: News): string {
+  const parts: string[] = []
+  if (news.level !== null) parts.push(`Level ${news.level}!`)
+  if (news.stage === 'adult') parts.push('I grew into an adult.')
+  if (news.stage === 'elder') parts.push("I'm an elder now.")
+  const got = ACHIEVEMENTS.filter(a => news.earned.includes(a.id))
+  if (got.length > 0) {
+    const hats = got.flatMap(a => (a.hat ? [EARNED_HAT_NAME[a.hat]] : []))
+    parts.push(`Earned ${listOf(got.map(a => a.title))}${hats.length > 0 ? `, and ${listOf(hats)}` : ''}.`)
+  }
+  return parts.join(' ')
 }

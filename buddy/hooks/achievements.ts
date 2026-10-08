@@ -1,9 +1,9 @@
 // Achievements (Progression spec section 3): milestones you reach across every buddy you've had,
 // six of which unlock a hat no roll gives. Earned ones are saved on `you` with the time each was
 // earned; everything else here is worked out from the record. Pure: no $.
-import type { Counts, Saved, You } from '../types'
+import type { Counts, Saved, Stage, You } from '../types'
 import { addCounts, zeroCounts } from './ledger'
-import { ADULT_LEVEL, ELDER_LEVEL, levelOf, safeCounts } from './progress'
+import { ADULT_LEVEL, ELDER_LEVEL, levelOf, safeCounts, stageOf } from './progress'
 import type { EarnedHat } from './sprites'
 
 export type AchievementId =
@@ -97,4 +97,23 @@ export function knownEarned(you: You): Achievement[] {
 // The hats you've earned, in table order.
 export function earnedHats(you: You): EarnedHat[] {
   return knownEarned(you).flatMap(a => (a.hat ? [a.hat] : []))
+}
+
+// What a commit changed worth saying (Progression spec section 4): the active buddy's new level,
+// its new stage when that rose too, and what was newly earned, in table order.
+export type News = { level: number | null; stage: Stage | null; earned: AchievementId[] }
+
+// Null when nothing rose, on a first hatch, or when the active buddy changed (a reroll or a swap).
+export function newsOf(before: Saved | null, after: Saved): News | null {
+  if (!before || before.active !== after.active) return null
+  const countsOf = (s: Saved) => s.buddies.find(b => b.seed === s.active)?.counts
+  const was = levelOf(countsOf(before))
+  const is = levelOf(countsOf(after))
+  const level = is > was ? is : null
+  const stage = level !== null && stageOf(is) !== stageOf(was) ? stageOf(is) : null
+  const had = earnedOf(before.you)
+  const earned = knownEarned(after.you)
+    .filter(a => !Object.hasOwn(had, a.id))
+    .map(a => a.id)
+  return level === null && earned.length === 0 ? null : { level, stage, earned }
 }

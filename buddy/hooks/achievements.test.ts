@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { Buddy, Counts, Saved, You } from '../types'
-import { ACHIEVEMENTS, earn, earnedHats, earnedOf, knownEarned, lifetime } from './achievements'
+import { ACHIEVEMENTS, earn, earnedHats, earnedOf, knownEarned, lifetime, newsOf } from './achievements'
 import { zeroCounts } from './ledger'
 
 const NOON = new Date(2026, 9, 7, 12).getTime()
@@ -107,4 +107,22 @@ test("a damaged earned field reads as none; a newer build's id is kept but not c
   expect(knownEarned(you).map(a => a.id)).toEqual(['shell', 'devoted'])
   expect(earnedHats(you)).toEqual(['hardhat', 'mortarboard'])
   expect(earn(record([buddy('a')], you), NOON).you.earned).toEqual({ party: AT, devoted: AT, shell: AT })
+})
+
+test('news: the level that rose, the stage with it, and what was newly earned, in table order', () => {
+  const at = (turns: number, done: Record<string, string> = {}) => record([buddy('a', { turns })], { earned: done })
+  // 810 turns are 8,100 XP, level 10; 1,210 are 12,100 XP, level 12.
+  expect(newsOf(at(809), at(810, { grownUp: AT }))).toEqual({ level: 10, stage: 'adult', earned: ['grownUp'] })
+  expect(newsOf(at(810), at(1_210))).toEqual({ level: 12, stage: null, earned: [] })
+  expect(newsOf(at(810), at(811))).toBeNull()
+  expect(newsOf(null, at(810))).toBeNull()
+  // A different active buddy: a reroll or a swap is no level-up.
+  const other = record([buddy('a', { turns: 1_210 }), buddy('b')])
+  expect(newsOf(at(810), other)).toBeNull()
+  // Only achievements this build knows, in table order, and only new ones.
+  expect(newsOf(at(0, { shell: AT }), at(0, { shell: AT, party: AT, devoted: AT, marathon: AT }))).toEqual({
+    level: null,
+    stage: null,
+    earned: ['marathon', 'devoted'],
+  })
 })

@@ -1665,3 +1665,97 @@ test('the level shows on the name line, and the persona hears the stats the budd
   // 'test-seed' rolled DEBUGGING 7, PATIENCE 30, CHAOS 31 and SNARK 9; level 40 lifts each to 34.
   expect(systems.at(-1)).toContain('Stats: DEBUGGING 34, PATIENCE 34, CHAOS 34, WISDOM 59, SNARK 34.')
 })
+
+// SAVED's buddy one turn short of level 10, on its first visit, so no streak greeting takes the bubble.
+const NEARLY: Saved = {
+  ...SAVED,
+  buddies: [{ ...SAVED.buddies[0]!, counts: { ...zeroCounts(), turns: 809 } }],
+  you: { lastDay: null, streak: 0, bestStreak: 0, days: 0 },
+}
+const CONFETTI_ROWS = [' *  .  *  . ', ' .  *  .  * ']
+const NEWS_10 = 'Level 10! I grew into an adult. Earned Grown up.'
+
+test('the turn that reaches level 10 is announced once, under confetti, and saved as growing up', async ($, on) => {
+  const shared = sharedStore(on, NEARLY)
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(await bubbleOf(ui)).toBe(NEWS_10)
+  expect(CONFETTI_ROWS).toContain((await drawnSprite(ui))[0])
+  expect(await ui.find({ type: 'Text', text: '  Pip  Lv 10  common ghost  ' })).toBeDefined()
+  expect(activeOf(shared.row)?.journal).toEqual([{ at: new Date(NOON).toISOString(), kind: 'grew', n: 1 }])
+  expect((shared.row as Saved).you.earned).toEqual({ grownUp: new Date(NOON).toISOString() })
+  // The next turn crosses nothing and says nothing.
+  await clock.advance(30_000)
+  await $.turn.complete({ ...TURN, turnId: 't2' })
+  await clock.settle()
+  expect(await bubbleOf(ui)).toBe('')
+})
+
+test('muted, an announcement is confetti with no words', async ($, on) => {
+  const shared = sharedStore(on, { ...NEARLY, mode: 'muted' })
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(await bubbleOf(ui)).toBe('')
+  expect(CONFETTI_ROWS).toContain((await drawnSprite(ui))[0])
+  expect((shared.row as Saved).you.earned).toEqual({ grownUp: new Date(NOON).toISOString() })
+})
+
+test('a level another session reached is not announced here', async ($, on) => {
+  const shared = sharedStore(on, NEARLY)
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  // Another session saves the turn that reaches level 10, and what it earned.
+  const theirs = JSON.parse(JSON.stringify(shared.row)) as Saved
+  theirs.buddies[0]!.counts.turns = 810
+  theirs.you.earned = { grownUp: new Date(NOON).toISOString() }
+  shared.row = theirs
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(activeOf(shared.row)?.counts.turns).toBe(811)
+  expect(await bubbleOf(ui)).toBe('')
+  expect(CONFETTI_ROWS).not.toContain((await drawnSprite(ui))[0])
+})
+
+test('a quip that comes back over an announcement is dropped; a pet reply is not', async ($, on) => {
+  const clock = world(on, { buddy: NEARLY })
+  engineBelow(on)
+  const prompts = model(on, null, 'Nice.')
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  await $.turn.complete(TURN)
+  await clock.settle()
+  // Past the failed call's flinch, whose frame has a row that reads like a bubble row.
+  await clock.advance(2_000)
+  // The failed call made the turn notable, so a quip was asked for; the news kept the bubble.
+  expect(prompts.filter(p => p.startsWith('Claude just finished a turn'))).toHaveLength(1)
+  expect(await bubbleOf(ui)).toBe(NEWS_10)
+  await runner($)('pet')
+  await clock.settle()
+  expect(await bubbleOf(ui)).toBe('Nice.')
+})
+
+test('a visit that earns something says so in place of the streak greeting', async ($, on) => {
+  const clock = world(on, { buddy: { ...SAVED, you: { lastDay: '2026-10-06', streak: 6, bestStreak: 6, days: 6 } } })
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await bubbleOf(ui)).toBe('Earned Regular.')
+})

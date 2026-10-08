@@ -110,7 +110,8 @@ export type Saved = {
   you: You
 }
 
-export type Bubble = { text: string; fromTick: number; untilTick: number }
+// `news` marks an announcement (Progression spec section 4): a quip never replaces one.
+export type Bubble = { text: string; fromTick: number; untilTick: number; news?: true }
 
 declare module 'claude-code' {
   interface PluginState {

@@ -2,6 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Buddy, Counts, Moment, MoodEvent, Saved, TurnFacts } from '../types'
+import { newsOf } from './achievements'
 import { dayInfo } from './calendar'
 import { cardAlt, cardSvg, journalAlt, journalSvg, meter } from './card'
 import {
@@ -39,6 +40,7 @@ import {
   fallbackSoul,
   hatchRequest,
   matchAddress,
+  newsLine,
   parseSoul,
   personaSystem,
   reactionPrompt,
@@ -190,9 +192,12 @@ async function commitNow($: EngineInterface, change: Change): Promise<string | n
   const base = await current($)
   const refused = refusal(base)
   if (refused) return refused
-  const saved = applyChange(base.kind === 'ok' ? base.saved : null, change, await $.clock.now())
+  const before = base.kind === 'ok' ? base.saved : null
+  const saved = applyChange(before, change, await $.clock.now())
   if (!saved) return null
   await adopt($, saved)
+  // Only the session whose commit made the change announces it, whether or not the write lands.
+  await announce($, before, saved)
   try {
     await $.store.set(STORE_KEY, saved)
     await update($, unsaved, () => false)
@@ -342,6 +347,28 @@ async function showBubble($: EngineInterface, text: string) {
   await update($, bubble, () => ({ text, fromTick: now, untilTick: now + bubbleTicks(text) }))
 }
 
+// An announcement is up: the bubble is news and still showing.
+async function newsUp($: EngineInterface): Promise<boolean> {
+  const said = await read($, bubble)
+  return said !== null && said.news === true && (await read($, tick)) < said.untilTick
+}
+
+// What a commit changed worth saying (Progression spec section 4): a celebration, and a canned
+// line unless muted. A throw costs only the announcement; the card shows the news either way.
+async function announce($: EngineInterface, before: Saved | null, after: Saved) {
+  try {
+    const news = newsOf(before, after)
+    if (!news || after.mode === 'off') return
+    await feel($, [], 'celebrate')
+    if (after.mode !== 'on') return
+    const text = newsLine(news)
+    const now = await read($, tick)
+    await update($, bubble, () => ({ text, fromTick: now, untilTick: now + bubbleTicks(text), news: true as const }))
+  } catch {
+    // Nothing to undo.
+  }
+}
+
 // The session's visit (spec section 3), greeting the streak on the first session of a new day.
 async function visitToday($: EngineInterface) {
   const saved = await read($, record)
@@ -349,7 +376,8 @@ async function visitToday($: EngineInterface) {
   const dayBefore = saved.you.lastDay
   await commit($, { kind: 'visit' })
   const after = await read($, record)
-  if (after && shouldGreet({ mode: after.mode, dayBefore, you: after.you })) {
+  // A visit that earned something has already said so.
+  if (after && shouldGreet({ mode: after.mode, dayBefore, you: after.you }) && !(await newsUp($))) {
     await showBubble($, streakGreeting(after.you.streak))
   }
 }
@@ -447,7 +475,8 @@ async function react($: EngineInterface, summary: TurnSummary, facts: TurnFacts)
   await update($, lastQuipAt, () => now)
   const memory = quipMemory(buddy.journal, facts, now, bones)
   const text = await ask($, buddy, bones, reactionPrompt(summary, memory), 'react')
-  if (text) await showBubble($, text)
+  // An announcement keeps the bubble: a quip that comes back over one is dropped.
+  if (text && !(await newsUp($))) await showBubble($, text)
 }
 
 async function hatch($: EngineInterface, kind: 'hatch' | 'reroll'): Promise<string> {
