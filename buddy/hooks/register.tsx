@@ -601,6 +601,10 @@ async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | un
       // Refused: nothing was written or adopted, so nobody is back to say hello.
       if (note !== null && note !== SAVE_FAILED) return note
       const back = shownBuddy((await read($, record)) ?? saved, found.seed)
+      // A card or journal that was pinned to this buddy now follows the active one, as targetOf
+      // answers null for it, so the next swap carries the panes along.
+      await update($, cardSeed, seed => (seed === found.seed ? null : seed))
+      await update($, journalSeed, seed => (seed === found.seed ? null : seed))
       await update($, bubble, () => null)
       later($, () => reply($, back, HELLO_PROMPT))
       return note ?? `${back.soul.name} is back.`

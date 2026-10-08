@@ -1914,6 +1914,27 @@ test('swap by number; the buddy already here, a stranger and a bare swap are ans
   expect(await run('swap mochi')).toBe('Mochi is back.')
 })
 
+test('a swap hands the card and journal back to the active buddy, so they follow the next swap', async ($, on) => {
+  const clock = world(on, { buddy: TWO })
+  model(on, null, 'Hi.')
+  await $.session.start(START)
+  await clock.settle()
+  const run = runner($)
+  expect(await run('card Pip')).toBeUndefined()
+  expect(await run('journal Pip')).toBeUndefined()
+  expect(await run('swap Pip')).toBe('Pip is back.')
+  expect(await run('swap Mochi')).toBe('Mochi is back.')
+  // Mount the panes as they stand: running /buddy card again would reset the target itself.
+  const card = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...pane() })
+  expect(await card.find({ text: 'Mochi' })).toBeDefined()
+  expect(await card.find({ text: 'Pip' })).toBeUndefined()
+  await card.unmount()
+  const journal = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...journalPane() })
+  expect(await journal.find({ text: "Mochi's journal" })).toBeDefined()
+  expect(await journal.find({ text: "Pip's journal" })).toBeUndefined()
+  await journal.unmount()
+})
+
 test('calls counted before a swap land on the buddy that made them, and the turn after on the one back', async ($, on) => {
   const shared = sharedStore(on, TWO)
   const clock = world(on, null)
