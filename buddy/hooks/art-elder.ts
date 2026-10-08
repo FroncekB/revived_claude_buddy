@@ -1,9 +1,8 @@
 // The elder bodies (Progression spec section 5), in art-adult.ts's format: the adult's size with
 // marks of age, every section drawn new, and nothing above the rest frame's head in any section.
-// A species not drawn here yet is drawn as its adult.
 import type { Species } from './roll'
 
-export const ELDER: Partial<Record<Species, string>> = {
+export const ELDER: Record<Species, string> = {
   duck: String.raw`
    ~__
   <({E} )___
@@ -315,5 +314,161 @@ export const ELDER: Partial<Record<Species, string>> = {
   ,-----,
 }( {E} . {E} ){
 }}('___'){{
+`,
+  capybara: String.raw`
+ o______o
+( {E}    {E} )_
+( ~(oo)~ )|
+(__)--(__)|
+~
+ o______o
+( {E}    {E} )_
+( ~(..)~ )|
+(__)--(__)|
+~
+ o______o  !
+( {E}    {E} )_
+( ~(OO)~ )|
+/__)--(__\|
+~
+\o______o
+( {E}    {E} )_
+( ~(oo)~ )|
+(__)--(__)|
+~
+
+ o______o _
+( {E}    {E} )|
+(_~(..)~_)|
+`,
+  cactus: String.raw`
+    .{*}.
+ ,-| {E}{E} |-,
+ | |    | |
+ U |____| U
+~
+    .{*}.  ,
+ ,-| {E}{E} |-,
+ | |    | |
+ U |____| U
+~
+   *.{*}.* !
+ ,-| {E}{E} |-,
+ | |  o | |
+ U |____| U
+~
+ n  .{*}.  n
+ '-| {E}{E} |-'
+   |    |
+   |____|
+~
+
+    .{*}.
+ ,-| {E}{E} |-,
+ U |____| U
+`,
+  robot: String.raw`
+    _|/_
+  |[{E}][{E}]%
+  |%-==- |
+  d[_|#|]b
+~
+    _*/_
+  |[{E}][{E}]%
+  |%-==- |
+  d[_|#|]b
+~
+  * _|/_ *
+  |[{E}][{E}]%
+  |%-!!- |
+  d[_|#|]b
+~
+    _|/_
+\ |[{E}][{E}]% /
+  |%\__/ |
+  d[_|#|]b
+~
+    _|/_
+  |[{E}][{E}]%
+  |%.... |
+ _d[_|#|]b_
+`,
+  rabbit: String.raw`
+  (\ ,-.
+ ( {E}  {E} )__
+=(  w  )= |
+ (")v(") _|
+~
+  (\ ,-'
+ ( {E}  {E} )__
+=(  w  )= |
+ (")v(") _|
+~
+  || ,-.  !
+ ( {E}  {E} )__
+=(  o  )= |
+ (")v(") _|
+~
+  (\ ,-.
+\( {E}  {E} )__
+=(  w  )= |
+ (")v(") _|
+~
+
+ __  ,-.  _
+ ( {E}  {E} ) |
+=(__w__)=_|
+`,
+  mushroom: String.raw`
+  .-o--o-.
+ /o      o\
+ '-| {E}{E} |-'
+   \||||/
+~
+  .-o--o-. .
+ /o      o\
+ '-| {E}{E} |-'
+   \||||/
+~
+ .-o--o-.  !
+/o      o\
+'-| {E}{E} |-'
+  /||||\
+~
+  .-o--o-.
+ /o      o\
+ \-| {E}{E} |-/
+   \||||/
+~
+
+  .-o--o-.
+ /o      o\
+ '-(_{E}{E}_)-'
+`,
+  chonk: String.raw`
+
+  /\____/\
+ (  {E}  {E}  )
+ (_\vwwv/_)
+~
+
+  /\____/\
+ (  {E}  {E}  )
+ (_\vwwv/_)~
+~
+
+  /\____/\ !
+ (  {E}  {E}  )
+/(_\voov/_)\
+~
+
+  /\____/\
+\(  {E}  {E}  )/
+ (_\vwwv/_)
+~
+
+
+  /\____/\
+ (_{E}vwwv{E}_)~
 `,
 }

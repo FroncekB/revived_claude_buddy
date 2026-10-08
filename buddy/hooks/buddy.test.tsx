@@ -5,6 +5,7 @@ import type { Engine } from 'claude-code/testing'
 import type { Moment, Saved } from '../types'
 import { SHIMMER } from './layout'
 import { zeroCounts } from './ledger'
+import { HAT_ART, bodyRows, fillEyes, headRow } from './sprites'
 import { TOUR_TICKS } from './tour'
 import { FAIL_PLAIN, FAIL_SNARKY, FALLBACK_NAMES } from './voice'
 
@@ -1942,4 +1943,51 @@ test('debug can tour the hatchlings or the elders, and says which', async ($, on
   expect(await ui.find({ type: 'Text', text: /tour 1\/18  common duck  $/ })).toBeDefined()
   expect(await run('debug elder')).toMatch(/ as elders with /)
   expect(await run('debug baby')).toMatch(/^Usage: /)
+})
+
+// The body rows a sprite should show under its top row, eyes filled and padded as the band pads them.
+const bodyBelowHead = (rest: string[], eye: string) => rest.slice(headRow(rest)).map(r => fillEyes(r, eye).padEnd(12))
+
+test('a new buddy is a hatchling, its hat just above its head, and the tour can show the hatchlings', async ($, on) => {
+  // 'tint-11' rolls a rare penguin with ° eyes in a wizard hat; with no counts it is a hatchling.
+  const clock = world(on, { buddy: { ...RECORD, seed: 'tint-11' } })
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  const rest = bodyRows('penguin', 'hatchling', 0)
+  const head = headRow(rest)
+  const rows = await drawnSprite(ui)
+  expect(head).toBeGreaterThan(0)
+  expect(rows.slice(0, head).every(r => r.trim() === '')).toBe(true)
+  expect(rows[head]).toBe(HAT_ART.wizard.padEnd(12))
+  expect(rows.slice(head + 1)).toEqual(bodyBelowHead(rest, '°'))
+  // The tour's first step is a plain common duck with · eyes.
+  await runner($)('debug hatchling')
+  const duck = bodyRows('duck', 'hatchling', 0)
+  expect((await drawnSprite(ui)).slice(headRow(duck) + 1)).toEqual(bodyBelowHead(duck, '·'))
+})
+
+test('a buddy at level 30 is drawn as its elder, on the band and on the card', async ($, on) => {
+  // 8,410 turns are 84,100 XP: level 30. What that earns is already earned, so nothing is announced.
+  const elder: Saved = {
+    ...ADULT,
+    buddies: [{ ...ADULT.buddies[0]!, counts: { ...zeroCounts(), turns: 8_410 } }],
+    you: {
+      ...ADULT.you,
+      earned: {
+        grownUp: '2026-10-01T12:00:00.000Z',
+        elder: '2026-10-02T12:00:00.000Z',
+        thousandTurns: '2026-10-02T12:00:00.000Z',
+      },
+    },
+  }
+  const clock = world(on, { buddy: elder })
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  // 'test-seed' rolls a common ghost with ✦ eyes.
+  const rest = bodyRows('ghost', 'elder', 0)
+  const body = bodyBelowHead(rest, '✦')
+  expect((await drawnSprite(ui)).slice(headRow(rest) + 1)).toEqual(body)
+  expect(await cardText($)).toContain(body.join('\n'))
 })

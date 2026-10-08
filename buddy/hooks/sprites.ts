@@ -190,11 +190,11 @@ export function fillEyes(row: string, eye: string): string {
 // Where each frame after the rest frame sits in a species' art.
 const SECTION: Record<2 | Pose, number> = { 2: 1, flinch: 2, celebrate: 3, sleep: 4 }
 
-// Each stage's bodies. A species a stage hasn't drawn yet is drawn as its adult.
-const STAGE_ART: Record<Stage, Partial<Record<Species, string>>> = { hatchling: HATCHLING, adult: ADULT, elder: ELDER }
+// Each stage's bodies, every species drawn at every stage.
+const STAGE_ART: Record<Stage, Record<Species, string>> = { hatchling: HATCHLING, adult: ADULT, elder: ELDER }
 
 export function bodyRows(species: Species, stage: Stage, frame: Frame | Pose): string[] {
-  const sections = parseArt(STAGE_ART[stage][species] ?? ADULT[species])
+  const sections = parseArt(STAGE_ART[stage][species])
   const rest = sections[0]!
   if (frame === 0) return rest
   if (frame === 1) return rest.map(row => ' ' + row)
