@@ -61,22 +61,22 @@ export const HATCHLING: Partial<Record<Species, string>> = {
 
      .
    .' '.
-   ('{E} {E})
+  ('{E} {E} )
 ~
 
       .
    .' ,'
-   ('{E} {E})
+  ('{E} {E} )
 ~
 
     .   !
   .' '.
-  ('{E} {E})
+ ('{E} {E} )
 ~
 
-    .
-  .' '.
- \('{E} {E})/
+     .
+  \.' './
+  ('{E} {E} )
 ~
 
 

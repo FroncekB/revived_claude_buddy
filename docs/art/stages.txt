@@ -53,9 +53,9 @@ rest          fidget A      fidget B      flinch        celebrate     sleep
 rest          fidget A      fidget B      flinch        celebrate     sleep
 
    .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
-     .              .             .           .   !         .
-   .' '.          .' '.        .' ,'        .' '.         .' '.          .-'-.
-   ('· ·)         ('· ·)       ('· ·)       ('O O)       \('^ ^)/       ('-.- )
+     .              .             .           .   !          .
+   .' '.          .' '.        .' ,'        .' '.         \.' './        .-'-.
+  ('· · )        ('· · )      ('· · )      ('O O )        ('^ ^ )       ('-.- )
 
 -- adult
 rest          fidget A      fidget B      flinch        celebrate     sleep
@@ -93,9 +93,9 @@ rest          fidget A      fidget B      flinch        celebrate     sleep
 -- elder
 rest          fidget A      fidget B      flinch        celebrate     sleep
    .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
-  /\_/\          /\_/\        /\_/\         /\_/\  !      /\_/\
- ( · · )        ( · · )      ( · · )       ( O O )       ( ^ ^ )        /\_/\___
-==\vwv/===     ==\vwv/===   ==\vwv/===    ==\vov/===    \=\vwv/=/      ( - -    )@
+   /\_/\          /\_/\        /\_/\         /\_/\  !      /\_/\
+  ( · · )        ( · · )      ( · · )       ( O O )       ( ^ ^ )       /\_/\___
+ ==\vwv/==      ==\vwv/==    ==\vwv/==     ==\vov/==    \==\vwv/==/    ( - -    )@
 / (")(")@ \    / (")(")@ \  / (")(")_@\    /(")(")\ @     (")(")@     ==\vwv/___)
 
 == dragon ==
@@ -121,7 +121,7 @@ rest          fidget A      fidget B      flinch        celebrate     sleep
   @)    (@       @)    (@     @)    (@      @)    (@ !    @)    (@
  (  ·  ·  )     (  ·  ·  )   (  ·  ·  )    (  O  O  )    (  ^  ^  )     @)____(@
  ~\  vv  /~     ~\  vv  /~   ~\  ~~  /~    ~\  ^^  /~    ~\  vv  /~*   (  -  -  )
- '/\_||_/\'     '/\_||_/\'   '/\_||_/\'~   '/\_||_/\'   \/\_||_/\/    ~~\__||__/~~
+ '/\_||_/\'     '/\_||_/\'   '/\_||_/\'~   '/\_||_/\'    \/\_||_/\/   ~~\__||__/~~
 
 == octopus ==
 -- hatchling
@@ -144,9 +144,9 @@ rest          fidget A      fidget B      flinch        celebrate     sleep
 rest          fidget A      fidget B      flinch        celebrate     sleep
    .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
   ,~~~~,         ,~~~~,       ,~~~~,        ,~~~~, !    \\,~~~~,  |
- ( · (·))       ( · (·))     ( · (·))      ( O (O))      \( ^ (^))|     ,~~~~,
+ ( · (·))       ( · (·))     ( · (·))      ( O (O))     \( ^ (^)) |     ,~~~~,
  (  __  )_      (  __  )_    (  __  )_     (  oo  )_     (  \/  )/     ( - (-))_
- //|||||\ |     //|||||\ |   \\|||||/ |   /// ||\\ |      /||||\      ~~|||||~~  |
+ //|||||\ |     //|||||\ |   \\|||||/ |   /// ||\\  |     /||||\      ~~|||||~~ |
 
 == owl ==
 -- hatchling: not drawn yet
