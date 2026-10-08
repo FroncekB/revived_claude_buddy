@@ -343,7 +343,7 @@ rest          fidget A      fidget B      flinch        celebrate     sleep
 -- elder
 rest          fidget A      fidget B      flinch        celebrate     sleep
    .WWW.         .WWW.         .WWW.         .WWW.         .WWW.         .WWW.
-    .{*}.          .{*}.        .{*}.  ,     *.{*}.* !   n  .{*}.  n
+    .{*}.          .{*}.        .{*}.  ,     *.{*}.* !   n  .{*}. n
  ,-| ·· |-,     ,-| ·· |-,   ,-| ·· |-,    ,-| OO |-,    '-| ^^ |-'       .{*}.
  | |    | |     | |    | |   | |    | |    | |  o | |      |    |      ,-| -- |-,
  U |____| U     U |____| U   U |____| U    U |____| U      |____|      U |____| U

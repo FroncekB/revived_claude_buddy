@@ -357,7 +357,7 @@ export const ELDER: Record<Species, string> = {
  | |  o | |
  U |____| U
 ~
- n  .{*}.  n
+ n  .{*}. n
  '-| {E}{E} |-'
    |    |
    |____|
