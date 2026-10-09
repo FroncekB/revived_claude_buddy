@@ -5,9 +5,11 @@ import { ageText, momentText, readable } from './journal'
 import { RARITY, STATS } from './roll'
 import type { Bones } from './roll'
 import { totalCalls, withCommas } from './ledger'
-import { bonesFor, levelOf, nextLevelXp, stageOf, xpOf } from './progress'
+import { levelOf, nextLevelXp, stageOf, xpOf } from './progress'
 import { PAINT, faceFor } from './sprites'
 import type { Prop } from './sprites'
+import { dressed } from './toys'
+import type { Dressed } from './toys'
 
 // A stretch of one row in one color; no color is the text color.
 export type Run = { text: string; color?: string }
@@ -183,7 +185,7 @@ export function achievementsText(earned: number): string {
   return `Achievements: ${earned} of ${ACHIEVEMENTS.length}`
 }
 
-export function cardLines(soul: Soul, bones: Bones, rerolls: number, progress?: CardProgress): string[] {
+export function cardLines(soul: Soul, bones: Dressed, rerolls: number, progress?: CardProgress): string[] {
   const bar = (v: number) => '#'.repeat(Math.round(v / 5)).padEnd(20, '-')
   const retired = progress?.retiredAt ? `   Retired ${progress.retiredAt.slice(0, 10)}` : ''
   return [
@@ -254,8 +256,8 @@ export type DexRow = {
   // Its place in `buddies`, from 1. `buddies` only grows, so the number never changes.
   number: number
   name: string
-  // Grown, for the portrait, the face, the rarity and the species.
-  bones: Bones
+  // Grown and in the hat it wears, for the portrait, the face, the rarity and the species.
+  bones: Dressed
   level: number
   stage: Stage
   // "Oct 7 – Nov 2", or "Oct 7 – now" for the active buddy.
@@ -274,7 +276,7 @@ export function dexRows(saved: Saved, now: number): DexRow[] {
     return {
       number: i + 1,
       name: b.soul.name,
-      bones: bonesFor(b),
+      bones: dressed(b, saved.you),
       level,
       stage: stageOf(level),
       dates: `${shortDate(b.soul.hatchedAt, year)} – ${end}`,

@@ -6,10 +6,12 @@ import { addCounts, localDay, visit, zeroCounts } from './ledger'
 import { applyMood, sulkFor, withSulk } from './mood'
 import { STAGES, grewMoments } from './progress'
 import { rollBones } from './roll'
+import { wearable, wornHat } from './toys'
+import type { Worn } from './toys'
 
 export const STORE_KEY = 'buddy'
 export const USAGE =
-  'Usage: /buddy [pet | card [who] | journal [who] | dex | swap <who> | rename <name> | mute | unmute | off | reroll [confirm]]'
+  'Usage: /buddy [pet | card [who] | journal [who] | dex | swap <who> | rename <name> | hat [hat] | mute | unmute | off | reroll [confirm]]'
 
 // What the store holds, as this build reads it (Foundation spec section 1).
 export type Stored =
@@ -87,8 +89,9 @@ export type Change =
   | { kind: 'visit' }
   // A retired buddy made active again (Progression spec section 7).
   | { kind: 'swap'; seed: string }
-  // A new name for one buddy (Interaction spec section 2).
+  // A new name for one buddy, and the hat it wears (Interaction spec section 2).
   | { kind: 'rename'; seed: string; name: string }
+  | { kind: 'hat'; seed: string; hat: Worn }
 
 // Today's visit (Foundation spec section 3). A new day after two or more missed ones leaves the
 // active buddy sulking (Alive spec section 2), and after three or more it goes in that buddy's
@@ -214,11 +217,27 @@ export function applyChange(saved: Saved | null, change: Change, now: number): S
         buddies: saved.buddies.map(b => (b.seed === change.seed ? { ...b, soul: { ...b.soul, name: change.name } } : b)),
       }
     }
+    case 'hat': {
+      const b = saved?.buddies.find(x => x.seed === change.seed)
+      // Judged on the fresh record: a hat it can wear, and a change from what it wears.
+      if (!saved || !b || !wearable(b, saved.you).includes(change.hat) || wornHat(b, saved.you) === change.hat) return null
+      const rolled = rollBones(b.seed).hat
+      return {
+        ...saved,
+        buddies: saved.buddies.map(x => {
+          if (x.seed !== change.seed) return x
+          if (change.hat !== rolled) return { ...x, hat: change.hat }
+          // Its rolled hat is the default, saved as no choice at all.
+          const { hat: _, ...rest } = x
+          return rest
+        }),
+      }
+    }
   }
 }
 
 type Plain = 'show' | 'pet' | 'dex' | 'mute' | 'unmute' | 'off' | 'reroll' | 'reroll-confirm' | 'debug-off' | 'usage'
-export type Sub = Plain | 'card' | 'journal' | 'swap' | 'debug' | 'rename'
+export type Sub = Plain | 'card' | 'journal' | 'swap' | 'debug' | 'rename' | 'hat'
 
 // A /buddy command as parsed: the subcommand, and what it was given (Progression spec section 7).
 export type Parsed =
@@ -228,6 +247,8 @@ export type Parsed =
   | { sub: 'debug'; stage?: Stage }
   // Everything after `rename`, as typed: validName refuses more than one word.
   | { sub: 'rename'; name: string }
+  // The hat's words as typed; none lists the hats.
+  | { sub: 'hat'; hat?: string }
 
 const SIMPLE: readonly string[] = ['pet', 'dex', 'mute', 'unmute', 'off']
 // Subcommands that can name one buddy after them.
@@ -253,6 +274,7 @@ export function parseSub(args: string): Parsed {
   }
   if (first === 'swap') return words.length === 2 ? { sub: 'swap', target: words[1]! } : { sub: 'usage' }
   if (first === 'rename') return words.length >= 2 ? { sub: 'rename', name: words.slice(1).join(' ') } : { sub: 'usage' }
+  if (first === 'hat') return words.length === 1 ? { sub: 'hat' } : { sub: 'hat', hat: words.slice(1).join(' ') }
   if (TARGETED.includes(first)) {
     const sub = first as 'card' | 'journal'
     if (words.length === 1) return { sub }

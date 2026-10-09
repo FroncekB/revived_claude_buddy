@@ -5,7 +5,7 @@ import type { Engine } from 'claude-code/testing'
 import type { Moment, Saved } from '../types'
 import { SHIMMER } from './layout'
 import { zeroCounts } from './ledger'
-import { HAT_ART, bodyRows, fillEyes, headRow } from './sprites'
+import { EARNED_HAT_ART, HAT_ART, HOLIDAY_HATS, bodyRows, fillEyes, headRow } from './sprites'
 import { TOUR_TICKS } from './tour'
 import { FAIL_PLAIN, FAIL_SNARKY, FALLBACK_NAMES } from './voice'
 
@@ -2227,4 +2227,77 @@ test('a rename the name rules refuse says why and writes nothing; a hidden buddy
   await clock.settle()
   expect(activeOf(shared.row)?.soul.name).toBe('Pip')
   expect(prompts).toEqual([])
+})
+
+// 'hat-10' rolls an uncommon capybara in a crown. Good friend has earned the flower crown. A first
+// visit, so no streak greeting takes the bubble.
+const CROWNED: Saved = {
+  ...SAVED,
+  active: 'hat-10',
+  buddies: [{ ...SAVED.buddies[0]!, seed: 'hat-10' }],
+  you: { lastDay: null, streak: 0, bestStreak: 0, days: 0, earned: { goodFriend: '2026-10-01T12:00:00.000Z' } },
+}
+
+test('a hat you have earned is saved and worn in the band, on the card and in the dex', async ($, on) => {
+  const shared = sharedStore(on, CROWNED)
+  const clock = world(on, null)
+  const prompts = model(on, null, 'Fancy.')
+  await $.session.start(START)
+  await clock.settle()
+  expect(await runner($)('hat')).toBe('Pip is wearing a crown. It can wear: crown, flowercrown, none.')
+  expect(await runner($)('hat flower crown')).toBe('Pip is wearing a flower crown.')
+  await clock.settle()
+  expect(activeOf(shared.row)?.hat).toBe('flowercrown')
+  expect(prompts).toEqual(['The developer just put a flower crown on you. React in one line.'])
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await bubbleOf(ui)).toBe('Fancy.')
+  const sprite = (await drawnSprite(ui)).join('\n')
+  expect(sprite).toContain(EARNED_HAT_ART.flowercrown)
+  expect(sprite).not.toContain(HAT_ART.crown)
+  expect(await cardText($)).toContain('Hat: flowercrown')
+  const card = await $.ui.mount({ plugin: 'buddy', surface: 'desktop', ...pane() })
+  expect(String((await card.find({ type: 'Svg' }))?.props.source)).toContain('>Flower crown<')
+  expect(await runner($)('dex')).toBeUndefined()
+  const dex = await $.ui.mount({ plugin: 'buddy', surface: 'desktop', ...dexPane() })
+  expect(String((await dex.find({ type: 'Svg' }))?.props.source)).toContain(EARNED_HAT_ART.flowercrown)
+  expect(await runner($)('hat none')).toBe('Pip took its hat off.')
+  await clock.settle()
+  expect(activeOf(shared.row)?.hat).toBe('none')
+})
+
+test('a hat not earned, or rolled by another buddy, is refused with the reason and nothing is saved', async ($, on) => {
+  const shared = sharedStore(on, CROWNED)
+  const clock = world(on, null)
+  const prompts = model(on, null, 'Fancy.')
+  await $.session.start(START)
+  await clock.settle()
+  const writes = shared.writes
+  expect(await runner($)('hat hardhat')).toBe('Earn Shell regular to unlock a hard hat.')
+  expect(await runner($)('hat halo')).toBe('Only a buddy that rolled a halo can wear one.')
+  expect(await runner($)('hat crown')).toBe('Pip is already wearing a crown.')
+  expect(await runner($)('hat jetpack')).toBe('No hat called jetpack. Pip can wear: crown, flowercrown, none.')
+  await clock.settle()
+  expect(shared.writes).toBe(writes)
+  expect(prompts).toEqual([])
+})
+
+test('on a holiday the band wears the holiday hat and the card keeps the hat it chose', async ($, on) => {
+  const chose: Saved = { ...CROWNED, buddies: [{ ...CROWNED.buddies[0]!, hat: 'flowercrown' }] }
+  const clock = world(on, { buddy: chose }, true, JULY4_NOON)
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  const sprite = (await drawnSprite(ui)).join('\n')
+  expect(sprite).toContain(HOLIDAY_HATS.july4!)
+  expect(sprite).not.toContain(EARNED_HAT_ART.flowercrown)
+  expect(await cardText($)).toContain('Hat: flowercrown')
+})
+
+test('a saved hat the buddy cannot wear, from an old or edited record, draws the hat it rolled', async ($, on) => {
+  const odd: Saved = { ...CROWNED, buddies: [{ ...CROWNED.buddies[0]!, hat: 'laurel' }] }
+  const clock = world(on, { buddy: odd })
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect((await drawnSprite(ui)).join('\n')).toContain(HAT_ART.crown)
 })

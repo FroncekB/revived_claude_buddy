@@ -30,7 +30,10 @@ import { eggRows, frameAt } from './sprites'
 import type { Frame, Prop } from './sprites'
 import { bandSvg } from './svg'
 import { TOUR_STEPS, tourAt } from './tour'
-import { renameFallback, renamePrompt, renameRefusal } from './toys'
+import {
+  dressed, hatChoice, hatFallback, hatList, hatPrompt, renameFallback, renamePrompt, renameRefusal, wearable, woreLine,
+  wornHat,
+} from './toys'
 import {
   HEART_TICKS,
   HELLO_PROMPT,
@@ -564,7 +567,7 @@ async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | un
       const shown = shownBuddy(saved, target.seed)
       const progress = cardProgress(saved, shown)
       return [
-        ...cardLines(shown.soul, bonesFor(shown), saved.rerolls, progress),
+        ...cardLines(shown.soul, dressed(shown, saved.you), saved.rerolls, progress),
         streakLine(saved.you, await countsOf($, shown)),
         achievementsText(progress.earned.length),
       ].join('\n')
@@ -626,6 +629,21 @@ async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | un
       later($, () => reply($, renamed, renamePrompt(name, parsed.name), renameFallback(parsed.name)))
       return note ?? `${name} is now ${parsed.name}.`
     }
+    case 'hat': {
+      if (await read($, hatching)) return EGG
+      if (saved.mode === 'off') return hidden
+      const can = wearable(buddy, saved.you)
+      const worn = wornHat(buddy, saved.you)
+      if (parsed.hat === undefined) return hatList(name, worn, can)
+      const choice = hatChoice({ name, words: parsed.hat, worn, can })
+      if ('reply' in choice) return choice.reply
+      const hat = choice.wear
+      const note = await commit($, { kind: 'hat', seed: buddy.seed, hat })
+      // Refused: nothing was written or adopted.
+      if (note !== null && note !== SAVE_FAILED) return note
+      later($, () => reply($, buddy, hatPrompt(hat), hatFallback(hat)))
+      return note ?? woreLine(name, hat)
+    }
     case 'debug': {
       if (saved.mode === 'off') return hidden
       const stage = parsed.stage ?? 'adult'
@@ -661,7 +679,7 @@ function eggLook(frame: Frame): Look {
 async function liveScene(
   $: EngineInterface,
   buddy: Buddy,
-  bones: Bones,
+  bones: Scene['bones'],
   stage: Stage,
   t: number,
   heartsFrame: number | null,
@@ -712,7 +730,7 @@ async function buddyLook($: EngineInterface, saved: Saved, t: number): Promise<L
         heartsFrame,
         saying,
       }
-    : await liveScene($, buddy, own, stage, t, heartsFrame, saying)
+    : await liveScene($, buddy, { ...own, hat: wornHat(buddy, saved.you) }, stage, t, heartsFrame, saying)
   const drawn = draw(scene)
   const { label, stars } = nameLine(name, bones, tour ? null : levelOf(buddy.counts))
   const sprite = spriteTint(bones, animTick)
@@ -737,7 +755,8 @@ export const register: Register = on => {
       await $.command.register({
         name: 'buddy',
         description: 'Hatch, pet, or manage your terminal buddy',
-        argumentHint: '[pet | card [who] | journal [who] | dex | swap <who> | rename <name> | mute | unmute | off | reroll [confirm]]',
+        argumentHint:
+          '[pet | card [who] | journal [who] | dex | swap <who> | rename <name> | hat [hat] | mute | unmute | off | reroll [confirm]]',
         immediate: true,
       })
     } catch {
@@ -908,7 +927,7 @@ export const register: Register = on => {
       if (!saved) return <Text dimColor>{NO_BUDDY}</Text>
 
       const buddy = shownBuddy(saved, await read($, cardSeed))
-      const bones = bonesFor(buddy)
+      const bones = dressed(buddy, saved.you)
       const progress = cardProgress(saved, buddy)
       const history = { you: saved.you, counts: await countsOf($, buddy) }
       if (e.surface !== 'terminal') {

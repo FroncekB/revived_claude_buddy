@@ -332,3 +332,17 @@ test('the text dex is a count, a note of any older ones, then at most the newest
   expect(lines[2]).toMatch(/^#5 {3}/)
   expect(lines[11]).toMatch(/^#14 {2}.* – now$/)
 })
+
+test('the text card and the dex show the hat a buddy wears', () => {
+  const you = { lastDay: null, streak: 0, bestStreak: 0, days: 0, earned: { elder: '2026-10-01T12:00:00.000Z' } }
+  const saved: Saved = {
+    schema: 2,
+    mode: 'on',
+    rerolls: 0,
+    active: 'hat-10',
+    buddies: [{ seed: 'hat-10', soul: SOUL, retiredAt: null, counts: zeroCounts(), hat: 'laurel' }],
+    you,
+  }
+  expect(dexRows(saved, NOV3)[0]?.bones.hat).toBe('laurel')
+  expect(cardLines(SOUL, { ...rollBones('hat-10'), hat: 'laurel' }, 0).join('\n')).toContain('Hat: laurel   Eyes: ·')
+})

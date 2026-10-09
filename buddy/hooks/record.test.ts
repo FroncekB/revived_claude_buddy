@@ -31,8 +31,10 @@ test('subcommands', () => {
   expect(parseSub('rename Mochi')).toEqual({ sub: 'rename', name: 'Mochi' })
   expect(parseSub('RENAME  Sir   Pip')).toEqual({ sub: 'rename', name: 'Sir Pip' })
   expect(sub('rename')).toBe('usage')
+  expect(parseSub('hat')).toEqual({ sub: 'hat' })
+  expect(parseSub('HAT Flower  Crown')).toEqual({ sub: 'hat', hat: 'Flower Crown' })
   expect(USAGE).toBe(
-    'Usage: /buddy [pet | card [who] | journal [who] | dex | swap <who> | rename <name> | mute | unmute | off | reroll [confirm]]',
+    'Usage: /buddy [pet | card [who] | journal [who] | dex | swap <who> | rename <name> | hat [hat] | mute | unmute | off | reroll [confirm]]',
   )
   expect(sub('mute')).toBe('mute')
   expect(sub('unmute')).toBe('unmute')
@@ -392,4 +394,30 @@ test("a rename changes only that buddy's name, with no visit, and nothing when t
   expect(applyChange(before, { kind: 'rename', seed: 'b', name: 'Bix' }, NOON)).toBeNull()
   expect(applyChange(before, { kind: 'rename', seed: 'gone', name: 'Rex' }, NOON)).toBeNull()
   expect(applyChange(null, { kind: 'rename', seed: 'b', name: 'Rex' }, NOON)).toBeNull()
+})
+
+// 'hat-10' rolls an uncommon capybara in a crown. You've earned Good friend's flower crown.
+const hatted = (hat?: string): Saved => ({
+  ...migrate(V1),
+  active: 'hat-10',
+  buddies: [{ seed: 'hat-10', soul: SOUL, retiredAt: null, counts: zeroCounts(), ...(hat === undefined ? {} : { hat }) }],
+  you: { lastDay: null, streak: 0, bestStreak: 0, days: 0, earned: { goodFriend: AT } },
+})
+
+test('a hat change saves a hat it can wear, saves its rolled hat as no choice, and refuses the rest', () => {
+  const crown = applyChange(hatted(), { kind: 'hat', seed: 'hat-10', hat: 'flowercrown' }, NOON)!
+  expect(crown.buddies[0]?.hat).toBe('flowercrown')
+  expect(crown.you).toEqual(hatted().you)
+  expect(applyChange(hatted(), { kind: 'hat', seed: 'hat-10', hat: 'none' }, NOON)?.buddies[0]?.hat).toBe('none')
+  const back = applyChange(hatted('flowercrown'), { kind: 'hat', seed: 'hat-10', hat: 'crown' }, NOON)!
+  expect('hat' in back.buddies[0]!).toBe(false)
+  // Already worn, not earned, and another buddy's rolled hat.
+  for (const hat of ['crown', 'laurel', 'halo'] as const) {
+    expect([hat, applyChange(hatted(), { kind: 'hat', seed: 'hat-10', hat }, NOON)]).toEqual([hat, null])
+  }
+  expect(applyChange(hatted(), { kind: 'hat', seed: 'gone', hat: 'none' }, NOON)).toBeNull()
+  expect(applyChange(null, { kind: 'hat', seed: 'hat-10', hat: 'none' }, NOON)).toBeNull()
+  // A field a newer build wrote survives.
+  const future = { ...hatted(), buddies: [{ ...hatted().buddies[0]!, xp: 7 }] } as unknown as Saved
+  expect(applyChange(future, { kind: 'hat', seed: 'hat-10', hat: 'none' }, NOON)?.buddies[0]).toMatchObject({ xp: 7 })
 })

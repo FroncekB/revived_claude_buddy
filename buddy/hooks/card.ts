@@ -8,8 +8,10 @@ import type { CardProgress, DexRow, JournalRow } from './layout'
 import { withCommas } from './ledger'
 import { nextLevelXp, xpForLevel } from './progress'
 import { RARITY, STATS } from './roll'
-import type { Bones, Hat, Rarity } from './roll'
+import type { Bones, Rarity } from './roll'
 import { spriteRows, topRow } from './sprites'
+import type { Wearable } from './sprites'
+import type { Dressed } from './toys'
 
 // The person's streak and the buddy's counts, for the card's last row.
 export type CardHistory = { you: You; counts: Counts }
@@ -31,7 +33,7 @@ const QUOTE_WIDTH = 44
 const JOURNAL_TOP = 76
 const JOURNAL_ROW = 22
 const JOURNAL_WORDS_X = PAD + 100
-const HAT_LABEL: Record<Hat, string> = {
+const HAT_LABEL: Record<Wearable, string> = {
   crown: 'Crown',
   tophat: 'Top hat',
   propeller: 'Propeller hat',
@@ -39,6 +41,12 @@ const HAT_LABEL: Record<Hat, string> = {
   wizard: 'Wizard hat',
   beanie: 'Beanie',
   tinyduck: 'Tiny duck',
+  hardhat: 'Hard hat',
+  nightcap: 'Nightcap',
+  flowercrown: 'Flower crown',
+  headphones: 'Headphones',
+  mortarboard: 'Mortarboard',
+  laurel: 'Laurel',
 }
 
 // The SVG is drawn as an image, blind to the theme: mid-tones that read on light and dark.
@@ -65,7 +73,7 @@ export function radarPoint(index: number, value: number): [number, number] {
 
 const xy = ([x, y]: [number, number]) => `${x.toFixed(1)},${y.toFixed(1)}`
 
-function label(bones: Bones, index: number): string {
+function label(bones: Dressed, index: number): string {
   const stat = STATS[index]!
   const [x, y] = radarPoint(index, LABEL_AT)
   const anchor = Math.abs(x - CX) < 1 ? 'middle' : x > CX ? 'start' : 'end'
@@ -82,7 +90,7 @@ function label(bones: Bones, index: number): string {
 }
 
 // The radar's marks in its own 400 by 280 box.
-function statChart(bones: Bones): string {
+function statChart(bones: Dressed): string {
   const color = FILL[bones.rarity]
   const ring = (value: number) => STATS.map((_, i) => xy(radarPoint(i, value))).join(' ')
   const grid = RINGS.map(v => `<polygon points="${ring(v)}" fill="none" stroke="${INK}" stroke-opacity="0.3"/>`)
@@ -103,7 +111,7 @@ const esc = (s: string) =>
 
 const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 
-function chips(bones: Bones): string[] {
+function chips(bones: Dressed): string[] {
   return [
     ...(bones.hat === 'none' ? [] : [HAT_LABEL[bones.hat]]),
     `${bones.eye} eyes`,
@@ -112,7 +120,7 @@ function chips(bones: Bones): string[] {
 }
 
 // A still portrait: the resting frame, hat on, eyes open. The card and the dex draw it.
-function stillRows(bones: Pick<Bones, 'species' | 'eye' | 'hat'>, stage: Stage): string[] {
+function stillRows(bones: Pick<Dressed, 'species' | 'eye' | 'hat'>, stage: Stage): string[] {
   const top = topRow({ hat: bones.hat, heartsFrame: null, sparkle: null })
   return spriteRows({ species: bones.species, stage, eye: bones.eye, frame: 0, top })
 }
@@ -129,7 +137,7 @@ function chipMarks(x: number, y: number, text: string, color: string): string[] 
 }
 
 // The whole card, top to bottom: name and stars, kind, portrait, quote, chips, radar, history.
-export function cardSvg(soul: Soul, bones: Bones, rerolls: number, history?: CardHistory, progress?: CardProgress): string {
+export function cardSvg(soul: Soul, bones: Dressed, rerolls: number, history?: CardHistory, progress?: CardProgress): string {
   const color = FILL[bones.rarity]
   const marks: string[] = [
     `<text x="${PAD}" y="44" font-size="22" font-weight="700" fill="${color}">${esc(soul.name)}</text>`,
@@ -260,7 +268,7 @@ export function journalAlt(name: string, rows: readonly JournalRow[]): string {
   return `${journalHeader(name)}. ${rows.map(r => `${capital(r.age.trim())}: ${r.text}.`).join(' ')}`
 }
 
-export function cardAlt(soul: Soul, bones: Bones, rerolls: number, history?: CardHistory, progress?: CardProgress): string {
+export function cardAlt(soul: Soul, bones: Dressed, rerolls: number, history?: CardHistory, progress?: CardProgress): string {
   const stars = RARITY[bones.rarity].stars
   return (
     `${soul.name}, ${bones.rarity} ${bones.species}, ${stars} star${stars === 1 ? '' : 's'}. ` +
@@ -281,7 +289,7 @@ function growthAlt(p: CardProgress): string {
   return `Level ${p.level}, ${p.stage}, ${xp}. ${earned}.`
 }
 
-export function statAlt(bones: Bones): string {
+export function statAlt(bones: Dressed): string {
   const each = STATS.map(s => {
     const note = s === bones.peak ? ' (highest)' : s === bones.low ? ' (lowest)' : ''
     return `${s} ${bones.stats[s]}${note}`

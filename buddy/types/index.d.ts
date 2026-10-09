@@ -98,6 +98,9 @@ export type Buddy = {
   journal?: Moment[]
   // Missing reads as zeros.
   bests?: Bests
+  // The hat it wears: a rolled or earned hat's id, or 'none' (Interaction spec section 2).
+  // Missing, or a hat it can't wear, reads as the hat it rolled.
+  hat?: string
 }
 
 // The `$.store` key `buddy` (Foundation spec section 1).
