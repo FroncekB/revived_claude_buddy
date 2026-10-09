@@ -109,7 +109,7 @@ Then:
 
 ### `/buddy rename <name>`
 
-`validName(name)` in `voice.ts`, taken out of `parseSoul` so hatching and renaming share it: one word, letters only, at most 12 characters, and not in `RESERVED_NAMES`.
+`validName(name)` in `voice.ts`, taken out of `parseSoul` so hatching and renaming share it: one word, letters only, at most 12 characters, and not in `RESERVED_NAMES`. Since a person now picks the name, `RESERVED_NAMES` also holds the headings prompts often open with, like `summary`, `background` and `requirements`.
 
 Replies:
 - not valid: `A name is one word of letters, at most 12.`
@@ -196,17 +196,17 @@ Otherwise there is no nudge this turn and nothing is called. The next turn can s
 
 It asks Haiku once, as a reaction (`ask` with `react`), with the persona and its mood and holiday lines:
 ```
-Claude just failed {tool} {n} times over its last two turns, and the developer may be stuck.
+Claude just failed the tool "{tool}" {n} times over its last two turns, and the developer may be stuck.
 Offer, in one line, to be their rubber duck: they can talk it through with you by starting a message with "{name},".
 ```
 If the model doesn't answer, the bubble shows the fallback: `{n} failed {tool} calls. Want to talk it through? Start with "{name},".` A reply that aborts the call wins, and the nudge shows nothing; so does a reply inside its 5 s floor, which asks nothing, and a swap during the call. A nudge whose answer comes back over an announcement is dropped, as a quip is.
 
-`{tool}` is the tool's name, with an MCP tool's `mcp__server__` prefix dropped: `Bash`, `Edit`, `create_issue`.
+`{tool}` is the tool's name, with an MCP tool's `mcp__server__` prefix dropped: `Bash`, `Edit`, `create_issue`. An MCP server names its own tools, so the name keeps only letters, digits, `_`, `.` and `-`, at most 40 of them, and is `tool` if nothing is left.
 
 **Duck mode.** When the nudge's bubble shows, `duckUntil` becomes now plus 15 minutes (`DUCK_MS`) and `duckTool` the tool. While `now < duckUntil`:
 - A talk's prompt carries one more line, and the talk moves `duckUntil` to 15 minutes from then:
   ```
-  You're the developer's rubber duck: {tool} kept failing. Ask one short question that helps them say what they expected and what happened instead. Don't guess at a fix; you can't see their code.
+  You're the developer's rubber duck: the tool "{tool}" kept failing. Ask one short question that helps them say what they expected and what happened instead. Don't guess at a fix; you can't see their code.
   ```
 - A rubber duck prop stands to the right of the buddy, in place of any holiday prop, and hides while a bubble is up, as props do (Alive section 6).
 

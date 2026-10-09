@@ -100,7 +100,7 @@ test('names that read as prompt openers are rejected, in any case', () => {
   expect(parseSoul('{"name": "fix", "personality": "x"}')).toBeNull()
   expect(parseSoul('{"name": "BUG", "personality": "x"}')).toBeNull()
   expect(parseSoul('{"name": "Pip", "personality": "x"}')).not.toBeNull()
-  expect(RESERVED_NAMES.size).toBe(29)
+  expect(RESERVED_NAMES.size).toBe(52)
   for (const name of ['P', 'Abcdefghijkl', 'mochi']) expect([name, validName(name)]).toEqual([name, true])
   for (const name of ['', 'Abcdefghijklm', 'R2D2', 'Sir Pip', 'Pip!']) {
     expect([name, validName(name)]).toEqual([name, false])

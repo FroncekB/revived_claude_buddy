@@ -7,9 +7,8 @@ import type { Bones } from './roll'
 import { totalCalls, withCommas } from './ledger'
 import { levelOf, nextLevelXp, stageOf, xpOf } from './progress'
 import { PAINT, faceFor } from './sprites'
-import type { Prop } from './sprites'
+import type { Dressed, Prop } from './sprites'
 import { dressed } from './toys'
-import type { Dressed } from './toys'
 
 // A stretch of one row in one color; no color is the text color.
 export type Run = { text: string; color?: string }

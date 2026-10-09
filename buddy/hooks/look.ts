@@ -8,7 +8,7 @@ import type { Bones } from './roll'
 import {
   CRUMBS, DUCK_PROP, HOLIDAY_HATS, POSE_EYE, PROPS, SNACK_ART, faceFor, frameAt, spriteRows, topRow,
 } from './sprites'
-import type { Pose, Prop, Wearable } from './sprites'
+import type { Pose, Prop, Worn } from './sprites'
 
 export const FLINCH_TICKS = 4
 export const CELEBRATE_TICKS = 6
@@ -23,7 +23,7 @@ export const NIGHT_SLEEP_TICKS = 120
 
 export type Scene = {
   // The hat may be an earned one: the debug tour shows them.
-  bones: Pick<Bones, 'species' | 'eye' | 'shiny'> & { hat: Wearable | 'none' }
+  bones: Pick<Bones, 'species' | 'eye' | 'shiny'> & { hat: Worn }
   // The stage the body is drawn at (Progression spec section 5).
   stage: Stage
   tick: number

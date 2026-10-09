@@ -4,10 +4,9 @@ import type { Buddy, Snack, You } from '../types'
 import { ACHIEVEMENTS, EARNED_HAT_NAME, earnedHats } from './achievements'
 import { bonesFor } from './progress'
 import { HATS, rollBones } from './roll'
-import type { Bones } from './roll'
 import { EARNED_HATS } from './sprites'
-import type { Wearable } from './sprites'
-import { RESERVED_NAMES, validName } from './voice'
+import type { Dressed, Wearable, Worn } from './sprites'
+import { RESERVED_NAMES, nth, validName } from './voice'
 
 // The answer to /buddy rename when `name` can't be the buddy's new name; null when it can. A
 // change of case alone is a rename.
@@ -24,12 +23,6 @@ export function renamePrompt(from: string, to: string): string {
 export function renameFallback(to: string): string {
   return `${to}. I like it.`
 }
-
-// A hat on a buddy's head, or none.
-export type Worn = Wearable | 'none'
-
-// A buddy's grown bones with the hat it wears in place of the one it rolled.
-export type Dressed = Omit<Bones, 'hat'> & { hat: Worn }
 
 // What each hat is called in a sentence.
 export const HAT_NAME: Record<Wearable, string> = {
@@ -121,9 +114,14 @@ const CALLED: Record<Snack, string> = {
 export const FULL_MS = 10 * 60_000
 export const FULL_LINES: readonly string[] = ['Still full, thanks.', 'One more bite and I pop.', 'Ask me again in a bit.']
 
+// The item of `list` a roll from 0 to 1 lands on.
+function pickFrom<T>(list: readonly T[], roll: number): T {
+  return list[Math.min(list.length - 1, Math.max(0, Math.floor(roll * list.length)))]!
+}
+
 // The snack for a roll from 0 to 1.
 export function snackOf(roll: number): Snack {
-  return SNACKS[Math.min(SNACKS.length - 1, Math.max(0, Math.floor(roll * SNACKS.length)))]!
+  return pickFrom(SNACKS, roll)
 }
 
 // `lastFedAt` is 0 for a buddy this session never fed.
@@ -132,7 +130,7 @@ export function isFull(lastFedAt: number, now: number): boolean {
 }
 
 export function fullLine(n: number): string {
-  return FULL_LINES[((n % FULL_LINES.length) + FULL_LINES.length) % FULL_LINES.length]!
+  return nth(FULL_LINES, n)
 }
 
 export function feedPrompt(snack: Snack): string {
@@ -187,9 +185,10 @@ export function readPlay(words: readonly string[]): { game?: Game; pick?: Throw 
 
 // One game, decided by `roll`, which gives a number from 0 to 1 each time it is called: the game
 // when none was named, then each side's die, call, flip or throw in the order the game needs them.
+// `dev…` is the developer's side and `buddy…` the buddy's; `told` speaks to the buddy, so there the
+// developer is "they".
 export function play(o: { name: string; game?: Game; pick?: Throw | Side; roll: () => number }): Played {
-  const pickFrom = <T>(list: readonly T[]): T => list[Math.min(list.length - 1, Math.floor(o.roll() * list.length))]!
-  const game = o.game ?? pickFrom(GAMES)
+  const game = o.game ?? pickFrom(GAMES, o.roll())
   const done = (outcome: Outcome, line: string, what: string): Played => ({
     game,
     outcome,
@@ -198,33 +197,33 @@ export function play(o: { name: string; game?: Game; pick?: Throw | Side; roll: 
   })
   const winner = (outcome: Outcome) => (outcome === 'win' ? `${o.name} wins.` : 'You win.')
   if (game === 'dice') {
-    const yours = 1 + Math.floor(o.roll() * 6)
-    const theirs = 1 + Math.floor(o.roll() * 6)
-    const what = `they rolled ${yours}, you rolled ${theirs}`
-    if (yours === theirs) return done('draw', `You both rolled ${yours}. A draw.`, what)
-    const outcome = theirs > yours ? 'win' : 'lose'
-    return done(outcome, `You rolled ${yours}; ${o.name} rolled ${theirs}. ${winner(outcome)}`, what)
+    const devRoll = 1 + Math.floor(o.roll() * 6)
+    const buddyRoll = 1 + Math.floor(o.roll() * 6)
+    const what = `they rolled ${devRoll}, you rolled ${buddyRoll}`
+    if (devRoll === buddyRoll) return done('draw', `You both rolled ${devRoll}. A draw.`, what)
+    const outcome = buddyRoll > devRoll ? 'win' : 'lose'
+    return done(outcome, `You rolled ${devRoll}; ${o.name} rolled ${buddyRoll}. ${winner(outcome)}`, what)
   }
   if (game === 'coin') {
     // You call it when you named a side; otherwise the buddy does.
     const youCall = o.pick === 'heads' || o.pick === 'tails'
-    const call = youCall ? (o.pick as Side) : pickFrom(SIDES)
-    const flip = pickFrom(SIDES)
+    const call = youCall ? (o.pick as Side) : pickFrom(SIDES, o.roll())
+    const flip = pickFrom(SIDES, o.roll())
     const outcome = (flip === call) === youCall ? 'lose' : 'win'
     const caller = youCall ? 'You' : o.name
     const what = `${youCall ? 'they' : 'you'} called ${call}, and it came up ${flip}`
     return done(outcome, `${caller} called ${call}. ${flip === 'heads' ? 'Heads' : 'Tails'}. ${winner(outcome)}`, what)
   }
-  const picked = !(THROWS as readonly (string | undefined)[]).includes(o.pick)
-  const yours = picked ? pickFrom(THROWS) : (o.pick as Throw)
-  const theirs = pickFrom(THROWS)
-  const what = `they threw ${yours}, you threw ${theirs}`
-  if (yours === theirs) {
-    return done('draw', `You both threw ${yours}${picked ? ' (yours picked for you)' : ''}. A draw.`, what)
+  const pickedForYou = !(THROWS as readonly (string | undefined)[]).includes(o.pick)
+  const devThrow = pickedForYou ? pickFrom(THROWS, o.roll()) : (o.pick as Throw)
+  const buddyThrow = pickFrom(THROWS, o.roll())
+  const what = `they threw ${devThrow}, you threw ${buddyThrow}`
+  if (devThrow === buddyThrow) {
+    return done('draw', `You both threw ${devThrow}${pickedForYou ? ' (yours picked for you)' : ''}. A draw.`, what)
   }
-  const outcome = BEATS[theirs] === yours ? 'win' : 'lose'
-  const mine = `You threw ${yours}${picked ? ' (picked for you)' : ''}`
-  return done(outcome, `${mine}; ${o.name} threw ${theirs}. ${winner(outcome)}`, what)
+  const outcome = BEATS[buddyThrow] === devThrow ? 'win' : 'lose'
+  const devLine = `You threw ${devThrow}${pickedForYou ? ' (picked for you)' : ''}`
+  return done(outcome, `${devLine}; ${o.name} threw ${buddyThrow}. ${winner(outcome)}`, what)
 }
 
 export function playPrompt(played: Played): string {
@@ -238,6 +237,5 @@ export const PLAY_FALLBACKS: Record<Outcome, readonly string[]> = {
 }
 
 export function playFallback(outcome: Outcome, n: number): string {
-  const pool = PLAY_FALLBACKS[outcome]
-  return pool[((n % pool.length) + pool.length) % pool.length]!
+  return nth(PLAY_FALLBACKS[outcome], n)
 }

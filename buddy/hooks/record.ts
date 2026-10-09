@@ -6,8 +6,9 @@ import { addCounts, localDay, visit, zeroCounts } from './ledger'
 import { applyMood, sulkFor, withSulk } from './mood'
 import { STAGES, grewMoments } from './progress'
 import { rollBones } from './roll'
+import type { Worn } from './sprites'
 import { readPlay, wearable, wornHat } from './toys'
-import type { Game, Side, Throw, Worn } from './toys'
+import type { Game, Side, Throw } from './toys'
 
 export const STORE_KEY = 'buddy'
 export const USAGE =

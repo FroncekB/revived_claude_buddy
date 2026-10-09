@@ -1,5 +1,6 @@
 // Break nudges (Interaction spec section 5): a run of main turns with no gap longer than 10
 // minutes, and when it has gone on long enough to suggest a break. Pure: no $.
+import { nth } from './voice'
 
 export const BREAK_GAP_MS = 10 * 60_000
 export const STRETCH_MS = 90 * 60_000
@@ -39,5 +40,5 @@ export const BREAK_LINES: readonly string[] = [
 
 // The `n`th break line, for a stretch `ms` long.
 export function breakLine(n: number, ms: number): string {
-  return BREAK_LINES[((n % BREAK_LINES.length) + BREAK_LINES.length) % BREAK_LINES.length]!.replace('{span}', spanText(ms))
+  return nth(BREAK_LINES, n).replace('{span}', spanText(ms))
 }

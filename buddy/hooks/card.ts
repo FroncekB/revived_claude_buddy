@@ -10,8 +10,7 @@ import { nextLevelXp, xpForLevel } from './progress'
 import { RARITY, STATS } from './roll'
 import type { Bones, Rarity } from './roll'
 import { spriteRows, topRow } from './sprites'
-import type { Wearable } from './sprites'
-import type { Dressed } from './toys'
+import type { Dressed, Wearable } from './sprites'
 
 // The person's streak and the buddy's counts, for the card's last row.
 export type CardHistory = { you: You; counts: Counts }

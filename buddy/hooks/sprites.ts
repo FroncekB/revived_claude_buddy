@@ -6,7 +6,7 @@ import { ADULT } from './art-adult'
 import { ELDER } from './art-elder'
 import { HATCHLING } from './art-hatchling'
 import type { HolidayId } from './calendar'
-import type { Hat, Species } from './roll'
+import type { Bones, Hat, Species } from './roll'
 
 export const SPRITE_W = 12
 export const BLANK = ' '.repeat(SPRITE_W)
@@ -75,6 +75,10 @@ export const EARNED_HAT_ART: Record<EarnedHat, string> = {
 
 // A hat a buddy can wear: one it rolled, or one you earned.
 export type Wearable = Hat | EarnedHat
+// A hat on a buddy's head, or none.
+export type Worn = Wearable | 'none'
+// A buddy's grown bones with the hat it wears in place of the one it rolled.
+export type Dressed = Omit<Bones, 'hat'> & { hat: Worn }
 const WEARABLE_ART: Record<Wearable, string> = { ...HAT_ART, ...EARNED_HAT_ART }
 
 export function hatArt(hat: Wearable): string {
@@ -235,7 +239,7 @@ export function spriteRows(o: { species: Species; stage: Stage; eye: string; fra
 
 // The hat row, the first that applies: hearts, a snack, confetti, zZ, a holiday hat, the hat, the sparkle.
 export function topRow(o: {
-  hat: Wearable | 'none'
+  hat: Worn
   heartsFrame: number | null
   sparkle: number | null
   snack?: string | null

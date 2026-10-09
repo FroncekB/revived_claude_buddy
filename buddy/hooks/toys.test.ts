@@ -15,6 +15,8 @@ test('a rename is refused with its reason, or allowed, a change of case included
   expect(renameRefusal('Pip', 'Pip')).toBe('Pip is already its name.')
   expect(renameRefusal('Claude', 'Pip')).toBe('Claude starts too many prompts to be a name.')
   expect(renameRefusal('FIX', 'Pip')).toBe('FIX starts too many prompts to be a name.')
+  // A heading a prompt opens with would swallow that prompt too.
+  expect(renameRefusal('Summary', 'Pip')).toBe('Summary starts too many prompts to be a name.')
   expect(renameRefusal('Sir Pip', 'Pip')).toBe('A name is one word of letters, at most 12.')
   expect(renameRefusal('Abcdefghijklm', 'Pip')).toBe('A name is one word of letters, at most 12.')
   expect(renamePrompt('Pip', 'Mochi')).toBe('The developer just renamed you from Pip to Mochi. React in one line.')

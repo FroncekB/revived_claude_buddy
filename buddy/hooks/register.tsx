@@ -8,6 +8,7 @@ import type { Stretch } from './breaks'
 import { dayInfo } from './calendar'
 import { cardAlt, cardSvg, dexAlt, dexSvg, journalAlt, journalSvg, meter } from './card'
 import { DUCK_MS, duckDue, duckFallback, duckLine, duckPrompt, failsByTool, shouldNudge } from './duck'
+import type { DuckDue } from './duck'
 import {
   MAX_QUEUED_TURNS, addCall, isRough, memoryLine, momentKey, noCalls, recall, talkMemories, turnFacts,
 } from './journal'
@@ -509,25 +510,27 @@ async function watchStretch($: EngineInterface, durationMs: number): Promise<boo
 // tool keeps failing, else a break nudge when one is due, else a quip. A turn with a nudge to make
 // waits for its own save first, which may announce something: the nudge then sees the announcement
 // and stays due, instead of being spent on a line the announcement replaces. `flushed` settles
-// whether the save worked or threw. Any other turn's quip goes at once.
+// whether the save worked or threw. Any other turn's quip goes at once. `ended` is the turn's
+// number, as turnNo counted it.
 async function respond(
   $: EngineInterface,
   summary: TurnSummary,
   facts: TurnFacts,
-  duck: { tool: string; n: number } | null,
+  duck: DuckDue | null,
   flushed: Promise<void>,
+  ended: number,
 ) {
-  const due = await watchStretch($, summary.durationMs)
-  if (duck || due) await flushed
-  if (duck && (await nudgeDuck($, duck))) return
+  const breakIsDue = await watchStretch($, summary.durationMs)
+  if (duck || breakIsDue) await flushed
+  if (duck && (await nudgeDuck($, duck, ended))) return
   if (await nudgeBreak($)) return
   await react($, summary, facts)
 }
 
 // The rubber-duck offer (Interaction spec section 4): one Haiku call in the turn's reaction slot,
-// past the quip cooldown but at most once in 30 minutes, and then duck mode. Returns whether it
-// took the turn's reaction slot.
-async function nudgeDuck($: EngineInterface, due: { tool: string; n: number }): Promise<boolean> {
+// ignoring the quip cooldown but at most once in 30 minutes, and then duck mode. Returns whether
+// it took the turn's reaction slot.
+async function nudgeDuck($: EngineInterface, duck: DuckDue, ended: number): Promise<boolean> {
   const saved = await read($, record)
   if (!saved || (await read($, hatching))) return false
   const now = await $.clock.now()
@@ -539,23 +542,24 @@ async function nudgeDuck($: EngineInterface, due: { tool: string; n: number }): 
     lastNudgeAt: await read($, lastNudgeAt),
   })
   if (!say) return false
-  // The same failures never nudge twice, and the next quip waits out a full cooldown.
-  prevFails = {}
+  // The same failures never nudge twice, and the next quip waits out a full cooldown. A turn that
+  // ended while this one's save was slow has put its own failures in prevFails; those stay.
+  if (turnNo === ended) prevFails = {}
   await update($, lastNudgeAt, () => now)
   await update($, lastQuipAt, () => now)
   const buddy = activeBuddy(saved)
   const name = buddy.soul.name
   const replied = await read($, lastReplyAt)
-  const text = await ask($, buddy, bonesFor(buddy), duckPrompt(name, due.tool, due.n), 'react')
+  const text = await ask($, buddy, bonesFor(buddy), duckPrompt(name, duck.tool, duck.n), 'react')
   // A reply that came in meanwhile wins, whether it cut the call short or, inside its 5 s floor,
   // asked nothing; so does a swap, which the offer was not for. An answer that comes back over an
   // announcement is dropped.
   if ((await read($, lastReplyAt)) !== replied) return true
   if ((await read($, record))?.active !== saved.active) return true
   if ((await newsShowing($)) !== null) return true
-  await showBubble($, text ?? duckFallback(name, due.tool, due.n))
+  await showBubble($, text ?? duckFallback(name, duck.tool, duck.n))
   const shown = await $.clock.now()
-  await update($, duckTool, () => due.tool)
+  await update($, duckTool, () => duck.tool)
   await update($, duckUntil, () => shown + DUCK_MS)
   return true
 }
@@ -981,7 +985,7 @@ export const register: Register = on => {
         failedTools = []
         turnCalls = noCalls()
         roughTurns = isRough(facts) ? roughTurns + 1 : 0
-        turnNo++
+        const ended = ++turnNo
         const turn: CountEvent = { kind: 'turn', reason: e.reason, durationMs: e.durationMs }
         const felt = turnMood(e.reason, e.durationMs, summary.failed.length)
         const kind = e.reason === 'error' ? 'flinch' : felt === 'longClean' ? 'celebrate' : null
@@ -989,7 +993,7 @@ export const register: Register = on => {
         const flushed = new Promise<void>(done => {
           later($, () => countAndFlush($, turn, felt ? [felt] : [], kind, facts).finally(done))
         })
-        later($, () => respond($, summary, facts, duck, flushed))
+        later($, () => respond($, summary, facts, duck, flushed, ended))
       }
     } catch {
       // A reaction is never worth breaking a turn over.

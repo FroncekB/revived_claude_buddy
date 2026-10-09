@@ -33,7 +33,7 @@ To install from a local copy of this repo instead, run `claude plugin marketplac
 | `/buddy journal [who]` | The moments it remembers, newest first, or another buddy's from the dex |
 | `/buddy dex` | Every buddy you've had, with its level and when it was with you |
 | `/buddy swap <who>` | Bring a buddy back from the dex, by name or number; the one here now retires |
-| `/buddy rename <name>` | A new name: one word, letters only, at most 12 characters |
+| `/buddy rename <name>` | A new name: one word, letters only, at most 12 characters, and not a word prompts often start with, like `Summary` |
 | `/buddy hat [hat]` | The hats it can wear, or put one on: the one it rolled, any you've earned, or `none` |
 | `/buddy mute` / `unmute` | Stop or resume its comments (it still answers when you talk to it) |
 | `/buddy off` | Hide it |
@@ -60,7 +60,7 @@ A mod runs inside Claude Code with your permissions, so here is exactly what thi
   - to offer to talk it through when a tool keeps failing, at most twice an hour
 
   Moods, reactions, holidays, the journal, levels, achievements, game results, break nudges and the line it says when a tool fails need no model call.
-- **What a turn comment sees.** Only the turn's outcome, how long it took, which tools ran or failed, the buddy's mood, whether today is a holiday or its hatch day, and now and then one of its journal moments. It never sees your prompt, Claude's answer, file contents or command arguments. The rubber-duck offer sees only the name of the tool that keeps failing and how often it failed.
+- **What a turn comment sees.** Only the turn's outcome, how long it took, which tools ran or failed, the buddy's mood, whether today is a holiday or its hatch day, and now and then one of its journal moments. It never sees your prompt, Claude's answer, file contents or command arguments. The rubber-duck offer sees the same mood and day, plus the name of the tool that keeps failing and how often it failed, and nothing else from the turn.
 - **Prompts addressed to it.** A prompt that starts with the buddy's name and a comma or colon (`Pip, hi`) is dropped before it reaches Claude, and the buddy answers it. Prompts that carry an attachment always go to Claude.
 - **What it saves.** One record in the mod's own store. For each buddy you've had: its seed, name, personality, hatch date, the time it was retired, the hat you chose for it, lifetime counts of turns, failed turns, longest turn, tool calls by kind, failed calls, pets and talks, its mood (two small numbers and when they last moved), its three other bests (the longest run of failed calls, the most calls in one turn and the longest rough stretch a clean turn ended), and its journal (up to 20 moments, each a kind, a number and a time, plus the tool group of a run of failed calls). Then the mode (on, muted or off), the reroll count, and your streak: the last day you visited, your current and best streak, and the days you've visited, and the achievements you've earned, each with when you earned it. Its XP, level and stage aren't saved: they're worked out from its counts. Never prompt text, answers, file contents or command arguments.
 - **Upgrading.** The record is now schema 2, and the first save after the update converts an older one. A session still open on 0.1.x doesn't know schema 2 and answers `Saved buddy uses schema 2; this mod knows 1.` until you reload it with `/reload-plugins`.

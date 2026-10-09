@@ -84,6 +84,17 @@ function model(on: On, soul: string | null, say: string | null): string[] {
   return prompts
 }
 
+// Answers every $.model.complete with `say`. Returns each call's system and prompt, for a test
+// that checks who the persona says the buddy is.
+function modelCalls(on: On, say: string): { system: string; prompt: string }[] {
+  const calls: { system: string; prompt: string }[] = []
+  on('model.complete', async (_$, e) => {
+    calls.push({ system: e.system ?? '', prompt: e.prompt })
+    return { value: ok(say) }
+  })
+  return calls
+}
+
 const runner = ($: Engine) => async (args: string) =>
   (await $.command.run({ command: 'buddy', args, ...RUN })).text
 
@@ -2196,13 +2207,15 @@ test('a rename is saved and answered, and the buddy then answers to its new name
   const shared = sharedStore(on, SAVED)
   const clock = world(on, null)
   engineBelow(on)
-  const prompts = model(on, null, 'Mochi it is.')
+  const calls = modelCalls(on, 'Mochi it is.')
   await $.session.start(START)
   await clock.settle()
   expect(await runner($)('rename Mochi')).toBe('Pip is now Mochi.')
   await clock.settle()
   expect(activeOf(shared.row)?.soul.name).toBe('Mochi')
-  expect(prompts).toEqual(['The developer just renamed you from Pip to Mochi. React in one line.'])
+  expect(calls.map(c => c.prompt)).toEqual(['The developer just renamed you from Pip to Mochi. React in one line.'])
+  // The reply comes from the buddy under its new name.
+  expect(calls[0]?.system).toMatch(/^You are Mochi, /)
   const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
   expect(await bubbleOf(ui)).toBe('Mochi it is.')
   expect(await ui.find({ text: /^ {2}Mochi {2}Lv 1 / })).toBeDefined()
@@ -2307,6 +2320,29 @@ test('a saved hat the buddy cannot wear, from an old or edited record, draws the
   expect((await drawnSprite(ui)).join('\n')).toContain(HAT_ART.crown)
 })
 
+test('a rename or a hat the store will not take lasts the session, and is still answered', async ($, on) => {
+  const shared = sharedStore(on, CROWNED)
+  const clock = world(on, null)
+  const calls = modelCalls(on, 'Noted.')
+  await $.session.start(START)
+  await clock.settle()
+  shared.refuse = true
+  expect(await runner($)('rename Mochi')).toBe('Could not save your buddy; it lives for this session only.')
+  await clock.settle()
+  expect(activeOf(shared.row)?.soul.name).toBe('Pip')
+  expect(calls.map(c => c.prompt)).toEqual(['The developer just renamed you from Pip to Mochi. React in one line.'])
+  expect(calls[0]?.system).toMatch(/^You are Mochi, /)
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await ui.find({ text: /^ {2}Mochi {2}Lv 1 / })).toBeDefined()
+  // Past the reply floor, so the hat's answer asks the model too.
+  await clock.advance(6_000)
+  expect(await runner($)('hat flower crown')).toBe('Could not save your buddy; it lives for this session only.')
+  await clock.settle()
+  expect(activeOf(shared.row)?.hat).toBeUndefined()
+  expect(calls.at(-1)?.prompt).toBe('The developer just put a flower crown on you. React in one line.')
+  expect((await drawnSprite(ui)).join('\n')).toContain(EARNED_HAT_ART.flowercrown)
+})
+
 test('a feed shows its snack, then crumbs, counts as a pet and asks once; fed again soon, the buddy is full', async ($, on) => {
   const shared = sharedStore(on, CROWNED)
   const clock = world(on, null)
@@ -2399,6 +2435,35 @@ test('a hidden buddy does not play', async ($, on) => {
   expect(await runner($)('play')).toBe('Pip is hidden. Run /buddy to bring it back.')
   await clock.settle()
   expect(prompts).toEqual([])
+})
+
+test('a feed, game, rename or hat while the egg is out is told to wait, and changes nobody', async ($, on) => {
+  const shared = sharedStore(on, TWO)
+  const clock = world(on, null)
+  let release!: () => void
+  const gate = new Promise<void>(resolve => {
+    release = resolve
+  })
+  on('model.complete', async () => {
+    await gate
+    return { value: failed() }
+  })
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  const run = runner($)
+  const rerolled = run('reroll confirm')
+  for (let i = 0; i < 100 && !(await ui.find({ text: /hatching/ })); i++) await Promise.resolve()
+  for (const args of ['feed', 'play dice', 'rename Rex', 'hat none']) {
+    expect([args, await run(args)]).toEqual([args, 'Wait for the egg to hatch.'])
+  }
+  release()
+  await rerolled
+  await clock.settle()
+  // Nobody was renamed, dressed, fed or played with.
+  const buddies = (shared.row as Saved).buddies
+  const changed = buddies.filter(b => b.soul.name === 'Rex' || b.hat !== undefined || b.counts.pets > 0)
+  expect(changed).toEqual([])
 })
 
 // A main turn `minutes` long, ending now.
@@ -2562,6 +2627,22 @@ test('a break due while a reply is at the model stays due, and comes at the next
   expect(isBreakLine(await saidNow($))).toBe(true)
 })
 
+test("a break's yawn never cuts the turn's flinch short: the break line shows under the flinch", async ($, on) => {
+  const clock = world(on, { buddy: LONG_DONE })
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  const short = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band(3, 80) })
+  const face = async () => (await short.findAll({ type: 'Text' }))[0]?.text ?? ''
+  // A 90-minute turn that errored: it flinches, and its break comes due.
+  await $.turn.complete({ ...turnOf(90), reason: 'error' as const })
+  await clock.settle()
+  expect(isBreakLine(await saidNow($))).toBe(true)
+  // 'hat-10' rolls a capybara: wide-eyed for the flinch, not closed for a yawn.
+  expect(await face()).toMatch(/^\(OooO\) {2}Pip/)
+})
+
 const OFFER = 'Want to talk it through?'
 // The rubber duck's yellow body in the band's prop column.
 const duckDrawn = async ($: Engine) => {
@@ -2638,6 +2719,7 @@ test('a second run of failures inside 30 minutes gets no offer; one after 30 doe
   await $.session.start(START)
   await clock.settle()
   const offers = () => prompts.filter(p => p.startsWith('Claude just failed'))
+  const quips = () => prompts.filter(p => p.startsWith('Claude just finished a turn'))
   await fail($, 3)
   await $.turn.complete(TURN)
   await clock.settle()
@@ -2647,6 +2729,8 @@ test('a second run of failures inside 30 minutes gets no offer; one after 30 doe
   await $.turn.complete({ ...TURN, turnId: 't2' })
   await clock.settle()
   expect(offers()).toHaveLength(1)
+  // The offer it couldn't make leaves the slot to a quip, past the cooldown and with failures to note.
+  expect(quips()).toHaveLength(1)
   // Not nudged, the last turn's 3 count with this one's.
   await clock.advance(21 * 60_000)
   await fail($, 3)
@@ -2797,4 +2881,134 @@ test('a swap while an offer is being asked for drops it: the buddy back is not p
   expect(await saidNow($)).toBe('Hello there.')
   await clock.advance(13_000)
   expect(await duckDrawn($)).toBe(false)
+})
+
+test('the failures an offer was made for never count toward the next one', async ($, on) => {
+  const clock = world(on, { buddy: CROWNED })
+  engineBelow(on)
+  const prompts = model(on, null, OFFER)
+  await $.session.start(START)
+  await clock.settle()
+  const offers = () => prompts.filter(p => p.startsWith('Claude just failed'))
+  await fail($, 3)
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(offers()).toHaveLength(1)
+  // Past the 30 minutes, one more failure: the 3 offered for are spent, so nothing is due.
+  await clock.advance(31 * 60_000)
+  await fail($, 1)
+  await $.turn.complete({ ...TURN, turnId: 't2' })
+  await clock.settle()
+  expect(offers()).toHaveLength(1)
+})
+
+test('an offer makes the next quip wait out a full cooldown', async ($, on) => {
+  const clock = world(on, { buddy: CROWNED })
+  engineBelow(on)
+  const prompts = model(on, null, OFFER)
+  await $.session.start(START)
+  await clock.settle()
+  const quips = () => prompts.filter(p => p.startsWith('Claude just finished a turn'))
+  await fail($, 3)
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(prompts).toEqual([duckPrompt('Pip', 'Bash', 3)])
+  // An errored turn always gets a quip once the cooldown allows: not a minute after the offer.
+  await clock.advance(60_000)
+  await $.turn.complete({ ...TURN, turnId: 't2', reason: 'error' as const })
+  await clock.settle()
+  expect(quips()).toHaveLength(0)
+  await clock.advance(7 * 60_000)
+  await $.turn.complete({ ...TURN, turnId: 't3', reason: 'error' as const })
+  await clock.settle()
+  expect(quips()).toHaveLength(1)
+})
+
+test("a turn that ends while an offer waits on its slow save keeps its own failures for the next offer", async ($, on) => {
+  const store = heldStore(on, CROWNED)
+  const clock = world(on, null)
+  engineBelow(on)
+  const prompts = model(on, null, OFFER)
+  await $.session.start(START)
+  await clock.settle()
+  const offers = () => prompts.filter(p => p.startsWith('Claude just failed'))
+  const failRead = () => $.tool.call({ tool: 'Read', file_path: '/x' })
+  // Bash fails 3 times, and the turn's save is held, so its offer waits for it.
+  await fail($, 3)
+  store.shared.held = true
+  await $.turn.complete(TURN)
+  await clock.settle()
+  // Meanwhile the next turn ends with 2 failed reads.
+  await failRead()
+  await failRead()
+  await $.turn.complete({ ...TURN, turnId: 't2' })
+  await clock.settle()
+  await idle()
+  store.release()
+  await clock.settle()
+  expect(offers()).toEqual([duckPrompt('Pip', 'Bash', 3)])
+  // Past the 30 minutes, one more failed read makes 3 with the 2 the offer left alone.
+  await clock.advance(31 * 60_000)
+  await failRead()
+  await $.turn.complete({ ...TURN, turnId: 't3' })
+  await clock.settle()
+  expect(offers()).toEqual([duckPrompt('Pip', 'Bash', 3), duckPrompt('Pip', 'Read', 3)])
+})
+
+test('an offer due on a turn whose slow save announces something waits for the announcement, and stays due', async ($, on) => {
+  // CROWNED has earned no long turn yet, so an 11-minute one announces Marathon; no break is due.
+  const store = heldStore(on, CROWNED)
+  const clock = world(on, null)
+  engineBelow(on)
+  const prompts = model(on, null, OFFER)
+  await $.session.start(START)
+  await clock.settle()
+  const offers = () => prompts.filter(p => p.startsWith('Claude just failed'))
+  await fail($, 3)
+  store.shared.held = true
+  await $.turn.complete(turnOf(11))
+  await clock.settle()
+  await idle()
+  // Nothing is asked while the turn's save is out.
+  expect(offers()).toEqual([])
+  store.release()
+  await clock.settle()
+  // The announcement has the bubble, and the offer was not spent on a line it replaced.
+  expect(await saidNow($)).toContain('Marathon')
+  expect(offers()).toEqual([])
+  await clock.advance(60_000)
+  expect(await duckDrawn($)).toBe(false)
+  // The next failing turn makes the offer, counting the 3 before.
+  await fail($, 1)
+  await $.turn.complete(turnOf(0.5, 't2'))
+  await clock.settle()
+  expect(offers()).toEqual([duckPrompt('Pip', 'Bash', 4)])
+  expect(await saidNow($)).toBe(OFFER)
+})
+
+test('an offer whose answer comes back over an announcement is dropped, with no duck mode', async ($, on) => {
+  const clock = world(on, { buddy: CROWNED })
+  engineBelow(on)
+  const held = heldOffer(on)
+  await $.session.start(START)
+  await clock.settle()
+  await fail($, 3)
+  await $.turn.complete(TURN)
+  await clock.advance(10)
+  await reached(held.prompts, 1)
+  expect(held.prompts).toEqual([duckPrompt('Pip', 'Bash', 3)])
+  // While the offer is at the model, an 11-minute turn ends and its save announces Marathon.
+  await $.turn.complete(turnOf(11, 't2'))
+  await clock.advance(10)
+  for (let i = 0; i < 20 && !(await saidNow($)).includes('Marathon'); i++) await idle()
+  expect(await saidNow($)).toContain('Marathon')
+  held.release()
+  await clock.settle()
+  expect(await saidNow($)).toContain('Marathon')
+  await clock.advance(60_000)
+  expect(await duckDrawn($)).toBe(false)
+  await $.prompt.submit({ text: 'Pip, any ideas?', wait: false, origin: { kind: 'composer' } })
+  await clock.settle()
+  expect(held.prompts.at(-1)).toContain('The developer says to you: any ideas?')
+  expect(held.prompts.at(-1)).not.toContain('rubber duck')
 })

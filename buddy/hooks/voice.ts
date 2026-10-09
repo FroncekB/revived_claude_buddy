@@ -147,12 +147,16 @@ export function hatchRequest(b: Bones): { system: string; prompt: string } {
   }
 }
 
-// Words a prompt opens with ("Claude, fix the test", "Note: ..."). A buddy with one of these
-// as its name would swallow real prompts, so hatching never accepts them. Lower case.
+// Words a prompt opens with ("Claude, fix the test", "Note: ...", "Summary: ..."). A buddy with
+// one of these as its name would swallow real prompts, so neither hatching nor /buddy rename
+// accepts them. Lower case.
 export const RESERVED_NAMES: ReadonlySet<string> = new Set([
   'claude', 'note', 'bug', 'todo', 'fix', 'task', 'context', 'question', 'update', 'error',
   'issue', 'test', 'plan', 'goal', 'edit', 'also', 'ok', 'okay', 'yes', 'no',
   'hey', 'hi', 'please', 'thanks', 'wait', 'next', 'now', 'so', 'lint',
+  'summary', 'background', 'requirements', 'constraints', 'important', 'remember', 'reminder', 'warning',
+  'problem', 'request', 'instructions', 'steps', 'example', 'notes', 'tldr', 'idea', 'help', 'review',
+  'feature', 'refactor', 'docs', 'btw', 'ps',
 ])
 
 // A name a buddy can have (base spec section 5): one word, letters only, at most 12 characters,
@@ -204,7 +208,8 @@ const CANNED: Record<StatName, readonly string[]> = {
   SNARK: ['Bold of you to call that a variable name.', 'I would have done it faster. Probably.', 'Oh good, more TODOs.'],
 }
 
-function nth(pool: readonly string[], n: number): string {
+// The `n`th line of `pool`, wrapping around for any whole `n`, negative ones too.
+export function nth(pool: readonly string[], n: number): string {
   return pool[((n % pool.length) + pool.length) % pool.length]!
 }
 
