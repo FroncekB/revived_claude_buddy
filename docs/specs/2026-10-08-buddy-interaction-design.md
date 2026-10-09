@@ -1,6 +1,6 @@
 # `buddy` Interaction — Design Spec
 
-**Status:** designed 2026-10-08; not built yet.
+**Status:** built 2026-10-08; live check pending. Plan: [`2026-10-08-buddy-interaction-plan.md`](2026-10-08-buddy-interaction-plan.md); its "Deliberate deviations" section lists ten small departures from this spec.
 **Author:** Brandon Froncek + Claude
 **Date:** 2026-10-08
 **Builds on:** [`2026-10-07-buddy-mod-design.md`](2026-10-07-buddy-mod-design.md) (the base spec), [`2026-10-07-buddy-foundation-design.md`](2026-10-07-buddy-foundation-design.md) (Foundation), [`2026-10-07-buddy-alive-design.md`](2026-10-07-buddy-alive-design.md) (Alive), [`2026-10-08-buddy-memory-design.md`](2026-10-08-buddy-memory-design.md) (Memory) and [`2026-10-08-buddy-progression-design.md`](2026-10-08-buddy-progression-design.md) (Progression). Section numbers below that start with "base", "Foundation", "Alive", "Memory" or "Progression" point there.

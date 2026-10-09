@@ -1,6 +1,6 @@
 {
   "name": "buddy",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "A seeded ASCII companion above the prompt, recreating the April Fools 2026 /buddy.",
   "author": { "name": "Brandon Froncek" },
   "types": "./types/index.d.ts"
