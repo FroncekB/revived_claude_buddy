@@ -2186,3 +2186,45 @@ test('a buddy at level 30 is drawn as its elder, on the band and on the card', a
   expect((await drawnSprite(ui)).slice(headRow(rest) + 1)).toEqual(body)
   expect(await cardText($)).toContain(body.join('\n'))
 })
+
+test('a rename is saved and answered, and the buddy then answers to its new name only', async ($, on) => {
+  const shared = sharedStore(on, SAVED)
+  const clock = world(on, null)
+  engineBelow(on)
+  const prompts = model(on, null, 'Mochi it is.')
+  await $.session.start(START)
+  await clock.settle()
+  expect(await runner($)('rename Mochi')).toBe('Pip is now Mochi.')
+  await clock.settle()
+  expect(activeOf(shared.row)?.soul.name).toBe('Mochi')
+  expect(prompts).toEqual(['The developer just renamed you from Pip to Mochi. React in one line.'])
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await bubbleOf(ui)).toBe('Mochi it is.')
+  expect(await ui.find({ text: /^ {2}Mochi {2}Lv 1 / })).toBeDefined()
+  expect(await $.prompt.submit({ text: 'Mochi, hi', wait: false, origin: { kind: 'composer' } })).toEqual({
+    drop: '(to Mochi)',
+  })
+  expect(await $.prompt.submit({ text: 'Pip, hi', wait: false, origin: { kind: 'composer' } })).toMatchObject({
+    text: 'Pip, hi',
+  })
+})
+
+test('a rename the name rules refuse says why and writes nothing; a hidden buddy is not renamed', async ($, on) => {
+  const shared = sharedStore(on, SAVED)
+  const clock = world(on, null)
+  const prompts = model(on, null, 'Hi.')
+  await $.session.start(START)
+  await clock.settle()
+  const writes = shared.writes
+  expect(await runner($)('rename Sir Pip')).toBe('A name is one word of letters, at most 12.')
+  expect(await runner($)('rename claude')).toBe('claude starts too many prompts to be a name.')
+  expect(await runner($)('rename Pip')).toBe('Pip is already its name.')
+  expect(await runner($)('rename')).toMatch(/^Usage: /)
+  await clock.settle()
+  expect(shared.writes).toBe(writes)
+  await runner($)('off')
+  expect(await runner($)('rename Mochi')).toBe('Pip is hidden. Run /buddy to bring it back.')
+  await clock.settle()
+  expect(activeOf(shared.row)?.soul.name).toBe('Pip')
+  expect(prompts).toEqual([])
+})

@@ -30,6 +30,7 @@ import { eggRows, frameAt } from './sprites'
 import type { Frame, Prop } from './sprites'
 import { bandSvg } from './svg'
 import { TOUR_STEPS, tourAt } from './tour'
+import { renameFallback, renamePrompt, renameRefusal } from './toys'
 import {
   HEART_TICKS,
   HELLO_PROMPT,
@@ -78,6 +79,7 @@ const CARD = 'card'
 const JOURNAL = 'journal'
 const DEX = 'dex'
 const NO_BUDDY = 'No buddy yet. Run /buddy to hatch one.'
+const EGG = 'Wait for the egg to hatch.'
 const SAVE_FAILED = 'Could not save your buddy; it lives for this session only.'
 
 type Look = {
@@ -418,16 +420,17 @@ async function ask(
   }
 }
 
-// Talk, pet and hello: answered even when muted, at most one model call per 5 s. A reply that
-// lands on an announcement follows it in the same bubble, so a pet that earns Good friend still
-// says so (Progression spec section 4).
-async function reply($: EngineInterface, who: Who, prompt: string) {
+// Talk, pet, hello and the toys: answered even when muted, at most one model call per 5 s. A reply
+// that lands on an announcement follows it in the same bubble, so a pet that earns Good friend
+// still says so (Progression spec section 4). `fallback` is said when the model isn't asked or
+// doesn't answer; without one, a canned line is.
+async function reply($: EngineInterface, who: Who, prompt: string, fallback?: string) {
   const bones = bonesFor(who)
   const now = await $.clock.now()
   const last = await read($, lastReplyAt)
   await update($, lastReplyAt, () => now)
   const text = now - last < REPLY_FLOOR_MS ? null : await ask($, who, bones, prompt, 'reply')
-  const line = text ?? cannedLine(bones, cannedCount++, Math.random())
+  const line = text ?? fallback ?? cannedLine(bones, cannedCount++, Math.random())
   const news = await newsShowing($)
   await showBubble($, news === null ? line : `${news} ${line}`, news ?? undefined)
 }
@@ -593,7 +596,7 @@ async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | un
     case 'reroll-confirm':
       return hatch($, 'reroll')
     case 'swap': {
-      if (await read($, hatching)) return 'Wait for the egg to hatch.'
+      if (await read($, hatching)) return EGG
       const found = findBuddy(saved, parsed.target)
       if (found.kind !== 'one') return notFound(saved, parsed.target, found, 'swap')
       if (found.seed === saved.active) return `${name} is already here.`
@@ -610,6 +613,18 @@ async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | un
       await update($, bubble, () => null)
       later($, () => reply($, back, HELLO_PROMPT))
       return note ?? `${back.soul.name} is back.`
+    }
+    case 'rename': {
+      if (await read($, hatching)) return EGG
+      if (saved.mode === 'off') return hidden
+      const refused = renameRefusal(parsed.name, name)
+      if (refused) return refused
+      const note = await commit($, { kind: 'rename', seed: buddy.seed, name: parsed.name })
+      // Refused: nothing was written or adopted.
+      if (note !== null && note !== SAVE_FAILED) return note
+      const renamed = shownBuddy((await read($, record)) ?? saved, buddy.seed)
+      later($, () => reply($, renamed, renamePrompt(name, parsed.name), renameFallback(parsed.name)))
+      return note ?? `${name} is now ${parsed.name}.`
     }
     case 'debug': {
       if (saved.mode === 'off') return hidden
@@ -722,7 +737,7 @@ export const register: Register = on => {
       await $.command.register({
         name: 'buddy',
         description: 'Hatch, pet, or manage your terminal buddy',
-        argumentHint: '[pet | card [who] | journal [who] | dex | swap <who> | mute | unmute | off | reroll [confirm]]',
+        argumentHint: '[pet | card [who] | journal [who] | dex | swap <who> | rename <name> | mute | unmute | off | reroll [confirm]]',
         immediate: true,
       })
     } catch {

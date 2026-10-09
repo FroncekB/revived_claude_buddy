@@ -153,6 +153,12 @@ export const RESERVED_NAMES: ReadonlySet<string> = new Set([
   'hey', 'hi', 'please', 'thanks', 'wait', 'next', 'now', 'so', 'lint',
 ])
 
+// A name a buddy can have (base spec section 5): one word, letters only, at most 12 characters,
+// and not a word prompts open with. Hatching and /buddy rename both hold to it.
+export function validName(name: string): boolean {
+  return /^[A-Za-z]{1,12}$/.test(name) && !RESERVED_NAMES.has(name.toLowerCase())
+}
+
 export function parseSoul(text: string): { name: string; personality: string } | null {
   const json = /\{[\s\S]*\}/.exec(text)?.[0]
   if (!json) return null
@@ -160,7 +166,7 @@ export function parseSoul(text: string): { name: string; personality: string } |
     const value = JSON.parse(json) as { name?: unknown; personality?: unknown }
     const name = typeof value.name === 'string' ? value.name.trim() : ''
     const personality = typeof value.personality === 'string' ? value.personality.trim() : ''
-    if (!/^[A-Za-z]{1,12}$/.test(name) || RESERVED_NAMES.has(name.toLowerCase())) return null
+    if (!validName(name)) return null
     if (personality.length === 0 || personality.length > 160) return null
     return { name, personality }
   } catch {

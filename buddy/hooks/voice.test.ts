@@ -5,7 +5,8 @@ import { rollBones } from './roll'
 import {
   BUBBLE_TICKS, FAIL_PLAIN, FAIL_SNARKY, FALLBACK_NAMES, MAX_SAY, QUIP_COOLDOWN_MS, RESERVED_NAMES, SAY_GOAL,
   bubbleTicks, cannedLine, cleanSay, failLine, fallbackSoul, hatchRequest, matchAddress, newsLine, parseSoul, personaSystem,
-  quipChance, quipCooldownMs, reactionPrompt, shouldFlag, shouldGreet, shouldQuip, streakGreeting, talkPrompt, withArticle,
+  quipChance, quipCooldownMs, reactionPrompt, shouldFlag, shouldGreet, shouldQuip, streakGreeting, talkPrompt, validName,
+  withArticle,
 } from './voice'
 import type { TurnSummary } from './voice'
 
@@ -100,6 +101,14 @@ test('names that read as prompt openers are rejected, in any case', () => {
   expect(parseSoul('{"name": "BUG", "personality": "x"}')).toBeNull()
   expect(parseSoul('{"name": "Pip", "personality": "x"}')).not.toBeNull()
   expect(RESERVED_NAMES.size).toBe(29)
+  for (const name of ['P', 'Abcdefghijkl', 'mochi']) expect([name, validName(name)]).toEqual([name, true])
+  for (const name of ['', 'Abcdefghijklm', 'R2D2', 'Sir Pip', 'Pip!']) {
+    expect([name, validName(name)]).toEqual([name, false])
+  }
+  for (const word of RESERVED_NAMES) {
+    expect([word, validName(word)]).toEqual([word, false])
+    expect([word, validName(word.toUpperCase())]).toEqual([word, false])
+  }
   for (const name of FALLBACK_NAMES) expect(RESERVED_NAMES.has(name.toLowerCase())).toBe(false)
   expect(FALLBACK_NAMES).toHaveLength(24)
 })

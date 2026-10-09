@@ -9,7 +9,7 @@ import { rollBones } from './roll'
 
 export const STORE_KEY = 'buddy'
 export const USAGE =
-  'Usage: /buddy [pet | card [who] | journal [who] | dex | swap <who> | mute | unmute | off | reroll [confirm]]'
+  'Usage: /buddy [pet | card [who] | journal [who] | dex | swap <who> | rename <name> | mute | unmute | off | reroll [confirm]]'
 
 // What the store holds, as this build reads it (Foundation spec section 1).
 export type Stored =
@@ -87,6 +87,8 @@ export type Change =
   | { kind: 'visit' }
   // A retired buddy made active again (Progression spec section 7).
   | { kind: 'swap'; seed: string }
+  // A new name for one buddy (Interaction spec section 2).
+  | { kind: 'rename'; seed: string; name: string }
 
 // Today's visit (Foundation spec section 3). A new day after two or more missed ones leaves the
 // active buddy sulking (Alive spec section 2), and after three or more it goes in that buddy's
@@ -204,11 +206,19 @@ export function applyChange(saved: Saved | null, change: Change, now: number): S
         ),
       }
     }
+    case 'rename': {
+      // No visit, as a mode change makes none: only the name moves.
+      if (!saved || !saved.buddies.some(b => b.seed === change.seed && b.soul.name !== change.name)) return null
+      return {
+        ...saved,
+        buddies: saved.buddies.map(b => (b.seed === change.seed ? { ...b, soul: { ...b.soul, name: change.name } } : b)),
+      }
+    }
   }
 }
 
 type Plain = 'show' | 'pet' | 'dex' | 'mute' | 'unmute' | 'off' | 'reroll' | 'reroll-confirm' | 'debug-off' | 'usage'
-export type Sub = Plain | 'card' | 'journal' | 'swap' | 'debug'
+export type Sub = Plain | 'card' | 'journal' | 'swap' | 'debug' | 'rename'
 
 // A /buddy command as parsed: the subcommand, and what it was given (Progression spec section 7).
 export type Parsed =
@@ -216,6 +226,8 @@ export type Parsed =
   | { sub: 'card' | 'journal'; target?: string }
   | { sub: 'swap'; target: string }
   | { sub: 'debug'; stage?: Stage }
+  // Everything after `rename`, as typed: validName refuses more than one word.
+  | { sub: 'rename'; name: string }
 
 const SIMPLE: readonly string[] = ['pet', 'dex', 'mute', 'unmute', 'off']
 // Subcommands that can name one buddy after them.
@@ -240,6 +252,7 @@ export function parseSub(args: string): Parsed {
     return stage ? { sub: 'debug', stage } : { sub: 'usage' }
   }
   if (first === 'swap') return words.length === 2 ? { sub: 'swap', target: words[1]! } : { sub: 'usage' }
+  if (first === 'rename') return words.length >= 2 ? { sub: 'rename', name: words.slice(1).join(' ') } : { sub: 'usage' }
   if (TARGETED.includes(first)) {
     const sub = first as 'card' | 'journal'
     if (words.length === 1) return { sub }

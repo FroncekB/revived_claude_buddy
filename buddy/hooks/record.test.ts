@@ -28,8 +28,11 @@ test('subcommands', () => {
   expect(parseSub('swap #2')).toEqual({ sub: 'swap', target: '#2' })
   expect(sub('swap')).toBe('usage')
   expect(sub('swap Pip now')).toBe('usage')
+  expect(parseSub('rename Mochi')).toEqual({ sub: 'rename', name: 'Mochi' })
+  expect(parseSub('RENAME  Sir   Pip')).toEqual({ sub: 'rename', name: 'Sir Pip' })
+  expect(sub('rename')).toBe('usage')
   expect(USAGE).toBe(
-    'Usage: /buddy [pet | card [who] | journal [who] | dex | swap <who> | mute | unmute | off | reroll [confirm]]',
+    'Usage: /buddy [pet | card [who] | journal [who] | dex | swap <who> | rename <name> | mute | unmute | off | reroll [confirm]]',
   )
   expect(sub('mute')).toBe('mute')
   expect(sub('unmute')).toBe('unmute')
@@ -154,6 +157,7 @@ test('fields this build does not know survive every change', () => {
     { kind: 'flush', pending: {}, turns: { s: [{ ...FACTS, failRun: 6 }] } },
     { kind: 'visit' },
     { kind: 'reroll', seed: 'n', soul: SOUL },
+    { kind: 'rename', seed: 's', name: 'Rex' },
   ]
   for (const change of changes) {
     const after = applyChange(future, change, NOON) as unknown as { buddies: unknown[] }
@@ -375,4 +379,17 @@ test('a swap on a new day keeps the streak but earns nothing; the next flush ear
   const flushed = applyChange(swapped, { kind: 'flush', pending: { a: ONE_TURN } }, NOON + 1_000)!
   expect(flushed.you.earned).toEqual({ regular: new Date(NOON + 1_000).toISOString() })
   expect(newsOf(swapped, flushed)?.earned).toEqual(['regular'])
+})
+
+test("a rename changes only that buddy's name, with no visit, and nothing when the name or seed is wrong", () => {
+  const before = pair(YESTERDAY)
+  const saved = applyChange(before, { kind: 'rename', seed: 'b', name: 'Mochi' }, NOON)!
+  expect(saved.buddies.map(b => b.soul)).toEqual([SOUL, { ...SOUL, name: 'Mochi' }])
+  expect(saved.you).toEqual(before.you)
+  expect(saved.active).toBe('b')
+  expect(applyChange(before, { kind: 'rename', seed: 'a', name: 'Rex' }, NOON)?.buddies[0]?.soul.name).toBe('Rex')
+  expect(applyChange(before, { kind: 'rename', seed: 'b', name: 'bix' }, NOON)?.buddies[1]?.soul.name).toBe('bix')
+  expect(applyChange(before, { kind: 'rename', seed: 'b', name: 'Bix' }, NOON)).toBeNull()
+  expect(applyChange(before, { kind: 'rename', seed: 'gone', name: 'Rex' }, NOON)).toBeNull()
+  expect(applyChange(null, { kind: 'rename', seed: 'b', name: 'Rex' }, NOON)).toBeNull()
 })
