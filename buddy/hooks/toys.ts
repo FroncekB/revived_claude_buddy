@@ -142,3 +142,102 @@ export function feedPrompt(snack: Snack): string {
 export function feedFallback(snack: Snack): string {
   return `Mm. Thanks for the ${snack}.`
 }
+
+// The games /buddy play knows, and the picks that name one.
+export type Game = 'dice' | 'coin' | 'rps'
+export type Throw = 'rock' | 'paper' | 'scissors'
+export type Side = 'heads' | 'tails'
+export const GAMES: readonly Game[] = ['dice', 'coin', 'rps']
+export const THROWS: readonly Throw[] = ['rock', 'paper', 'scissors']
+export const SIDES: readonly Side[] = ['heads', 'tails']
+// What each throw beats.
+const BEATS: Record<Throw, Throw> = { rock: 'scissors', scissors: 'paper', paper: 'rock' }
+const GAME_NAME: Record<Game, string> = { dice: 'dice', coin: 'a coin toss', rps: 'rock-paper-scissors' }
+
+// How a game went, from the buddy's side.
+export type Outcome = 'win' | 'lose' | 'draw'
+const TOLD: Record<Outcome, string> = { win: 'You won.', lose: 'They won.', draw: 'A draw.' }
+
+export type Played = {
+  game: Game
+  outcome: Outcome
+  // The command's answer.
+  line: string
+  // What happened, as the buddy is told it.
+  told: string
+}
+
+const pickGame = (word: string): Game | undefined =>
+  (THROWS as readonly string[]).includes(word) ? 'rps' : (SIDES as readonly string[]).includes(word) ? 'coin' : undefined
+
+// The words after `play`, lower-cased: a game, a pick that names its game, or a game and a pick
+// that fits it. Null for anything else.
+export function readPlay(words: readonly string[]): { game?: Game; pick?: Throw | Side } | null {
+  const [first, second, ...rest] = words
+  if (first === undefined) return {}
+  if (rest.length > 0) return null
+  if (second === undefined) {
+    if ((GAMES as readonly string[]).includes(first)) return { game: first as Game }
+    const game = pickGame(first)
+    return game ? { game, pick: first as Throw | Side } : null
+  }
+  const game = pickGame(second)
+  return game !== undefined && game === first ? { game, pick: second as Throw | Side } : null
+}
+
+// One game, decided by `roll`, which gives a number from 0 to 1 each time it is called: the game
+// when none was named, then each side's die, call, flip or throw in the order the game needs them.
+export function play(o: { name: string; game?: Game; pick?: Throw | Side; roll: () => number }): Played {
+  const any = <T>(list: readonly T[]): T => list[Math.min(list.length - 1, Math.floor(o.roll() * list.length))]!
+  const game = o.game ?? any(GAMES)
+  const done = (outcome: Outcome, line: string, what: string): Played => ({
+    game,
+    outcome,
+    line,
+    told: `You just played ${GAME_NAME[game]} with the developer: ${what}. ${TOLD[outcome]}`,
+  })
+  const winner = (outcome: Outcome) => (outcome === 'win' ? `${o.name} wins.` : 'You win.')
+  if (game === 'dice') {
+    const yours = 1 + Math.floor(o.roll() * 6)
+    const theirs = 1 + Math.floor(o.roll() * 6)
+    const what = `they rolled ${yours}, you rolled ${theirs}`
+    if (yours === theirs) return done('draw', `You both rolled ${yours}. A draw.`, what)
+    const outcome = theirs > yours ? 'win' : 'lose'
+    return done(outcome, `You rolled ${yours}; ${o.name} rolled ${theirs}. ${winner(outcome)}`, what)
+  }
+  if (game === 'coin') {
+    // You call it when you named a side; otherwise the buddy does.
+    const youCall = o.pick === 'heads' || o.pick === 'tails'
+    const call = youCall ? (o.pick as Side) : any(SIDES)
+    const flip = any(SIDES)
+    const outcome = (flip === call) === youCall ? 'lose' : 'win'
+    const caller = youCall ? 'You' : o.name
+    const what = `${youCall ? 'they' : 'you'} called ${call}, and it came up ${flip}`
+    return done(outcome, `${caller} called ${call}. ${flip === 'heads' ? 'Heads' : 'Tails'}. ${winner(outcome)}`, what)
+  }
+  const picked = !(THROWS as readonly (string | undefined)[]).includes(o.pick)
+  const yours = picked ? any(THROWS) : (o.pick as Throw)
+  const theirs = any(THROWS)
+  const what = `they threw ${yours}, you threw ${theirs}`
+  if (yours === theirs) {
+    return done('draw', `You both threw ${yours}${picked ? ' (yours picked for you)' : ''}. A draw.`, what)
+  }
+  const outcome = BEATS[theirs] === yours ? 'win' : 'lose'
+  const mine = `You threw ${yours}${picked ? ' (picked for you)' : ''}`
+  return done(outcome, `${mine}; ${o.name} threw ${theirs}. ${winner(outcome)}`, what)
+}
+
+export function playPrompt(played: Played): string {
+  return `${played.told} React in one line.`
+}
+
+export const PLAY_FALLBACKS: Record<Outcome, readonly string[]> = {
+  win: ['Ha! Again?', 'Undefeated. Mostly.'],
+  lose: ['Best two out of three.', 'I let you win.'],
+  draw: ['A draw. Suspicious.', 'Again. Now.'],
+}
+
+export function playFallback(outcome: Outcome, n: number): string {
+  const pool = PLAY_FALLBACKS[outcome]
+  return pool[((n % pool.length) + pool.length) % pool.length]!
+}

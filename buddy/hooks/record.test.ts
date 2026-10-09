@@ -20,6 +20,17 @@ test('subcommands', () => {
   expect(sub('  pet ')).toBe('pet')
   expect(sub('Feed')).toBe('feed')
   expect(sub('feed twice')).toBe('usage')
+  expect(parseSub('play')).toEqual({ sub: 'play' })
+  expect(parseSub('play Dice')).toEqual({ sub: 'play', game: 'dice' })
+  expect(parseSub('play coin')).toEqual({ sub: 'play', game: 'coin' })
+  expect(parseSub('play rps')).toEqual({ sub: 'play', game: 'rps' })
+  expect(parseSub('play ROCK')).toEqual({ sub: 'play', game: 'rps', pick: 'rock' })
+  expect(parseSub('play tails')).toEqual({ sub: 'play', game: 'coin', pick: 'tails' })
+  expect(parseSub('play rps scissors')).toEqual({ sub: 'play', game: 'rps', pick: 'scissors' })
+  expect(parseSub('play coin Heads')).toEqual({ sub: 'play', game: 'coin', pick: 'heads' })
+  for (const bad of ['play chess', 'play dice 4', 'play coin rock', 'play rps heads', 'play rps rock now']) {
+    expect([bad, sub(bad)]).toEqual([bad, 'usage'])
+  }
   expect(sub('CARD')).toBe('card')
   expect(sub('journal')).toBe('journal')
   expect(sub('dex')).toBe('dex')
@@ -36,7 +47,7 @@ test('subcommands', () => {
   expect(parseSub('hat')).toEqual({ sub: 'hat' })
   expect(parseSub('HAT Flower  Crown')).toEqual({ sub: 'hat', hat: 'Flower Crown' })
   expect(USAGE).toBe(
-    'Usage: /buddy [pet | feed | card [who] | journal [who] | dex | swap <who> | rename <name> | hat [hat] | mute | unmute | off | reroll [confirm]]',
+    'Usage: /buddy [pet | feed | play [game] | card [who] | journal [who] | dex | swap <who> | rename <name> | hat [hat] | mute | unmute | off | reroll [confirm]]',
   )
   expect(sub('mute')).toBe('mute')
   expect(sub('unmute')).toBe('unmute')

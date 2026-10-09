@@ -6,7 +6,7 @@ import type { Moment, Saved } from '../types'
 import { SHIMMER } from './layout'
 import { zeroCounts } from './ledger'
 import { CRUMBS, EARNED_HAT_ART, HAT_ART, HOLIDAY_HATS, SNACK_ART, bodyRows, fillEyes, headRow } from './sprites'
-import { FULL_LINES, SNACKS, feedPrompt } from './toys'
+import { FULL_LINES, PLAY_FALLBACKS, SNACKS, feedPrompt } from './toys'
 import { TOUR_TICKS } from './tour'
 import { FAIL_PLAIN, FAIL_SNARKY, FALLBACK_NAMES } from './voice'
 
@@ -1207,6 +1207,7 @@ test("the persona hears the buddy's mood and the day", async ($, on) => {
 const SOOTHERS: [string, ($: Engine) => Promise<unknown>][] = [
   ['a pet', $ => runner($)('pet')],
   ['a feed', $ => runner($)('feed')],
+  ['a game', $ => runner($)('play dice')],
   ['a talk', $ => $.prompt.submit({ text: 'Pip, sorry I was away.', wait: false, origin: { kind: 'composer' } })],
 ]
 
@@ -2340,6 +2341,60 @@ test('a hidden buddy is not fed', async ($, on) => {
   const prompts = model(on, null, 'Crunchy.')
   await $.session.start(START)
   expect(await runner($)('feed')).toBe('Pip is hidden. Run /buddy to bring it back.')
+  await clock.settle()
+  expect(prompts).toEqual([])
+})
+
+test('a game answers its result at once, counts as a pet and asks once; inside 5 s its fallback is about the game', async ($, on) => {
+  const shared = sharedStore(on, CROWNED)
+  const clock = world(on, null)
+  const prompts = model(on, null, 'Rematch.')
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await runner($)('play rps rock')).toMatch(
+    /^(You threw rock; Pip threw (paper|scissors)\. (Pip wins|You win)\.|You both threw rock\. A draw\.)$/,
+  )
+  await clock.settle()
+  expect(prompts).toHaveLength(1)
+  expect(prompts[0]).toMatch(/^You just played rock-paper-scissors with the developer: they threw rock, you threw \w+\. /)
+  expect(prompts[0]).toMatch(/\. (You won|They won|A draw)\. React in one line\.$/)
+  expect(activeOf(shared.row)?.counts.pets).toBe(1)
+  expect(await bubbleOf(ui)).toBe('Rematch.')
+  expect(await runner($)('play coin')).toMatch(/^Pip called (heads|tails)\. (Heads|Tails)\. (Pip wins|You win)\.$/)
+  await clock.settle()
+  expect(prompts).toHaveLength(1)
+  expect(Object.values(PLAY_FALLBACKS).flat()).toContain(await bubbleOf(ui))
+  expect(activeOf(shared.row)?.counts.pets).toBe(2)
+})
+
+// Math.random can't be stubbed in a test, so this plays until it has seen a win and a game that
+// wasn't one. The buddy wins a game of dice 15 times in 36, so 40 games miss either about once in
+// a hundred million runs.
+test('the buddy celebrates a game it wins, and only one it wins', async ($, on) => {
+  const clock = world(on, { buddy: CROWNED })
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  const seen = new Set<boolean>()
+  for (let i = 0; i < 40 && seen.size < 2; i++) {
+    const won = ((await runner($)('play dice')) ?? '').endsWith('Pip wins.')
+    await clock.settle()
+    const sprite = (await drawnSprite(ui)).join('\n')
+    expect([i, CONFETTI_ROWS.some(row => sprite.includes(row))]).toEqual([i, won])
+    seen.add(won)
+    // Past the celebration's 3 seconds.
+    await clock.advance(4_000)
+  }
+  expect(seen.size).toBe(2)
+})
+
+test('a hidden buddy does not play', async ($, on) => {
+  const clock = world(on, { buddy: { ...SAVED, mode: 'off' } })
+  const prompts = model(on, null, 'Rematch.')
+  await $.session.start(START)
+  expect(await runner($)('play')).toBe('Pip is hidden. Run /buddy to bring it back.')
   await clock.settle()
   expect(prompts).toEqual([])
 })

@@ -31,8 +31,8 @@ import type { Frame, Prop } from './sprites'
 import { bandSvg } from './svg'
 import { TOUR_STEPS, tourAt } from './tour'
 import {
-  dressed, feedFallback, feedPrompt, fullLine, hatChoice, hatFallback, hatList, hatPrompt, isFull, renameFallback,
-  renamePrompt, renameRefusal, snackOf, wearable, woreLine, wornHat,
+  dressed, feedFallback, feedPrompt, fullLine, hatChoice, hatFallback, hatList, hatPrompt, isFull, play, playFallback,
+  playPrompt, renameFallback, renamePrompt, renameRefusal, snackOf, wearable, woreLine, wornHat,
 } from './toys'
 import {
   HEART_TICKS,
@@ -580,6 +580,15 @@ async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | un
       later($, () => soothe($, { kind: 'pet' }, buddy, feedPrompt(snack), feedFallback(snack)))
       return undefined
     }
+    case 'play': {
+      if (await read($, hatching)) return EGG
+      if (saved.mode === 'off') return hidden
+      const played = play({ name, game: parsed.game, pick: parsed.pick, roll: Math.random })
+      if (played.outcome === 'win') await feel($, [], 'celebrate')
+      // Care, like a pet: counted, it eases a sulk, then the buddy has its say about the game.
+      later($, () => soothe($, { kind: 'pet' }, buddy, playPrompt(played), playFallback(played.outcome, cannedCount++)))
+      return played.line
+    }
     case 'card': {
       const target = targetOf(saved, parsed.target, 'card')
       if ('reply' in target) return target.reply
@@ -780,7 +789,7 @@ export const register: Register = on => {
         name: 'buddy',
         description: 'Hatch, pet, or manage your terminal buddy',
         argumentHint:
-          '[pet | feed | card [who] | journal [who] | dex | swap <who> | rename <name> | hat [hat] | mute | unmute | off | reroll [confirm]]',
+          '[pet | feed | play [game] | card [who] | journal [who] | dex | swap <who> | rename <name> | hat [hat] | mute | unmute | off | reroll [confirm]]',
         immediate: true,
       })
     } catch {

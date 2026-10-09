@@ -4,8 +4,9 @@ import type { Buddy, You } from '../types'
 import { zeroCounts } from './ledger'
 import { bonesFor } from './progress'
 import {
-  FULL_LINES, FULL_MS, HAT_NAME, SNACKS, dressed, feedFallback, feedPrompt, fullLine, hatChoice, hatFallback, hatList,
-  hatPrompt, isFull, renameFallback, renamePrompt, renameRefusal, snackOf, wearable, woreLine, wornHat,
+  FULL_LINES, FULL_MS, HAT_NAME, PLAY_FALLBACKS, SNACKS, THROWS, dressed, feedFallback, feedPrompt, fullLine, hatChoice,
+  hatFallback, hatList, hatPrompt, isFull, play, playFallback, playPrompt, renameFallback, renamePrompt, renameRefusal,
+  snackOf, wearable, woreLine, wornHat,
 } from './toys'
 
 test('a rename is refused with its reason, or allowed, a change of case included', () => {
@@ -101,4 +102,87 @@ test('a buddy fed in the last 10 minutes is full, and says so in turn', () => {
   expect(isFull(NOW - FULL_MS + 1, NOW)).toBe(true)
   expect(isFull(NOW - FULL_MS, NOW)).toBe(false)
   expect([0, 1, 2, 3].map(fullLine)).toEqual([...FULL_LINES, FULL_LINES[0]])
+})
+
+// Rolls that come back in the order given, as a game draws them.
+const rolls = (...r: number[]) => {
+  let i = 0
+  return () => r[i++] ?? 0
+}
+
+test('dice: the higher roll wins and the same roll is a draw, told from the buddy side', () => {
+  // A die rolls 1 + floor(6r): 0.5 is a 4, 0.9 a 6, 0.4 and 0.34 both a 3.
+  expect(play({ name: 'Pip', game: 'dice', roll: rolls(0.5, 0.9) })).toEqual({
+    game: 'dice',
+    outcome: 'win',
+    line: 'You rolled 4; Pip rolled 6. Pip wins.',
+    told: 'You just played dice with the developer: they rolled 4, you rolled 6. You won.',
+  })
+  expect(play({ name: 'Pip', game: 'dice', roll: rolls(0.9, 0.5) })).toMatchObject({
+    outcome: 'lose',
+    line: 'You rolled 6; Pip rolled 4. You win.',
+  })
+  expect(play({ name: 'Pip', game: 'dice', roll: rolls(0.4, 0.34) })).toMatchObject({
+    outcome: 'draw',
+    line: 'You both rolled 3. A draw.',
+    told: 'You just played dice with the developer: they rolled 3, you rolled 3. A draw.',
+  })
+})
+
+test('a coin: you call it when you name a side, else the buddy does, and the caller wins on a match', () => {
+  // A side is heads under 0.5, tails from 0.5.
+  expect(play({ name: 'Pip', game: 'coin', pick: 'heads', roll: rolls(0.7) })).toEqual({
+    game: 'coin',
+    outcome: 'win',
+    line: 'You called heads. Tails. Pip wins.',
+    told: 'You just played a coin toss with the developer: they called heads, and it came up tails. You won.',
+  })
+  expect(play({ name: 'Pip', game: 'coin', pick: 'tails', roll: rolls(0.7) }).line).toBe(
+    'You called tails. Tails. You win.',
+  )
+  expect(play({ name: 'Pip', game: 'coin', roll: rolls(0.7, 0.7) })).toMatchObject({
+    outcome: 'win',
+    line: 'Pip called tails. Tails. Pip wins.',
+    told: 'You just played a coin toss with the developer: you called tails, and it came up tails. You won.',
+  })
+  expect(play({ name: 'Pip', game: 'coin', roll: rolls(0.7, 0.2) })).toMatchObject({
+    outcome: 'lose',
+    line: 'Pip called tails. Heads. You win.',
+  })
+})
+
+test('rock-paper-scissors: every pair of throws, and a throw picked for you', () => {
+  // A throw is rock under 1/3, paper under 2/3, scissors above.
+  expect(play({ name: 'Pip', game: 'rps', pick: 'rock', roll: rolls(0.9) })).toEqual({
+    game: 'rps',
+    outcome: 'lose',
+    line: 'You threw rock; Pip threw scissors. You win.',
+    told: 'You just played rock-paper-scissors with the developer: they threw rock, you threw scissors. They won.',
+  })
+  const beats = ['rock>scissors', 'scissors>paper', 'paper>rock']
+  for (const mine of THROWS) {
+    for (const [j, theirs] of THROWS.entries()) {
+      const { outcome } = play({ name: 'Pip', game: 'rps', pick: mine, roll: rolls((j + 0.5) / 3) })
+      const expected = mine === theirs ? 'draw' : beats.includes(`${mine}>${theirs}`) ? 'lose' : 'win'
+      expect([mine, theirs, outcome]).toEqual([mine, theirs, expected])
+    }
+  }
+  expect(play({ name: 'Pip', game: 'rps', roll: rolls(0, 0.4) }).line).toBe(
+    'You threw rock (picked for you); Pip threw paper. Pip wins.',
+  )
+  expect(play({ name: 'Pip', game: 'rps', roll: rolls(0.4, 0.4) }).line).toBe(
+    'You both threw paper (yours picked for you). A draw.',
+  )
+})
+
+test('no game named picks one; the prompt and the fallbacks follow the outcome', () => {
+  expect(play({ name: 'Pip', roll: rolls(0, 0.5, 0.5) }).game).toBe('dice')
+  expect(play({ name: 'Pip', roll: rolls(0.5, 0.7, 0.7) }).game).toBe('coin')
+  expect(play({ name: 'Pip', roll: rolls(0.99, 0, 0) }).game).toBe('rps')
+  const played = play({ name: 'Pip', game: 'dice', roll: rolls(0.5, 0.9) })
+  expect(playPrompt(played)).toBe(`${played.told} React in one line.`)
+  expect([0, 1, 2].map(n => playFallback('win', n))).toEqual(['Ha! Again?', 'Undefeated. Mostly.', 'Ha! Again?'])
+  expect(playFallback('lose', 1)).toBe('I let you win.')
+  expect(playFallback('draw', 0)).toBe('A draw. Suspicious.')
+  expect(Object.values(PLAY_FALLBACKS).flat()).toHaveLength(6)
 })
