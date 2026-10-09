@@ -10,6 +10,8 @@ import type { Pose, Prop, Wearable } from './sprites'
 
 export const FLINCH_TICKS = 4
 export const CELEBRATE_TICKS = 6
+// A yawn before a break nudge (Interaction spec section 5).
+export const YAWN_TICKS = 4
 // A snack is on the hat row for 5 ticks, the last 2 of them as crumbs (Interaction spec section 2).
 export const SNACK_TICKS = 5
 export const CRUMB_TICKS = 2
@@ -24,9 +26,9 @@ export type Scene = {
   stage: Stage
   tick: number
   mood: MoodName
-  // A flinch or celebrate still running. Only the debug tour poses 'sleep'; otherwise sleep
+  // A flinch, celebrate or yawn still running. Only the debug tour poses 'sleep'; otherwise sleep
   // comes from idle time.
-  pose: Pose | null
+  pose: Pose | 'yawn' | null
   idleTicks: number
   night: boolean
   holiday: Holiday | null
@@ -53,7 +55,8 @@ function snackRow(snack: Scene['snack'], tick: number): string | null {
 
 export function draw(s: Scene): Drawn {
   const asleep = isAsleep(s)
-  const pose: Pose | null = asleep ? 'sleep' : s.pose
+  // A yawn is the sleep frame with its closed eyes, awake: no zZ.
+  const pose: Pose | null = asleep || s.pose === 'yawn' ? 'sleep' : s.pose
   const { frame, blink } = frameAt(s.tick)
   const eye = pose ? POSE_EYE[pose] : blink ? '-' : s.mood === 'neutral' ? s.bones.eye : MOOD_EYE[s.mood]
   const top = topRow({

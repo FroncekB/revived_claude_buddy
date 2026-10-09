@@ -1419,17 +1419,18 @@ test('a quip with nothing to echo remembers some of the time, never every time',
   const prompts = model(on, null, 'Hm.')
   await $.session.start(START)
   await clock.settle()
-  // Errored turns with no calls: each gets a quip, and none echoes a kind of memory.
+  // Errored turns with no calls: each gets a quip, and none echoes a kind of memory. Four minutes
+  // apart they are one long stretch, so the turns 92 and 184 minutes in get a break nudge instead.
   for (let i = 0; i < 60; i++) {
     await $.turn.complete({ ...TURN, turnId: `t${i}`, reason: 'error' })
     await clock.settle()
     await clock.advance(4 * 60_000)
   }
-  expect(prompts).toHaveLength(60)
-  // At 0.30, no memory in 60 quips comes about once in two billion runs, and one in all 60 never.
+  expect(prompts).toHaveLength(58)
+  // At 0.30, no memory in 58 quips comes about once in a billion runs, and one in all 58 never.
   const remembered = prompts.filter(p => p.includes('\nA memory (')).length
   expect(remembered).toBeGreaterThan(0)
-  expect(remembered).toBeLessThan(60)
+  expect(remembered).toBeLessThan(58)
 })
 
 test("a talk's prompt carries the three newest memories", async ($, on) => {
@@ -2397,4 +2398,107 @@ test('a hidden buddy does not play', async ($, on) => {
   expect(await runner($)('play')).toBe('Pip is hidden. Run /buddy to bring it back.')
   await clock.settle()
   expect(prompts).toEqual([])
+})
+
+// A main turn `minutes` long, ending now.
+const turnOf = (minutes: number, turnId = 't1') => ({ ...TURN, turnId, durationMs: minutes * 60_000 })
+// Every break line opens with a yawn, and nothing else the buddy says does.
+const isBreakLine = (text: string) => text.startsWith('*yawn* ')
+// The bubble's words now, from a band mounted just to look: a band left mounted redraws on every
+// tick, which makes an advance of an hour or more slow.
+async function saidNow($: Engine): Promise<string> {
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  const said = await bubbleOf(ui)
+  await ui.unmount()
+  return said
+}
+// CROWNED, with Marathon and Ultramarathon already earned, so a long turn announces nothing.
+const EARNED_AT = '2026-10-01T12:00:00.000Z'
+const LONG_DONE: Saved = {
+  ...CROWNED,
+  you: { ...CROWNED.you, earned: { goodFriend: EARNED_AT, marathon: EARNED_AT, ultramarathon: EARNED_AT } },
+}
+
+test('after 90 minutes of turns with no long gap the buddy yawns and suggests a break, in place of a quip', async ($, on) => {
+  const clock = world(on, { buddy: LONG_DONE })
+  engineBelow(on)
+  const prompts = model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  const short = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band(3, 80) })
+  const face = async () => (await short.findAll({ type: 'Text' }))[0]?.text ?? ''
+  // 85 minutes: not yet.
+  await $.turn.complete(turnOf(85))
+  await clock.settle()
+  expect(await bubbleOf(ui)).toBe('')
+  // A 4-minute gap, then 1 more: 90 minutes since the stretch began.
+  await clock.advance(5 * 60_000)
+  const asked = prompts.length
+  await $.turn.complete(turnOf(1, 't2'))
+  await clock.settle()
+  const said = await bubbleOf(ui)
+  expect(isBreakLine(said)).toBe(true)
+  expect(said).toContain('90 minutes')
+  expect(prompts).toHaveLength(asked)
+  // 'hat-10' rolls a capybara with · eyes: closed for the yawn, with no zZ, then open again.
+  expect(await face()).toMatch(/^\(-oo-\) {2}Pip/)
+  expect(await face()).not.toContain('zZ')
+  await clock.advance(2_000)
+  expect(await face()).toMatch(/^\(·oo·\) {2}Pip/)
+})
+
+test('a gap of more than 10 minutes starts the stretch over', async ($, on) => {
+  const clock = world(on, { buddy: LONG_DONE })
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  // 85 minutes, then 11 minutes away: the 96 minutes since it began are two stretches.
+  await $.turn.complete(turnOf(85))
+  await clock.advance(11 * 60_000)
+  await $.turn.complete(turnOf(0.5, 't2'))
+  await clock.settle()
+  expect(await bubbleOf(ui)).toBe('')
+})
+
+test('a stretch that runs on is nudged again 90 minutes after the last nudge, and not before', async ($, on) => {
+  const clock = world(on, { buddy: LONG_DONE })
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  // One turn of 90 minutes is due at its end.
+  await $.turn.complete(turnOf(90))
+  await clock.settle()
+  expect(isBreakLine(await saidNow($))).toBe(true)
+  await clock.advance(30 * 60_000)
+  await $.turn.complete(turnOf(29, 't2'))
+  await clock.settle()
+  expect(isBreakLine(await saidNow($))).toBe(false)
+  await clock.advance(60 * 60_000)
+  await $.turn.complete(turnOf(59, 't3'))
+  await clock.settle()
+  const said = await saidNow($)
+  expect(isBreakLine(said)).toBe(true)
+  expect(said).toContain('3 hours')
+})
+
+test('a break due while muted waits, and comes at the first turn end after unmuting', async ($, on) => {
+  const clock = world(on, { buddy: LONG_DONE })
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  await runner($)('mute')
+  await $.turn.complete(turnOf(95))
+  await clock.settle()
+  expect(await bubbleOf(ui)).toBe('')
+  await runner($)('unmute')
+  await clock.advance(60_000)
+  await $.turn.complete(turnOf(0.5, 't2'))
+  await clock.settle()
+  expect(isBreakLine(await bubbleOf(ui))).toBe(true)
 })

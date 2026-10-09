@@ -14,7 +14,9 @@ import {
 } from './layout'
 import { addCounts, countEvent, mergePending, toolGroup, zeroCounts } from './ledger'
 import type { CountEvent } from './ledger'
-import { CELEBRATE_TICKS, FLINCH_TICKS, SNACK_TICKS, draw, portrait } from './look'
+import { breakDue, breakLine, nextStretch } from './breaks'
+import type { Stretch } from './breaks'
+import { CELEBRATE_TICKS, FLINCH_TICKS, SNACK_TICKS, YAWN_TICKS, draw, portrait } from './look'
 import type { Scene } from './look'
 import { MAX_QUEUED_MOOD, applyMood, moodLine, moodOf, turnMood } from './mood'
 import type { MoodName } from './mood'
@@ -129,6 +131,9 @@ let recalled: Record<string, number> = {}
 // failed call's line can run after its turn has ended, so it carries its turn's number.
 let turnNo = 0
 let flaggedTurn = -1
+// The run of main turns a break nudge watches (Interaction spec section 5). Lost on a reload, which
+// starts it over: at worst a nudge comes later.
+let stretch: Stretch | null = null
 // The last commit this session started. The next one waits for it to settle.
 let lastCommit: Promise<unknown> = Promise.resolve()
 
@@ -236,18 +241,22 @@ async function count($: EngineInterface, event: CountEvent) {
   await update($, pending, p => ({ ...p, [seed]: countEvent(p[seed] ?? zeroCounts(), event) }))
 }
 
+const POSE_TICKS = { flinch: FLINCH_TICKS, celebrate: CELEBRATE_TICKS, yawn: YAWN_TICKS } as const
+
 // Queues mood events for the active buddy and strikes a pose, under the rules for counting
-// (Alive spec sections 2 and 4). A celebration never cuts a flinch short.
-async function feel($: EngineInterface, events: readonly MoodEvent[], kind: 'flinch' | 'celebrate' | null) {
+// (Alive spec sections 2 and 4). A celebration never cuts a flinch short, and a yawn never cuts
+// either short.
+async function feel($: EngineInterface, events: readonly MoodEvent[], kind: 'flinch' | 'celebrate' | 'yawn' | null) {
   const seed = await countedSeed($)
   if (seed === null) return
   if (events.length > 0) await update($, pendingMood, p => ({ ...p, [seed]: queueNewest(p[seed], events, MAX_QUEUED_MOOD) }))
   if (kind === null) return
   const now = await read($, tick)
-  const untilTick = now + (kind === 'flinch' ? FLINCH_TICKS : CELEBRATE_TICKS)
-  await update($, posing, p =>
-    kind === 'celebrate' && p?.kind === 'flinch' && now < p.untilTick ? p : { kind, untilTick },
-  )
+  const untilTick = now + POSE_TICKS[kind]
+  await update($, posing, p => {
+    const running = p !== null && now < p.untilTick
+    return running && (kind === 'yawn' || (kind === 'celebrate' && p.kind === 'flinch')) ? p : { kind, untilTick }
+  })
 }
 
 // Queues a finished main turn for the journal, under the rules for counting (Memory spec section 3).
@@ -474,6 +483,28 @@ async function talkMemoryLines($: EngineInterface, journal: readonly Moment[] | 
   } catch {
     return []
   }
+}
+
+// The reaction slot a finished main turn has (Interaction spec section 6): a break nudge when one
+// is due, else a quip.
+async function respond($: EngineInterface, summary: TurnSummary, facts: TurnFacts) {
+  if (await nudgeBreak($)) return
+  await react($, summary, facts)
+}
+
+// A break nudge, once the stretch has run long enough (Interaction spec section 5): a yawn and a
+// canned line, no model call, only when on. One that can't be said now stays due. Returns whether
+// it took the turn's reaction slot.
+async function nudgeBreak($: EngineInterface): Promise<boolean> {
+  const saved = await read($, record)
+  const now = await $.clock.now()
+  const run = stretch
+  if (!saved || saved.mode !== 'on' || (await read($, hatching)) || !run || !breakDue(run, now)) return false
+  if ((await newsShowing($)) !== null) return false
+  stretch = { ...run, nudgedAt: now }
+  await feel($, [], 'yawn')
+  await showBubble($, breakLine(cannedCount++, now - run.start))
+  return true
 }
 
 // A finished main turn: speak only when shouldQuip says so, never muted, never while a call is
@@ -866,7 +897,9 @@ export const register: Register = on => {
         const felt = turnMood(e.reason, e.durationMs, summary.failed.length)
         const kind = e.reason === 'error' ? 'flinch' : felt === 'longClean' ? 'celebrate' : null
         later($, () => countAndFlush($, turn, felt ? [felt] : [], kind, facts))
-        later($, () => react($, summary, facts))
+        const end = await $.clock.now()
+        stretch = nextStretch(stretch, end - e.durationMs, end)
+        later($, () => respond($, summary, facts))
       }
     } catch {
       // A reaction is never worth breaking a turn over.

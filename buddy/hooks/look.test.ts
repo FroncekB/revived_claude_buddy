@@ -93,3 +93,13 @@ test('a snack is on the hat row for 3 ticks, then crumbs for 2, then the hat aga
   expect(top(15)).toBe(HAT_ART.crown.padEnd(SPRITE_W))
   expect(draw({ ...CALM, tick: 10 }).sprite[0]).toBe(HAT_ART.crown.padEnd(SPRITE_W))
 })
+
+test('a yawn draws the sleep frame with closed eyes, awake: no zZ, and the hat stays on', () => {
+  const yawn = draw({ ...CALM, pose: 'yawn' })
+  expect(body(yawn.sprite)).toEqual(posed('sleep'))
+  expect(yawn.sprite[0]).toBe(HAT_ART.crown.padEnd(SPRITE_W))
+  expect(yawn.asleep).toBe(false)
+  expect(yawn.face).not.toContain('zZ')
+  expect(yawn.face).toContain(POSE_EYE.sleep)
+  expect(isAsleep({ ...CALM, pose: 'yawn', idleTicks: DAY_SLEEP_TICKS })).toBe(false)
+})
