@@ -5,7 +5,7 @@ import { DAY_SLEEP_TICKS, NIGHT_SLEEP_TICKS, SNACK_TICKS, draw, isAsleep, portra
 import type { Scene } from './look'
 import { MOOD_EYE } from './mood'
 import {
-  CONFETTI, CRUMBS, HAT_ART, HEARTS, HOLIDAY_HATS, POSE_EYE, PROPS, SNACK_ART, SPRITE_W, ZZZ, bodyRows, fillEyes,
+  CONFETTI, CRUMBS, DUCK_PROP, HAT_ART, HEARTS, HOLIDAY_HATS, POSE_EYE, PROPS, SNACK_ART, SPRITE_W, ZZZ, bodyRows, fillEyes,
 } from './sprites'
 import type { Pose } from './sprites'
 
@@ -102,4 +102,11 @@ test('a yawn draws the sleep frame with closed eyes, awake: no zZ, and the hat s
   expect(yawn.face).not.toContain('zZ')
   expect(yawn.face).toContain(POSE_EYE.sleep)
   expect(isAsleep({ ...CALM, pose: 'yawn', idleTicks: DAY_SLEEP_TICKS })).toBe(false)
+})
+
+test('in duck mode the rubber duck stands in for a holiday prop, and hides while something is said', () => {
+  expect(draw({ ...CALM, duck: true }).prop).toBe(DUCK_PROP)
+  expect(draw({ ...CALM, duck: true, holiday: JULY4 }).prop).toBe(DUCK_PROP)
+  expect(draw({ ...CALM, duck: true, saying: true }).prop).toBeNull()
+  expect(draw({ ...CALM, duck: false, holiday: JULY4 }).prop).toBe(PROPS.july4)
 })

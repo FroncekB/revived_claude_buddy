@@ -7,6 +7,7 @@ import { SHIMMER } from './layout'
 import { zeroCounts } from './ledger'
 import { CRUMBS, EARNED_HAT_ART, HAT_ART, HOLIDAY_HATS, SNACK_ART, bodyRows, fillEyes, headRow } from './sprites'
 import { FULL_LINES, PLAY_FALLBACKS, SNACKS, feedPrompt } from './toys'
+import { duckLine, duckPrompt } from './duck'
 import { TOUR_TICKS } from './tour'
 import { FAIL_PLAIN, FAIL_SNARKY, FALLBACK_NAMES } from './voice'
 
@@ -2501,4 +2502,149 @@ test('a break due while muted waits, and comes at the first turn end after unmut
   await $.turn.complete(turnOf(0.5, 't2'))
   await clock.settle()
   expect(isBreakLine(await bubbleOf(ui))).toBe(true)
+})
+
+const OFFER = 'Want to talk it through?'
+// The rubber duck's yellow body in the band's prop column.
+const duckDrawn = async ($: Engine) => {
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  const body = await ui.find({ type: 'Text', text: /^\(\.\)__$/ })
+  await ui.unmount()
+  return body?.props.color === 'yellow'
+}
+const fail = async ($: Engine, times: number) => {
+  for (let i = 0; i < times; i++) await $.tool.call({ tool: 'Bash', command: 'false' })
+}
+
+test('a tool that fails 3 times across two turns gets one rubber-duck offer in place of a quip, then the duck stands by', async ($, on) => {
+  const clock = world(on, { buddy: CROWNED })
+  engineBelow(on)
+  const prompts = model(on, null, OFFER)
+  await $.session.start(START)
+  await clock.settle()
+  const quips = () => prompts.filter(p => p.startsWith('Claude just finished a turn'))
+  const offers = () => prompts.filter(p => p.startsWith('Claude just failed'))
+  await fail($, 2)
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect([quips().length, offers().length]).toEqual([1, 0])
+  // Past the quip cooldown, so this turn would quip if the offer didn't take its place.
+  await clock.advance(7 * 60_000)
+  await fail($, 1)
+  await $.turn.complete({ ...TURN, turnId: 't2' })
+  await clock.settle()
+  expect(offers()).toEqual([duckPrompt('Pip', 'Bash', 3)])
+  expect(quips()).toHaveLength(1)
+  expect(await saidNow($)).toBe(OFFER)
+  expect(await duckDrawn($)).toBe(false)
+  // Once the bubble has gone, the duck stands beside the buddy until duck mode runs out.
+  await clock.advance(13_000)
+  expect(await duckDrawn($)).toBe(true)
+  await clock.advance(15 * 60_000)
+  expect(await duckDrawn($)).toBe(false)
+})
+
+test('an offer the model leaves unanswered is canned; talk inside duck mode is rubber-ducked and keeps it going', async ($, on) => {
+  const clock = world(on, { buddy: CROWNED })
+  engineBelow(on)
+  const prompts: string[] = []
+  on('model.complete', async (_$, e) => {
+    prompts.push(e.prompt)
+    return { value: e.prompt.startsWith('Claude just failed') ? failed() : ok('Walk me through it.') }
+  })
+  await $.session.start(START)
+  await clock.settle()
+  await fail($, 3)
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(await saidNow($)).toBe('3 failed Bash calls. Want to talk it through? Start with "Pip,".')
+  const talk = async () => {
+    await $.prompt.submit({ text: 'Pip, the build keeps failing', wait: false, origin: { kind: 'composer' } })
+    await clock.settle()
+    return prompts.at(-1) ?? ''
+  }
+  // 10 minutes on, a talk carries the duck line and keeps duck mode 15 minutes from then.
+  await clock.advance(10 * 60_000)
+  expect(await talk()).toContain(duckLine('Bash'))
+  await clock.advance(14 * 60_000)
+  expect(await talk()).toContain(duckLine('Bash'))
+  // 16 minutes after the last talk, it has run out.
+  await clock.advance(16 * 60_000)
+  expect(await talk()).not.toContain('rubber duck')
+})
+
+test('a second run of failures inside 30 minutes gets no offer; one after 30 does', async ($, on) => {
+  const clock = world(on, { buddy: CROWNED })
+  engineBelow(on)
+  const prompts = model(on, null, OFFER)
+  await $.session.start(START)
+  await clock.settle()
+  const offers = () => prompts.filter(p => p.startsWith('Claude just failed'))
+  await fail($, 3)
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(offers()).toHaveLength(1)
+  await clock.advance(10 * 60_000)
+  await fail($, 3)
+  await $.turn.complete({ ...TURN, turnId: 't2' })
+  await clock.settle()
+  expect(offers()).toHaveLength(1)
+  // Not nudged, the last turn's 3 count with this one's.
+  await clock.advance(21 * 60_000)
+  await fail($, 3)
+  await $.turn.complete({ ...TURN, turnId: 't3' })
+  await clock.settle()
+  expect(offers()).toEqual([duckPrompt('Pip', 'Bash', 3), duckPrompt('Pip', 'Bash', 6)])
+})
+
+test('a muted or hidden buddy makes no offer and calls no model', async ($, on) => {
+  const clock = world(on, { buddy: CROWNED })
+  engineBelow(on)
+  const prompts = model(on, null, OFFER)
+  await $.session.start(START)
+  await clock.settle()
+  await runner($)('mute')
+  await fail($, 3)
+  await $.turn.complete(TURN)
+  await clock.settle()
+  await runner($)('off')
+  await fail($, 3)
+  await $.turn.complete({ ...TURN, turnId: 't2' })
+  await clock.settle()
+  expect(prompts).toEqual([])
+})
+
+test('a swap ends duck mode: the buddy back gets no duck line', async ($, on) => {
+  const clock = world(on, { buddy: TWO })
+  engineBelow(on)
+  const prompts = model(on, null, OFFER)
+  await $.session.start(START)
+  await clock.settle()
+  await fail($, 3)
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(prompts.filter(p => p.startsWith('Claude just failed'))).toEqual([duckPrompt('Mochi', 'Bash', 3)])
+  expect(await runner($)('swap Pip')).toBe('Pip is back.')
+  await clock.advance(60_000)
+  await $.prompt.submit({ text: 'Pip, hi', wait: false, origin: { kind: 'composer' } })
+  await clock.settle()
+  expect(prompts.at(-1)).toContain('The developer says to you: hi')
+  expect(prompts.at(-1)).not.toContain('rubber duck')
+  expect(await duckDrawn($)).toBe(false)
+})
+
+test('a duck offer and a break due at one turn end: the offer, then the break at the next turn end', async ($, on) => {
+  const clock = world(on, { buddy: LONG_DONE })
+  engineBelow(on)
+  model(on, null, OFFER)
+  await $.session.start(START)
+  await clock.settle()
+  await fail($, 3)
+  await $.turn.complete(turnOf(90))
+  await clock.settle()
+  expect(await saidNow($)).toBe(OFFER)
+  await clock.advance(60_000)
+  await $.turn.complete(turnOf(0.5, 't2'))
+  await clock.settle()
+  expect(isBreakLine(await saidNow($))).toBe(true)
 })

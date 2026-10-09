@@ -129,6 +129,12 @@ export const PAINT: Readonly<Record<string, string>> = {
   m: 'magenta',
 }
 
+// The rubber duck beside the buddy while duck mode lasts (Interaction spec section 4).
+export const DUCK_PROP: Prop = {
+  art: ['', '    _', '  <(.)__', '   (___/', ''],
+  paint: ['', '    y', '  ryyyyy', '   yyyyy', ''],
+}
+
 export const PROPS: Readonly<Partial<Record<HolidayId, Prop>>> = {
   newyear: {
     art: ['  \\ | /', ' -- * --', '  / | \\', '     .  *', ' *   .'],

@@ -126,9 +126,11 @@ export function reactionPrompt(s: TurnSummary, memory: string | null = null): st
   ].join('\n')
 }
 
-// `memories` are the journal lines a talk may draw on (Memory spec section 4).
-export function talkPrompt(message: string, memories: readonly string[] = []): string {
-  return [`The developer says to you: ${message.slice(0, 500)}`, ...memories, 'Reply in one line.'].join('\n')
+// `memories` are the journal lines a talk may draw on (Memory spec section 4), and `duck` the
+// rubber-duck line while duck mode lasts (Interaction spec section 4).
+export function talkPrompt(message: string, memories: readonly string[] = [], duck: string | null = null): string {
+  const lines = [`The developer says to you: ${message.slice(0, 500)}`, ...memories, ...(duck ? [duck] : [])]
+  return [...lines, 'Reply in one line.'].join('\n')
 }
 
 export function hatchRequest(b: Bones): { system: string; prompt: string } {

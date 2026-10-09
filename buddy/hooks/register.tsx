@@ -4,6 +4,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { Buddy, Counts, Moment, MoodEvent, Saved, Stage, TurnFacts } from '../types'
 import { newsOf } from './achievements'
 import { dayInfo } from './calendar'
+import { DUCK_MS, duckDue, duckFallback, duckLine, duckPrompt, failsByTool, shouldNudge } from './duck'
 import { cardAlt, cardSvg, dexAlt, dexSvg, journalAlt, journalSvg, meter } from './card'
 import {
   MAX_QUEUED_TURNS, addCall, isRough, memoryLine, momentKey, noCalls, recall, talkMemories, turnFacts,
@@ -81,6 +82,9 @@ const journalSeed = atom({ plugin: 'buddy', key: 'journalSeed' } as const, null)
 const tourStage = atom({ plugin: 'buddy', key: 'tourStage' } as const, 'adult')
 const snackShown = atom({ plugin: 'buddy', key: 'snack' } as const, null)
 const lastFedAt = atom({ plugin: 'buddy', key: 'lastFedAt' } as const, 0)
+const duckUntil = atom({ plugin: 'buddy', key: 'duckUntil' } as const, 0)
+const duckTool = atom({ plugin: 'buddy', key: 'duckTool' } as const, null)
+const lastNudgeAt = atom({ plugin: 'buddy', key: 'lastNudgeAt' } as const, 0)
 
 const CARD = 'card'
 const JOURNAL = 'journal'
@@ -134,6 +138,8 @@ let flaggedTurn = -1
 // The run of main turns a break nudge watches (Interaction spec section 5). Lost on a reload, which
 // starts it over: at worst a nudge comes later.
 let stretch: Stretch | null = null
+// The last main turn's failed calls by tool, for the rubber duck (Interaction spec section 4).
+let prevFails: Record<string, number> = {}
 // The last commit this session started. The next one waits for it to settle.
 let lastCommit: Promise<unknown> = Promise.resolve()
 
@@ -164,6 +170,8 @@ async function adopt($: EngineInterface, saved: Saved) {
   const before = await read($, record)
   await update($, record, () => saved)
   if (saved.mode === 'off' || saved.active !== before?.active) roughTurns = 0
+  // Duck mode belongs to the buddy that offered it (Interaction spec section 4).
+  if (saved.active !== before?.active) await update($, duckUntil, () => 0)
   if (saved.mode === 'off') stopTimer()
   else if (!timer) startTimer($)
 }
@@ -485,11 +493,60 @@ async function talkMemoryLines($: EngineInterface, journal: readonly Moment[] | 
   }
 }
 
-// The reaction slot a finished main turn has (Interaction spec section 6): a break nudge when one
-// is due, else a quip.
-async function respond($: EngineInterface, summary: TurnSummary, facts: TurnFacts) {
+// The reaction slot a finished main turn has (Interaction spec section 6): the rubber duck when a
+// tool keeps failing, else a break nudge when one is due, else a quip.
+async function respond(
+  $: EngineInterface,
+  summary: TurnSummary,
+  facts: TurnFacts,
+  duck: { tool: string; n: number } | null,
+) {
+  if (duck && (await nudgeDuck($, duck))) return
   if (await nudgeBreak($)) return
   await react($, summary, facts)
+}
+
+// The rubber-duck offer (Interaction spec section 4): one Haiku call in the turn's reaction slot,
+// past the quip cooldown but at most once in 30 minutes, and then duck mode. Returns whether it
+// took the turn's reaction slot.
+async function nudgeDuck($: EngineInterface, due: { tool: string; n: number }): Promise<boolean> {
+  const saved = await read($, record)
+  if (!saved || (await read($, hatching))) return false
+  const now = await $.clock.now()
+  const say = shouldNudge({
+    mode: saved.mode,
+    inFlight: inFlight !== null,
+    newsUp: (await newsShowing($)) !== null,
+    now,
+    lastNudgeAt: await read($, lastNudgeAt),
+  })
+  if (!say) return false
+  // The same failures never nudge twice, and the next quip waits out a full cooldown.
+  prevFails = {}
+  await update($, lastNudgeAt, () => now)
+  await update($, lastQuipAt, () => now)
+  const buddy = activeBuddy(saved)
+  const name = buddy.soul.name
+  const replied = await read($, lastReplyAt)
+  const text = await ask($, buddy, bonesFor(buddy), duckPrompt(name, due.tool, due.n), 'react')
+  // A reply that cut the call short wins; an answer that comes back over an announcement is dropped.
+  if (text === null && (await read($, lastReplyAt)) !== replied) return true
+  if ((await newsShowing($)) !== null) return true
+  await showBubble($, text ?? duckFallback(name, due.tool, due.n))
+  const shown = await $.clock.now()
+  await update($, duckUntil, () => shown + DUCK_MS)
+  await update($, duckTool, () => due.tool)
+  return true
+}
+
+// The duck line a talk carries while duck mode lasts; the talk keeps duck mode for 15 minutes
+// more (Interaction spec section 4). Null once it has run out.
+async function duckTalk($: EngineInterface): Promise<string | null> {
+  const now = await $.clock.now()
+  const tool = await read($, duckTool)
+  if (tool === null || now >= (await read($, duckUntil))) return null
+  await update($, duckUntil, () => now + DUCK_MS)
+  return duckLine(tool)
 }
 
 // A break nudge, once the stretch has run long enough (Interaction spec section 5): a yawn and a
@@ -756,6 +813,7 @@ async function liveScene(
     stage,
     tick: t,
     snack: await read($, snackShown),
+    duck: now < (await read($, duckUntil)),
     mood: await moodNow($, buddy, now),
     pose: posed && t < posed.untilTick ? posed.kind : null,
     idleTicks: t - (await read($, lastActive)),
@@ -888,6 +946,9 @@ export const register: Register = on => {
       if (e.agentId === undefined) {
         const summary: TurnSummary = { reason: e.reason, durationMs: e.durationMs, tools: tally, failed: failedTools }
         const facts = turnFacts(e.reason, e.durationMs, turnCalls, roughTurns)
+        // Judged before this turn's failures take the last turn's place (Interaction spec section 4).
+        const duck = duckDue(prevFails, failedTools)
+        prevFails = failsByTool(failedTools)
         tally = {}
         failedTools = []
         turnCalls = noCalls()
@@ -899,7 +960,7 @@ export const register: Register = on => {
         later($, () => countAndFlush($, turn, felt ? [felt] : [], kind, facts))
         const end = await $.clock.now()
         stretch = nextStretch(stretch, end - e.durationMs, end)
-        later($, () => respond($, summary, facts))
+        later($, () => respond($, summary, facts, duck))
       }
     } catch {
       // A reaction is never worth breaking a turn over.
@@ -917,7 +978,10 @@ export const register: Register = on => {
       const bare = !e.attachments || e.attachments.length === 0
       const message = buddy && fromPerson && bare ? matchAddress(buddy.soul.name, e.text) : null
       if (buddy && message !== null) {
-        later($, async () => soothe($, { kind: 'talk' }, buddy, talkPrompt(message, await talkMemoryLines($, buddy.journal))))
+        later($, async () => {
+          const prompt = talkPrompt(message, await talkMemoryLines($, buddy.journal), await duckTalk($))
+          await soothe($, { kind: 'talk' }, buddy, prompt)
+        })
         return { drop: `(to ${buddy.soul.name})` }
       }
     } catch {

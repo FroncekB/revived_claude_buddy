@@ -5,7 +5,9 @@ import type { Holiday } from './calendar'
 import { MOOD_EYE } from './mood'
 import type { MoodName } from './mood'
 import type { Bones } from './roll'
-import { CRUMBS, HOLIDAY_HATS, POSE_EYE, PROPS, SNACK_ART, faceFor, frameAt, spriteRows, topRow } from './sprites'
+import {
+  CRUMBS, DUCK_PROP, HOLIDAY_HATS, POSE_EYE, PROPS, SNACK_ART, faceFor, frameAt, spriteRows, topRow,
+} from './sprites'
 import type { Pose, Prop, Wearable } from './sprites'
 
 export const FLINCH_TICKS = 4
@@ -36,6 +38,8 @@ export type Scene = {
   saying: boolean
   // A snack being eaten and the tick it's gone by. Missing reads as none.
   snack?: { kind: Snack; untilTick: number } | null
+  // Duck mode: the rubber duck stands in for any holiday prop. Missing reads as off.
+  duck?: boolean
 }
 
 export type Drawn = { sprite: string[]; face: string; prop: Prop | null; asleep: boolean }
@@ -71,7 +75,7 @@ export function draw(s: Scene): Drawn {
   return {
     sprite: spriteRows({ species: s.bones.species, stage: s.stage, eye, frame: pose ?? frame, top }),
     face: faceFor(s.bones.species, eye) + (asleep ? ' zZ' : ''),
-    prop: s.holiday && !s.saying ? (PROPS[s.holiday.id] ?? null) : null,
+    prop: s.saying ? null : s.duck ? DUCK_PROP : s.holiday ? (PROPS[s.holiday.id] ?? null) : null,
     asleep,
   }
 }

@@ -205,6 +205,9 @@ test('a quip prompt carries its memory just before the ask, and a talk prompt it
   expect(reactionPrompt(ROUGH)).not.toContain('A memory')
   expect(reactionPrompt(ROUGH, line).split('\n').slice(-2)).toEqual([line, 'React in one line.'])
   expect(talkPrompt('hi')).toBe('The developer says to you: hi\nReply in one line.')
+  expect(talkPrompt('hi', ['- today: x'], 'Be a duck.')).toBe(
+    'The developer says to you: hi\n- today: x\nBe a duck.\nReply in one line.',
+  )
   expect(talkPrompt('hi', ['Your memories, newest first:', '- today: x', 'Mention one only if it fits what they said.'])).toBe(
     'The developer says to you: hi\nYour memories, newest first:\n- today: x\nMention one only if it fits what they said.\nReply in one line.',
   )

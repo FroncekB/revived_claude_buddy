@@ -153,6 +153,11 @@ declare module 'claude-code' {
       // ms, 0 for never (Interaction spec section 2).
       snack: { kind: Snack; untilTick: number } | null
       lastFedAt: number
+      // When duck mode ends, in ms, 0 when it's off; the tool it's about; and when the last duck
+      // nudge fired (Interaction spec section 4).
+      duckUntil: number
+      duckTool: string | null
+      lastNudgeAt: number
     }
   }
 }
