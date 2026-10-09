@@ -126,9 +126,11 @@ export function reactionPrompt(s: TurnSummary, memory: string | null = null): st
   ].join('\n')
 }
 
-// `memories` are the journal lines a talk may draw on (Memory spec section 4).
-export function talkPrompt(message: string, memories: readonly string[] = []): string {
-  return [`The developer says to you: ${message.slice(0, 500)}`, ...memories, 'Reply in one line.'].join('\n')
+// `memories` are the journal lines a talk may draw on (Memory spec section 4), and `duck` the
+// rubber-duck line while duck mode lasts (Interaction spec section 4).
+export function talkPrompt(message: string, memories: readonly string[] = [], duck: string | null = null): string {
+  const lines = [`The developer says to you: ${message.slice(0, 500)}`, ...memories, ...(duck ? [duck] : [])]
+  return [...lines, 'Reply in one line.'].join('\n')
 }
 
 export function hatchRequest(b: Bones): { system: string; prompt: string } {
@@ -145,13 +147,23 @@ export function hatchRequest(b: Bones): { system: string; prompt: string } {
   }
 }
 
-// Words a prompt opens with ("Claude, fix the test", "Note: ..."). A buddy with one of these
-// as its name would swallow real prompts, so hatching never accepts them. Lower case.
+// Words a prompt opens with ("Claude, fix the test", "Note: ...", "Summary: ..."). A buddy with
+// one of these as its name would swallow real prompts, so neither hatching nor /buddy rename
+// accepts them. Lower case.
 export const RESERVED_NAMES: ReadonlySet<string> = new Set([
   'claude', 'note', 'bug', 'todo', 'fix', 'task', 'context', 'question', 'update', 'error',
   'issue', 'test', 'plan', 'goal', 'edit', 'also', 'ok', 'okay', 'yes', 'no',
   'hey', 'hi', 'please', 'thanks', 'wait', 'next', 'now', 'so', 'lint',
+  'summary', 'background', 'requirements', 'constraints', 'important', 'remember', 'reminder', 'warning',
+  'problem', 'request', 'instructions', 'steps', 'example', 'notes', 'tldr', 'idea', 'help', 'review',
+  'feature', 'refactor', 'docs', 'btw', 'ps',
 ])
+
+// A name a buddy can have (base spec section 5): one word, letters only, at most 12 characters,
+// and not a word prompts open with. Hatching and /buddy rename both hold to it.
+export function validName(name: string): boolean {
+  return /^[A-Za-z]{1,12}$/.test(name) && !RESERVED_NAMES.has(name.toLowerCase())
+}
 
 export function parseSoul(text: string): { name: string; personality: string } | null {
   const json = /\{[\s\S]*\}/.exec(text)?.[0]
@@ -160,7 +172,7 @@ export function parseSoul(text: string): { name: string; personality: string } |
     const value = JSON.parse(json) as { name?: unknown; personality?: unknown }
     const name = typeof value.name === 'string' ? value.name.trim() : ''
     const personality = typeof value.personality === 'string' ? value.personality.trim() : ''
-    if (!/^[A-Za-z]{1,12}$/.test(name) || RESERVED_NAMES.has(name.toLowerCase())) return null
+    if (!validName(name)) return null
     if (personality.length === 0 || personality.length > 160) return null
     return { name, personality }
   } catch {
@@ -196,7 +208,8 @@ const CANNED: Record<StatName, readonly string[]> = {
   SNARK: ['Bold of you to call that a variable name.', 'I would have done it faster. Probably.', 'Oh good, more TODOs.'],
 }
 
-function nth(pool: readonly string[], n: number): string {
+// The `n`th line of `pool`, wrapping around for any whole `n`, negative ones too.
+export function nth(pool: readonly string[], n: number): string {
   return pool[((n % pool.length) + pool.length) % pool.length]!
 }
 

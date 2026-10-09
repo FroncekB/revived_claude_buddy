@@ -3,6 +3,9 @@ export type Mode = 'on' | 'muted' | 'off'
 // How grown a buddy is, by its level (Progression spec section 2).
 export type Stage = 'hatchling' | 'adult' | 'elder'
 
+// A snack /buddy feed gives (Interaction spec section 2).
+export type Snack = 'cookie' | 'apple' | 'fish' | 'cheese' | 'berries' | 'donut'
+
 export type Soul = { name: string; personality: string; hatchedAt: string }
 
 // The schema 1 record (base spec section 3), read only to migrate it.
@@ -98,6 +101,9 @@ export type Buddy = {
   journal?: Moment[]
   // Missing reads as zeros.
   bests?: Bests
+  // The hat it wears: a rolled or earned hat's id, or 'none' (Interaction spec section 2).
+  // Missing, or a hat it can't wear, reads as the hat it rolled.
+  hat?: string
 }
 
 // The `$.store` key `buddy` (Foundation spec section 1).
@@ -129,8 +135,9 @@ declare module 'claude-code' {
       lastReplyAt: number
       // Counts not yet saved, by buddy seed (Foundation spec section 2).
       pending: Record<string, Counts>
-      // A flinch or celebrate and the tick it ends on (Alive spec section 4).
-      pose: { kind: 'flinch' | 'celebrate'; untilTick: number } | null
+      // A flinch, celebrate or yawn and the tick it ends on (Alive spec section 4, Interaction
+      // spec section 5).
+      pose: { kind: 'flinch' | 'celebrate' | 'yawn'; untilTick: number } | null
       // The tick of the last activity, for idle sleep.
       lastActiveTick: number
       // Mood events not yet saved, by buddy seed (Alive spec section 2).
@@ -142,6 +149,15 @@ declare module 'claude-code' {
       journalSeed: string | null
       // The stage /buddy debug tours (Progression spec section 5).
       tourStage: Stage
+      // The snack the hat row shows and the tick it's eaten by, and when the buddy last ate, in
+      // ms, 0 for never (Interaction spec section 2).
+      snack: { kind: Snack; untilTick: number } | null
+      lastFedAt: number
+      // When duck mode ends, in ms, 0 when it's off; the tool it's about; and when the last duck
+      // nudge fired (Interaction spec section 4).
+      duckUntil: number
+      duckTool: string | null
+      lastNudgeAt: number
     }
   }
 }

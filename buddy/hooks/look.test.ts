@@ -1,10 +1,12 @@
 import { expect, test } from 'claude-code/testing'
 
 import { holidayOn } from './calendar'
-import { DAY_SLEEP_TICKS, NIGHT_SLEEP_TICKS, draw, isAsleep, portrait } from './look'
+import { DAY_SLEEP_TICKS, NIGHT_SLEEP_TICKS, SNACK_TICKS, draw, isAsleep, portrait } from './look'
 import type { Scene } from './look'
 import { MOOD_EYE } from './mood'
-import { CONFETTI, HAT_ART, HEARTS, HOLIDAY_HATS, POSE_EYE, PROPS, SPRITE_W, ZZZ, bodyRows, fillEyes } from './sprites'
+import {
+  CONFETTI, CRUMBS, DUCK_PROP, HAT_ART, HEARTS, HOLIDAY_HATS, POSE_EYE, PROPS, SNACK_ART, SPRITE_W, ZZZ, bodyRows, fillEyes,
+} from './sprites'
 import type { Pose } from './sprites'
 
 // A plain duck in a crown, doing nothing in particular.
@@ -81,4 +83,30 @@ test("the card's portrait is the rolled buddy: its hat and its eye", () => {
   const rows = portrait(BONES, 'adult', 0)
   expect(rows[0]).toBe(HAT_ART.crown.padEnd(SPRITE_W))
   expect(rows.join('\n')).toContain('<(· )___')
+})
+
+test('a snack is on the hat row for 3 ticks, then crumbs for 2, then the hat again', () => {
+  const snack = { kind: 'cookie' as const, untilTick: 10 + SNACK_TICKS }
+  const top = (tick: number) => draw({ ...CALM, tick, snack }).sprite[0]
+  expect([10, 11, 12].map(top)).toEqual(Array(3).fill(SNACK_ART.cookie.padEnd(SPRITE_W)))
+  expect([13, 14].map(top)).toEqual(Array(2).fill(CRUMBS.padEnd(SPRITE_W)))
+  expect(top(15)).toBe(HAT_ART.crown.padEnd(SPRITE_W))
+  expect(draw({ ...CALM, tick: 10 }).sprite[0]).toBe(HAT_ART.crown.padEnd(SPRITE_W))
+})
+
+test('a yawn draws the sleep frame with closed eyes, awake: no zZ, and the hat stays on', () => {
+  const yawn = draw({ ...CALM, pose: 'yawn' })
+  expect(body(yawn.sprite)).toEqual(posed('sleep'))
+  expect(yawn.sprite[0]).toBe(HAT_ART.crown.padEnd(SPRITE_W))
+  expect(yawn.asleep).toBe(false)
+  expect(yawn.face).not.toContain('zZ')
+  expect(yawn.face).toContain(POSE_EYE.sleep)
+  expect(isAsleep({ ...CALM, pose: 'yawn', idleTicks: DAY_SLEEP_TICKS })).toBe(false)
+})
+
+test('in duck mode the rubber duck stands in for a holiday prop, and hides while something is said', () => {
+  expect(draw({ ...CALM, duck: true }).prop).toBe(DUCK_PROP)
+  expect(draw({ ...CALM, duck: true, holiday: JULY4 }).prop).toBe(DUCK_PROP)
+  expect(draw({ ...CALM, duck: true, saying: true }).prop).toBeNull()
+  expect(draw({ ...CALM, duck: false, holiday: JULY4 }).prop).toBe(PROPS.july4)
 })

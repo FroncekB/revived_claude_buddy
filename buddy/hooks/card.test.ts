@@ -253,3 +253,8 @@ test('a dex date span from another year is squeezed to fit its tile; a short one
   expect(dateText('Oct 7 – now')).toBeDefined()
   expect(dateText('Oct 7 – now')).not.toContain('textLength')
 })
+
+test('an earned hat gets a chip of its own', () => {
+  expect(cardSvg(SOUL, { ...BONES, hat: 'flowercrown' }, 0)).toContain('>Flower crown<')
+  expect(cardAlt(SOUL, { ...BONES, hat: 'mortarboard' }, 0)).toContain('Mortarboard, ✦ eyes')
+})

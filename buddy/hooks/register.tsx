@@ -3,8 +3,12 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { Buddy, Counts, Moment, MoodEvent, Saved, Stage, TurnFacts } from '../types'
 import { newsOf } from './achievements'
+import { breakDue, breakLine, nextStretch } from './breaks'
+import type { Stretch } from './breaks'
 import { dayInfo } from './calendar'
 import { cardAlt, cardSvg, dexAlt, dexSvg, journalAlt, journalSvg, meter } from './card'
+import { DUCK_MS, duckDue, duckFallback, duckLine, duckPrompt, failsByTool, shouldNudge } from './duck'
+import type { DuckDue } from './duck'
 import {
   MAX_QUEUED_TURNS, addCall, isRough, memoryLine, momentKey, noCalls, recall, talkMemories, turnFacts,
 } from './journal'
@@ -14,7 +18,7 @@ import {
 } from './layout'
 import { addCounts, countEvent, mergePending, toolGroup, zeroCounts } from './ledger'
 import type { CountEvent } from './ledger'
-import { CELEBRATE_TICKS, FLINCH_TICKS, draw, portrait } from './look'
+import { CELEBRATE_TICKS, FLINCH_TICKS, SNACK_TICKS, YAWN_TICKS, draw, portrait } from './look'
 import type { Scene } from './look'
 import { MAX_QUEUED_MOOD, applyMood, moodLine, moodOf, turnMood } from './mood'
 import type { MoodName } from './mood'
@@ -30,6 +34,10 @@ import { eggRows, frameAt } from './sprites'
 import type { Frame, Prop } from './sprites'
 import { bandSvg } from './svg'
 import { TOUR_STEPS, tourAt } from './tour'
+import {
+  dressed, feedFallback, feedPrompt, fullLine, hatChoice, hatFallback, hatList, hatPrompt, isFull, play, playFallback,
+  playPrompt, renameFallback, renamePrompt, renameRefusal, snackOf, wearable, woreLine, wornHat,
+} from './toys'
 import {
   HEART_TICKS,
   HELLO_PROMPT,
@@ -73,11 +81,17 @@ const pendingTurns = atom({ plugin: 'buddy', key: 'pendingTurns' } as const, {})
 const cardSeed = atom({ plugin: 'buddy', key: 'cardSeed' } as const, null)
 const journalSeed = atom({ plugin: 'buddy', key: 'journalSeed' } as const, null)
 const tourStage = atom({ plugin: 'buddy', key: 'tourStage' } as const, 'adult')
+const snackShown = atom({ plugin: 'buddy', key: 'snack' } as const, null)
+const lastFedAt = atom({ plugin: 'buddy', key: 'lastFedAt' } as const, 0)
+const duckUntil = atom({ plugin: 'buddy', key: 'duckUntil' } as const, 0)
+const duckTool = atom({ plugin: 'buddy', key: 'duckTool' } as const, null)
+const lastNudgeAt = atom({ plugin: 'buddy', key: 'lastNudgeAt' } as const, 0)
 
 const CARD = 'card'
 const JOURNAL = 'journal'
 const DEX = 'dex'
 const NO_BUDDY = 'No buddy yet. Run /buddy to hatch one.'
+const EGG = 'Wait for the egg to hatch.'
 const SAVE_FAILED = 'Could not save your buddy; it lives for this session only.'
 
 type Look = {
@@ -122,6 +136,11 @@ let recalled: Record<string, number> = {}
 // failed call's line can run after its turn has ended, so it carries its turn's number.
 let turnNo = 0
 let flaggedTurn = -1
+// The run of main turns a break nudge watches (Interaction spec section 5). Lost on a reload, which
+// starts it over: at worst a nudge comes later.
+let stretch: Stretch | null = null
+// The last main turn's failed calls by tool, for the rubber duck (Interaction spec section 4).
+let prevFails: Record<string, number> = {}
 // The last commit this session started. The next one waits for it to settle.
 let lastCommit: Promise<unknown> = Promise.resolve()
 
@@ -152,6 +171,8 @@ async function adopt($: EngineInterface, saved: Saved) {
   const before = await read($, record)
   await update($, record, () => saved)
   if (saved.mode === 'off' || saved.active !== before?.active) roughTurns = 0
+  // Duck mode belongs to the buddy that offered it (Interaction spec section 4).
+  if (saved.active !== before?.active) await update($, duckUntil, () => 0)
   if (saved.mode === 'off') stopTimer()
   else if (!timer) startTimer($)
 }
@@ -229,18 +250,22 @@ async function count($: EngineInterface, event: CountEvent) {
   await update($, pending, p => ({ ...p, [seed]: countEvent(p[seed] ?? zeroCounts(), event) }))
 }
 
+const POSE_TICKS = { flinch: FLINCH_TICKS, celebrate: CELEBRATE_TICKS, yawn: YAWN_TICKS } as const
+
 // Queues mood events for the active buddy and strikes a pose, under the rules for counting
-// (Alive spec sections 2 and 4). A celebration never cuts a flinch short.
-async function feel($: EngineInterface, events: readonly MoodEvent[], kind: 'flinch' | 'celebrate' | null) {
+// (Alive spec sections 2 and 4). A celebration never cuts a flinch short, and a yawn never cuts
+// either short.
+async function feel($: EngineInterface, events: readonly MoodEvent[], kind: 'flinch' | 'celebrate' | 'yawn' | null) {
   const seed = await countedSeed($)
   if (seed === null) return
   if (events.length > 0) await update($, pendingMood, p => ({ ...p, [seed]: queueNewest(p[seed], events, MAX_QUEUED_MOOD) }))
   if (kind === null) return
   const now = await read($, tick)
-  const untilTick = now + (kind === 'flinch' ? FLINCH_TICKS : CELEBRATE_TICKS)
-  await update($, posing, p =>
-    kind === 'celebrate' && p?.kind === 'flinch' && now < p.untilTick ? p : { kind, untilTick },
-  )
+  const untilTick = now + POSE_TICKS[kind]
+  await update($, posing, p => {
+    const running = p !== null && now < p.untilTick
+    return running && (kind === 'yawn' || (kind === 'celebrate' && p.kind === 'flinch')) ? p : { kind, untilTick }
+  })
 }
 
 // Queues a finished main turn for the journal, under the rules for counting (Memory spec section 3).
@@ -418,27 +443,32 @@ async function ask(
   }
 }
 
-// Talk, pet and hello: answered even when muted, at most one model call per 5 s. A reply that
-// lands on an announcement follows it in the same bubble, so a pet that earns Good friend still
-// says so (Progression spec section 4).
-async function reply($: EngineInterface, who: Who, prompt: string) {
+// Talk, pet, hello and the toys: answered even when muted, at most one model call per 5 s. A reply
+// that lands on an announcement follows it in the same bubble, so a pet that earns Good friend
+// still says so (Progression spec section 4). `fallback` is said when the model isn't asked or
+// doesn't answer; without one, a canned line is.
+async function reply($: EngineInterface, who: Who, prompt: string, fallback?: string) {
   const bones = bonesFor(who)
   const now = await $.clock.now()
   const last = await read($, lastReplyAt)
   await update($, lastReplyAt, () => now)
   const text = now - last < REPLY_FLOOR_MS ? null : await ask($, who, bones, prompt, 'reply')
-  const line = text ?? cannedLine(bones, cannedCount++, Math.random())
+  await sayAfterNews($, text ?? fallback ?? cannedLine(bones, cannedCount++, Math.random()))
+}
+
+// Says `line`, after an announcement still showing, in the same bubble (Progression spec section 4).
+async function sayAfterNews($: EngineInterface, line: string) {
   const news = await newsShowing($)
   await showBubble($, news === null ? line : `${news} ${line}`, news ?? undefined)
 }
 
 // A pet or a talk: counted and saved before the reply is asked for. A save in progress holds the
 // soothe in neither the queue nor the record, so a reply asked for meanwhile would hear the old mood.
-async function soothe($: EngineInterface, event: CountEvent, who: Who, prompt: string) {
+async function soothe($: EngineInterface, event: CountEvent, who: Who, prompt: string, fallback?: string) {
   try {
     await countAndFlush($, event, ['soothe'])
   } finally {
-    await reply($, who, prompt)
+    await reply($, who, prompt, fallback)
   }
 }
 
@@ -462,6 +492,108 @@ async function talkMemoryLines($: EngineInterface, journal: readonly Moment[] | 
   } catch {
     return []
   }
+}
+
+// Carries the stretch on past a finished main turn, and says whether a break is now due. A throw
+// costs the watch, never the reaction.
+async function watchStretch($: EngineInterface, durationMs: number): Promise<boolean> {
+  try {
+    const end = await $.clock.now()
+    stretch = nextStretch(stretch, end - durationMs, end)
+    return breakDue(stretch, end)
+  } catch {
+    return false
+  }
+}
+
+// The reaction slot a finished main turn has (Interaction spec section 6): the rubber duck when a
+// tool keeps failing, else a break nudge when one is due, else a quip. A turn with a nudge to make
+// waits for its own save first, which may announce something: the nudge then sees the announcement
+// and stays due, instead of being spent on a line the announcement replaces. `flushed` settles
+// whether the save worked or threw. Any other turn's quip goes at once. `ended` is the turn's
+// number, as turnNo counted it.
+async function respond(
+  $: EngineInterface,
+  summary: TurnSummary,
+  facts: TurnFacts,
+  duck: DuckDue | null,
+  flushed: Promise<void>,
+  ended: number,
+) {
+  const breakIsDue = await watchStretch($, summary.durationMs)
+  if (duck || breakIsDue) await flushed
+  if (duck && (await nudgeDuck($, duck, ended))) return
+  if (await nudgeBreak($)) return
+  await react($, summary, facts)
+}
+
+// The rubber-duck offer (Interaction spec section 4): one Haiku call in the turn's reaction slot,
+// ignoring the quip cooldown but at most once in 30 minutes, and then duck mode. Returns whether
+// it took the turn's reaction slot.
+async function nudgeDuck($: EngineInterface, duck: DuckDue, ended: number): Promise<boolean> {
+  const saved = await read($, record)
+  if (!saved || (await read($, hatching))) return false
+  const now = await $.clock.now()
+  const say = shouldNudge({
+    mode: saved.mode,
+    inFlight: inFlight !== null,
+    newsUp: (await newsShowing($)) !== null,
+    now,
+    lastNudgeAt: await read($, lastNudgeAt),
+  })
+  if (!say) return false
+  // The same failures never nudge twice, and the next quip waits out a full cooldown. A turn that
+  // ended while this one's save was slow has put its own failures in prevFails; those stay.
+  if (turnNo === ended) prevFails = {}
+  await update($, lastNudgeAt, () => now)
+  await update($, lastQuipAt, () => now)
+  const buddy = activeBuddy(saved)
+  const name = buddy.soul.name
+  const replied = await read($, lastReplyAt)
+  const text = await ask($, buddy, bonesFor(buddy), duckPrompt(name, duck.tool, duck.n), 'react')
+  // A reply that came in meanwhile wins, whether it cut the call short or, inside its 5 s floor,
+  // asked nothing; so does a swap, which the offer was not for. An answer that comes back over an
+  // announcement is dropped.
+  if ((await read($, lastReplyAt)) !== replied) return true
+  if ((await read($, record))?.active !== saved.active) return true
+  if ((await newsShowing($)) !== null) return true
+  await showBubble($, text ?? duckFallback(name, duck.tool, duck.n))
+  const shown = await $.clock.now()
+  await update($, duckTool, () => duck.tool)
+  await update($, duckUntil, () => shown + DUCK_MS)
+  return true
+}
+
+// The duck line a talk carries while duck mode lasts; the talk keeps duck mode for 15 minutes
+// more (Interaction spec section 4). Null once it has run out. A throw costs the line, never the
+// reply.
+async function duckTalk($: EngineInterface): Promise<string | null> {
+  try {
+    const now = await $.clock.now()
+    const tool = await read($, duckTool)
+    if (tool === null || now >= (await read($, duckUntil))) return null
+    await update($, duckUntil, () => now + DUCK_MS)
+    return duckLine(tool)
+  } catch {
+    return null
+  }
+}
+
+// A break nudge, once the stretch has run long enough (Interaction spec section 5): a yawn and a
+// canned line, no model call, only when on. One that can't be said now, with an announcement up or
+// a model call in flight, stays due. Returns whether it took the turn's reaction slot.
+async function nudgeBreak($: EngineInterface): Promise<boolean> {
+  const saved = await read($, record)
+  const now = await $.clock.now()
+  const run = stretch
+  if (!saved || saved.mode !== 'on' || (await read($, hatching)) || !run || !breakDue(run, now)) return false
+  if (inFlight !== null || (await newsShowing($)) !== null) return false
+  // A turn that ended meanwhile has carried the stretch on, so the mark goes on the current one, if
+  // it is still this run.
+  if (stretch?.start === run.start) stretch = { ...stretch, nudgedAt: now }
+  await feel($, [], 'yawn')
+  await showBubble($, breakLine(cannedCount++, now - run.start))
+  return true
 }
 
 // A finished main turn: speak only when shouldQuip says so, never muted, never while a call is
@@ -551,6 +683,32 @@ async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | un
       later($, () => soothe($, { kind: 'pet' }, buddy, PET_PROMPT))
       return undefined
     }
+    case 'feed': {
+      if (await read($, hatching)) return EGG
+      if (saved.mode === 'off') return hidden
+      const now = await $.clock.now()
+      // Fed in the last 10 minutes: a canned no-thanks, with nothing eaten or counted.
+      if (isFull(await read($, lastFedAt), now)) {
+        await sayAfterNews($, fullLine(cannedCount++))
+        return undefined
+      }
+      const snack = snackOf(Math.random())
+      const t = await read($, tick)
+      await update($, lastFedAt, () => now)
+      await update($, snackShown, () => ({ kind: snack, untilTick: t + SNACK_TICKS }))
+      // Care, like a pet: counted, it eases a sulk, then the reply.
+      later($, () => soothe($, { kind: 'pet' }, buddy, feedPrompt(snack), feedFallback(snack)))
+      return undefined
+    }
+    case 'play': {
+      if (await read($, hatching)) return EGG
+      if (saved.mode === 'off') return hidden
+      const played = play({ name, game: parsed.game, pick: parsed.pick, roll: Math.random })
+      if (played.outcome === 'win') await feel($, [], 'celebrate')
+      // Care, like a pet: counted, it eases a sulk, then the buddy has its say about the game.
+      later($, () => soothe($, { kind: 'pet' }, buddy, playPrompt(played), playFallback(played.outcome, cannedCount++)))
+      return played.line
+    }
     case 'card': {
       const target = targetOf(saved, parsed.target, 'card')
       if ('reply' in target) return target.reply
@@ -561,7 +719,7 @@ async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | un
       const shown = shownBuddy(saved, target.seed)
       const progress = cardProgress(saved, shown)
       return [
-        ...cardLines(shown.soul, bonesFor(shown), saved.rerolls, progress),
+        ...cardLines(shown.soul, dressed(shown, saved.you), saved.rerolls, progress),
         streakLine(saved.you, await countsOf($, shown)),
         achievementsText(progress.earned.length),
       ].join('\n')
@@ -593,7 +751,7 @@ async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | un
     case 'reroll-confirm':
       return hatch($, 'reroll')
     case 'swap': {
-      if (await read($, hatching)) return 'Wait for the egg to hatch.'
+      if (await read($, hatching)) return EGG
       const found = findBuddy(saved, parsed.target)
       if (found.kind !== 'one') return notFound(saved, parsed.target, found, 'swap')
       if (found.seed === saved.active) return `${name} is already here.`
@@ -610,6 +768,33 @@ async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | un
       await update($, bubble, () => null)
       later($, () => reply($, back, HELLO_PROMPT))
       return note ?? `${back.soul.name} is back.`
+    }
+    case 'rename': {
+      if (await read($, hatching)) return EGG
+      if (saved.mode === 'off') return hidden
+      const refused = renameRefusal(parsed.name, name)
+      if (refused) return refused
+      const note = await commit($, { kind: 'rename', seed: buddy.seed, name: parsed.name })
+      // Refused: nothing was written or adopted.
+      if (note !== null && note !== SAVE_FAILED) return note
+      const renamed = shownBuddy((await read($, record)) ?? saved, buddy.seed)
+      later($, () => reply($, renamed, renamePrompt(name, parsed.name), renameFallback(parsed.name)))
+      return note ?? `${name} is now ${parsed.name}.`
+    }
+    case 'hat': {
+      if (await read($, hatching)) return EGG
+      if (saved.mode === 'off') return hidden
+      const can = wearable(buddy, saved.you)
+      const worn = wornHat(buddy, saved.you)
+      if (parsed.hat === undefined) return hatList(name, worn, can)
+      const choice = hatChoice({ name, words: parsed.hat, worn, can })
+      if ('reply' in choice) return choice.reply
+      const hat = choice.wear
+      const note = await commit($, { kind: 'hat', seed: buddy.seed, hat })
+      // Refused: nothing was written or adopted.
+      if (note !== null && note !== SAVE_FAILED) return note
+      later($, () => reply($, buddy, hatPrompt(hat), hatFallback(hat)))
+      return note ?? woreLine(name, hat)
     }
     case 'debug': {
       if (saved.mode === 'off') return hidden
@@ -646,7 +831,7 @@ function eggLook(frame: Frame): Look {
 async function liveScene(
   $: EngineInterface,
   buddy: Buddy,
-  bones: Bones,
+  bones: Scene['bones'],
   stage: Stage,
   t: number,
   heartsFrame: number | null,
@@ -659,6 +844,8 @@ async function liveScene(
     bones,
     stage,
     tick: t,
+    snack: await read($, snackShown),
+    duck: now < (await read($, duckUntil)),
     mood: await moodNow($, buddy, now),
     pose: posed && t < posed.untilTick ? posed.kind : null,
     idleTicks: t - (await read($, lastActive)),
@@ -697,7 +884,7 @@ async function buddyLook($: EngineInterface, saved: Saved, t: number): Promise<L
         heartsFrame,
         saying,
       }
-    : await liveScene($, buddy, own, stage, t, heartsFrame, saying)
+    : await liveScene($, buddy, { ...own, hat: wornHat(buddy, saved.you) }, stage, t, heartsFrame, saying)
   const drawn = draw(scene)
   const { label, stars } = nameLine(name, bones, tour ? null : levelOf(buddy.counts))
   const sprite = spriteTint(bones, animTick)
@@ -722,7 +909,8 @@ export const register: Register = on => {
       await $.command.register({
         name: 'buddy',
         description: 'Hatch, pet, or manage your terminal buddy',
-        argumentHint: '[pet | card [who] | journal [who] | dex | swap <who> | mute | unmute | off | reroll [confirm]]',
+        argumentHint:
+          '[pet | feed | play [game] | card [who] | journal [who] | dex | swap <who> | rename <name> | hat [hat] | mute | unmute | off | reroll [confirm]]',
         immediate: true,
       })
     } catch {
@@ -790,16 +978,22 @@ export const register: Register = on => {
       if (e.agentId === undefined) {
         const summary: TurnSummary = { reason: e.reason, durationMs: e.durationMs, tools: tally, failed: failedTools }
         const facts = turnFacts(e.reason, e.durationMs, turnCalls, roughTurns)
+        // Judged before this turn's failures take the last turn's place (Interaction spec section 4).
+        const duck = duckDue(prevFails, failedTools)
+        prevFails = failsByTool(failedTools)
         tally = {}
         failedTools = []
         turnCalls = noCalls()
         roughTurns = isRough(facts) ? roughTurns + 1 : 0
-        turnNo++
+        const ended = ++turnNo
         const turn: CountEvent = { kind: 'turn', reason: e.reason, durationMs: e.durationMs }
         const felt = turnMood(e.reason, e.durationMs, summary.failed.length)
         const kind = e.reason === 'error' ? 'flinch' : felt === 'longClean' ? 'celebrate' : null
-        later($, () => countAndFlush($, turn, felt ? [felt] : [], kind, facts))
-        later($, () => react($, summary, facts))
+        // Settles when the save has finished, whether it worked or threw (`later` swallows the throw).
+        const flushed = new Promise<void>(done => {
+          later($, () => countAndFlush($, turn, felt ? [felt] : [], kind, facts).finally(done))
+        })
+        later($, () => respond($, summary, facts, duck, flushed, ended))
       }
     } catch {
       // A reaction is never worth breaking a turn over.
@@ -817,7 +1011,10 @@ export const register: Register = on => {
       const bare = !e.attachments || e.attachments.length === 0
       const message = buddy && fromPerson && bare ? matchAddress(buddy.soul.name, e.text) : null
       if (buddy && message !== null) {
-        later($, async () => soothe($, { kind: 'talk' }, buddy, talkPrompt(message, await talkMemoryLines($, buddy.journal))))
+        later($, async () => {
+          const prompt = talkPrompt(message, await talkMemoryLines($, buddy.journal), await duckTalk($))
+          await soothe($, { kind: 'talk' }, buddy, prompt)
+        })
         return { drop: `(to ${buddy.soul.name})` }
       }
     } catch {
@@ -893,7 +1090,7 @@ export const register: Register = on => {
       if (!saved) return <Text dimColor>{NO_BUDDY}</Text>
 
       const buddy = shownBuddy(saved, await read($, cardSeed))
-      const bones = bonesFor(buddy)
+      const bones = dressed(buddy, saved.you)
       const progress = cardProgress(saved, buddy)
       const history = { you: saved.you, counts: await countsOf($, buddy) }
       if (e.surface !== 'terminal') {

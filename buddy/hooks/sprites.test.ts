@@ -4,8 +4,9 @@ import { ADULT } from './art-adult'
 import { STAGES } from './progress'
 import { EYES, HATS, SPECIES, fnv1a32 } from './roll'
 import {
-  BLANK, CONFETTI, EARNED_HATS, EARNED_HAT_ART, HAT_ART, HEARTS, HOLIDAY_HATS, POSES, POSE_EYE, PROPS, PROP_ROWS, PROP_W,
-  SPRITE_W, ZZZ, bodyRows, eggRows, faceFor, fillEyes, frameAt, hatArt, headRow, spriteRows, topRow,
+  BLANK, CONFETTI, CRUMBS, DUCK_PROP, EARNED_HATS, EARNED_HAT_ART, HAT_ART, HEARTS, HOLIDAY_HATS, POSES, POSE_EYE, PROPS,
+  PROP_ROWS, PROP_W, SNACK_ART, SPRITE_W, ZZZ, bodyRows, eggRows, faceFor, fillEyes, frameAt, hatArt, headRow, spriteRows,
+  topRow,
 } from './sprites'
 import type { Prop } from './sprites'
 
@@ -197,4 +198,20 @@ test('every elder drawn is drawn new: no frame is a copy of its adult frame', ()
     }
   }
   expect(copied).toEqual([])
+})
+
+test('every snack and its crumbs fit the hat row, and a snack sits under the hearts and over the confetti', () => {
+  for (const art of [...Object.values(SNACK_ART), CRUMBS]) expect([art, [...art].length <= SPRITE_W]).toEqual([art, true])
+  const all = { hat: 'crown' as const, heartsFrame: 0, sparkle: null, snack: SNACK_ART.fish, confetti: 0 }
+  expect(topRow(all)).toContain('♥')
+  expect(topRow({ ...all, heartsFrame: null })).toBe(SNACK_ART.fish.padEnd(SPRITE_W))
+  expect(topRow({ ...all, heartsFrame: null, snack: null })).toBe(CONFETTI[0])
+})
+
+test('the rubber duck fits a prop box, with its paint inside it', () => {
+  expect(DUCK_PROP.art).toHaveLength(PROP_ROWS)
+  DUCK_PROP.art.forEach((row, i) => {
+    expect([i, [...row].length <= PROP_W]).toEqual([i, true])
+    expect([i, (DUCK_PROP.paint?.[i] ?? '').length <= row.length]).toEqual([i, true])
+  })
 })

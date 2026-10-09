@@ -9,7 +9,7 @@ import { EYES, HATS, RARITIES, SPECIES } from './roll'
 import type { Bones } from './roll'
 import type { Stage } from '../types'
 import { EARNED_HATS } from './sprites'
-import type { Pose, Wearable } from './sprites'
+import type { Pose, Worn } from './sprites'
 
 export const TOUR_STEP_TICKS = 28
 export const TOUR_STEPS = SPECIES.length
@@ -32,7 +32,7 @@ const STEP_POSES: readonly Pose[] = ['flinch', 'celebrate', 'sleep']
 // The shiny pass rotates every hat a buddy can wear, earned ones too (Progression spec section 5).
 const SHINY_HATS = ['none', ...HATS, ...EARNED_HATS] as const
 
-export type TourLook = Pick<Bones, 'rarity' | 'species' | 'eye' | 'shiny'> & { hat: Wearable | 'none' }
+export type TourLook = Pick<Bones, 'rarity' | 'species' | 'eye' | 'shiny'> & { hat: Worn }
 
 export type TourAt = {
   name: string

@@ -5,7 +5,8 @@ import { rollBones } from './roll'
 import {
   BUBBLE_TICKS, FAIL_PLAIN, FAIL_SNARKY, FALLBACK_NAMES, MAX_SAY, QUIP_COOLDOWN_MS, RESERVED_NAMES, SAY_GOAL,
   bubbleTicks, cannedLine, cleanSay, failLine, fallbackSoul, hatchRequest, matchAddress, newsLine, parseSoul, personaSystem,
-  quipChance, quipCooldownMs, reactionPrompt, shouldFlag, shouldGreet, shouldQuip, streakGreeting, talkPrompt, withArticle,
+  quipChance, quipCooldownMs, reactionPrompt, shouldFlag, shouldGreet, shouldQuip, streakGreeting, talkPrompt, validName,
+  withArticle,
 } from './voice'
 import type { TurnSummary } from './voice'
 
@@ -99,7 +100,15 @@ test('names that read as prompt openers are rejected, in any case', () => {
   expect(parseSoul('{"name": "fix", "personality": "x"}')).toBeNull()
   expect(parseSoul('{"name": "BUG", "personality": "x"}')).toBeNull()
   expect(parseSoul('{"name": "Pip", "personality": "x"}')).not.toBeNull()
-  expect(RESERVED_NAMES.size).toBe(29)
+  expect(RESERVED_NAMES.size).toBe(52)
+  for (const name of ['P', 'Abcdefghijkl', 'mochi']) expect([name, validName(name)]).toEqual([name, true])
+  for (const name of ['', 'Abcdefghijklm', 'R2D2', 'Sir Pip', 'Pip!']) {
+    expect([name, validName(name)]).toEqual([name, false])
+  }
+  for (const word of RESERVED_NAMES) {
+    expect([word, validName(word)]).toEqual([word, false])
+    expect([word, validName(word.toUpperCase())]).toEqual([word, false])
+  }
   for (const name of FALLBACK_NAMES) expect(RESERVED_NAMES.has(name.toLowerCase())).toBe(false)
   expect(FALLBACK_NAMES).toHaveLength(24)
 })
@@ -196,6 +205,9 @@ test('a quip prompt carries its memory just before the ask, and a talk prompt it
   expect(reactionPrompt(ROUGH)).not.toContain('A memory')
   expect(reactionPrompt(ROUGH, line).split('\n').slice(-2)).toEqual([line, 'React in one line.'])
   expect(talkPrompt('hi')).toBe('The developer says to you: hi\nReply in one line.')
+  expect(talkPrompt('hi', ['- today: x'], 'Be a duck.')).toBe(
+    'The developer says to you: hi\n- today: x\nBe a duck.\nReply in one line.',
+  )
   expect(talkPrompt('hi', ['Your memories, newest first:', '- today: x', 'Mention one only if it fits what they said.'])).toBe(
     'The developer says to you: hi\nYour memories, newest first:\n- today: x\nMention one only if it fits what they said.\nReply in one line.',
   )
