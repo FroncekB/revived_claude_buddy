@@ -223,10 +223,10 @@ export function headRow(rest: readonly string[]): number {
   return Math.max(0, rest.findIndex(row => row.trim() !== ''))
 }
 
-// The 5 sprite rows. The top row (hearts, confetti, zZ, a hat or the sparkle) sits just above the
-// head, which is where the stage's rest frame starts, and every row above it is blank (Progression
-// spec section 5). Every adult's head starts on its first body row, so its top row is row 0. Art
-// keeps the rows above the head blank in every section, so the top row covers nothing.
+// The 5 sprite rows. The top row (hearts, the snack, confetti, zZ, a hat or the sparkle) sits just
+// above the head, which is where the stage's rest frame starts, and every row above it is blank
+// (Progression spec section 5). Every adult's head starts on its first body row, so its top row is
+// row 0. Art keeps the rows above the head blank in every section, so the top row covers nothing.
 export function spriteRows(o: { species: Species; stage: Stage; eye: string; frame: Frame | Pose; top: string }): string[] {
   const rows = [BLANK, ...bodyRows(o.species, o.stage, o.frame).map(row => fillEyes(row, o.eye))]
   rows[headRow(bodyRows(o.species, o.stage, 0))] = o.top

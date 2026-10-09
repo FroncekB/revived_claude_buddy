@@ -188,8 +188,8 @@ export function readPlay(words: readonly string[]): { game?: Game; pick?: Throw 
 // One game, decided by `roll`, which gives a number from 0 to 1 each time it is called: the game
 // when none was named, then each side's die, call, flip or throw in the order the game needs them.
 export function play(o: { name: string; game?: Game; pick?: Throw | Side; roll: () => number }): Played {
-  const any = <T>(list: readonly T[]): T => list[Math.min(list.length - 1, Math.floor(o.roll() * list.length))]!
-  const game = o.game ?? any(GAMES)
+  const pickFrom = <T>(list: readonly T[]): T => list[Math.min(list.length - 1, Math.floor(o.roll() * list.length))]!
+  const game = o.game ?? pickFrom(GAMES)
   const done = (outcome: Outcome, line: string, what: string): Played => ({
     game,
     outcome,
@@ -208,16 +208,16 @@ export function play(o: { name: string; game?: Game; pick?: Throw | Side; roll: 
   if (game === 'coin') {
     // You call it when you named a side; otherwise the buddy does.
     const youCall = o.pick === 'heads' || o.pick === 'tails'
-    const call = youCall ? (o.pick as Side) : any(SIDES)
-    const flip = any(SIDES)
+    const call = youCall ? (o.pick as Side) : pickFrom(SIDES)
+    const flip = pickFrom(SIDES)
     const outcome = (flip === call) === youCall ? 'lose' : 'win'
     const caller = youCall ? 'You' : o.name
     const what = `${youCall ? 'they' : 'you'} called ${call}, and it came up ${flip}`
     return done(outcome, `${caller} called ${call}. ${flip === 'heads' ? 'Heads' : 'Tails'}. ${winner(outcome)}`, what)
   }
   const picked = !(THROWS as readonly (string | undefined)[]).includes(o.pick)
-  const yours = picked ? any(THROWS) : (o.pick as Throw)
-  const theirs = any(THROWS)
+  const yours = picked ? pickFrom(THROWS) : (o.pick as Throw)
+  const theirs = pickFrom(THROWS)
   const what = `they threw ${yours}, you threw ${theirs}`
   if (yours === theirs) {
     return done('draw', `You both threw ${yours}${picked ? ' (yours picked for you)' : ''}. A draw.`, what)

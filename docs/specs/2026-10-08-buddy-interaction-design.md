@@ -199,7 +199,7 @@ It asks Haiku once, as a reaction (`ask` with `react`), with the persona and its
 Claude just failed {tool} {n} times over its last two turns, and the developer may be stuck.
 Offer, in one line, to be their rubber duck: they can talk it through with you by starting a message with "{name},".
 ```
-If the model doesn't answer, the bubble shows the fallback: `{n} failed {tool} calls. Want to talk it through? Start with "{name},".` A reply that aborts the call wins, and the nudge shows nothing. A nudge whose answer comes back over an announcement is dropped, as a quip is.
+If the model doesn't answer, the bubble shows the fallback: `{n} failed {tool} calls. Want to talk it through? Start with "{name},".` A reply that aborts the call wins, and the nudge shows nothing; so does a reply inside its 5 s floor, which asks nothing, and a swap during the call. A nudge whose answer comes back over an announcement is dropped, as a quip is.
 
 `{tool}` is the tool's name, with an MCP tool's `mcp__server__` prefix dropped: `Bash`, `Edit`, `create_issue`.
 
@@ -234,6 +234,7 @@ A subagent's turn neither extends nor breaks a stretch. The stretch lives in a m
 **The nudge,** when due at a turn's end, and only when:
 - the mode is `on` and no egg is out
 - no announcement is showing
+- no model call is in flight
 - no duck nudge took this turn (section 4)
 
 Otherwise it stays due for the next turn end. When it fires, `nudgedAt` becomes now. Then:

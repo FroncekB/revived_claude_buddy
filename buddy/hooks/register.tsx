@@ -3,9 +3,11 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { Buddy, Counts, Moment, MoodEvent, Saved, Stage, TurnFacts } from '../types'
 import { newsOf } from './achievements'
+import { breakDue, breakLine, nextStretch } from './breaks'
+import type { Stretch } from './breaks'
 import { dayInfo } from './calendar'
-import { DUCK_MS, duckDue, duckFallback, duckLine, duckPrompt, failsByTool, shouldNudge } from './duck'
 import { cardAlt, cardSvg, dexAlt, dexSvg, journalAlt, journalSvg, meter } from './card'
+import { DUCK_MS, duckDue, duckFallback, duckLine, duckPrompt, failsByTool, shouldNudge } from './duck'
 import {
   MAX_QUEUED_TURNS, addCall, isRough, memoryLine, momentKey, noCalls, recall, talkMemories, turnFacts,
 } from './journal'
@@ -15,8 +17,6 @@ import {
 } from './layout'
 import { addCounts, countEvent, mergePending, toolGroup, zeroCounts } from './ledger'
 import type { CountEvent } from './ledger'
-import { breakDue, breakLine, nextStretch } from './breaks'
-import type { Stretch } from './breaks'
 import { CELEBRATE_TICKS, FLINCH_TICKS, SNACK_TICKS, YAWN_TICKS, draw, portrait } from './look'
 import type { Scene } from './look'
 import { MAX_QUEUED_MOOD, applyMood, moodLine, moodOf, turnMood } from './mood'
@@ -493,14 +493,32 @@ async function talkMemoryLines($: EngineInterface, journal: readonly Moment[] | 
   }
 }
 
+// Carries the stretch on past a finished main turn, and says whether a break is now due. A throw
+// costs the watch, never the reaction.
+async function watchStretch($: EngineInterface, durationMs: number): Promise<boolean> {
+  try {
+    const end = await $.clock.now()
+    stretch = nextStretch(stretch, end - durationMs, end)
+    return breakDue(stretch, end)
+  } catch {
+    return false
+  }
+}
+
 // The reaction slot a finished main turn has (Interaction spec section 6): the rubber duck when a
-// tool keeps failing, else a break nudge when one is due, else a quip.
+// tool keeps failing, else a break nudge when one is due, else a quip. A turn with a nudge to make
+// waits for its own save first, which may announce something: the nudge then sees the announcement
+// and stays due, instead of being spent on a line the announcement replaces. `flushed` settles
+// whether the save worked or threw. Any other turn's quip goes at once.
 async function respond(
   $: EngineInterface,
   summary: TurnSummary,
   facts: TurnFacts,
   duck: { tool: string; n: number } | null,
+  flushed: Promise<void>,
 ) {
+  const due = await watchStretch($, summary.durationMs)
+  if (duck || due) await flushed
   if (duck && (await nudgeDuck($, duck))) return
   if (await nudgeBreak($)) return
   await react($, summary, facts)
@@ -529,36 +547,46 @@ async function nudgeDuck($: EngineInterface, due: { tool: string; n: number }): 
   const name = buddy.soul.name
   const replied = await read($, lastReplyAt)
   const text = await ask($, buddy, bonesFor(buddy), duckPrompt(name, due.tool, due.n), 'react')
-  // A reply that cut the call short wins; an answer that comes back over an announcement is dropped.
-  if (text === null && (await read($, lastReplyAt)) !== replied) return true
+  // A reply that came in meanwhile wins, whether it cut the call short or, inside its 5 s floor,
+  // asked nothing; so does a swap, which the offer was not for. An answer that comes back over an
+  // announcement is dropped.
+  if ((await read($, lastReplyAt)) !== replied) return true
+  if ((await read($, record))?.active !== saved.active) return true
   if ((await newsShowing($)) !== null) return true
   await showBubble($, text ?? duckFallback(name, due.tool, due.n))
   const shown = await $.clock.now()
-  await update($, duckUntil, () => shown + DUCK_MS)
   await update($, duckTool, () => due.tool)
+  await update($, duckUntil, () => shown + DUCK_MS)
   return true
 }
 
 // The duck line a talk carries while duck mode lasts; the talk keeps duck mode for 15 minutes
-// more (Interaction spec section 4). Null once it has run out.
+// more (Interaction spec section 4). Null once it has run out. A throw costs the line, never the
+// reply.
 async function duckTalk($: EngineInterface): Promise<string | null> {
-  const now = await $.clock.now()
-  const tool = await read($, duckTool)
-  if (tool === null || now >= (await read($, duckUntil))) return null
-  await update($, duckUntil, () => now + DUCK_MS)
-  return duckLine(tool)
+  try {
+    const now = await $.clock.now()
+    const tool = await read($, duckTool)
+    if (tool === null || now >= (await read($, duckUntil))) return null
+    await update($, duckUntil, () => now + DUCK_MS)
+    return duckLine(tool)
+  } catch {
+    return null
+  }
 }
 
 // A break nudge, once the stretch has run long enough (Interaction spec section 5): a yawn and a
-// canned line, no model call, only when on. One that can't be said now stays due. Returns whether
-// it took the turn's reaction slot.
+// canned line, no model call, only when on. One that can't be said now, with an announcement up or
+// a model call in flight, stays due. Returns whether it took the turn's reaction slot.
 async function nudgeBreak($: EngineInterface): Promise<boolean> {
   const saved = await read($, record)
   const now = await $.clock.now()
   const run = stretch
   if (!saved || saved.mode !== 'on' || (await read($, hatching)) || !run || !breakDue(run, now)) return false
-  if ((await newsShowing($)) !== null) return false
-  stretch = { ...run, nudgedAt: now }
+  if (inFlight !== null || (await newsShowing($)) !== null) return false
+  // A turn that ended meanwhile has carried the stretch on, so the mark goes on the current one, if
+  // it is still this run.
+  if (stretch?.start === run.start) stretch = { ...stretch, nudgedAt: now }
   await feel($, [], 'yawn')
   await showBubble($, breakLine(cannedCount++, now - run.start))
   return true
@@ -957,10 +985,11 @@ export const register: Register = on => {
         const turn: CountEvent = { kind: 'turn', reason: e.reason, durationMs: e.durationMs }
         const felt = turnMood(e.reason, e.durationMs, summary.failed.length)
         const kind = e.reason === 'error' ? 'flinch' : felt === 'longClean' ? 'celebrate' : null
-        later($, () => countAndFlush($, turn, felt ? [felt] : [], kind, facts))
-        const end = await $.clock.now()
-        stretch = nextStretch(stretch, end - e.durationMs, end)
-        later($, () => respond($, summary, facts, duck))
+        // Settles when the save has finished, whether it worked or threw (`later` swallows the throw).
+        const flushed = new Promise<void>(done => {
+          later($, () => countAndFlush($, turn, felt ? [felt] : [], kind, facts).finally(done))
+        })
+        later($, () => respond($, summary, facts, duck, flushed))
       }
     } catch {
       // A reaction is never worth breaking a turn over.
