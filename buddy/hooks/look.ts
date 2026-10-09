@@ -1,15 +1,18 @@
 // What the band shows at one moment (Alive spec section 6): the body frame, the eyes, the hat
 // row, the compact face and a prop, each by its own order of what wins. Pure: no $.
-import type { Stage } from '../types'
+import type { Snack, Stage } from '../types'
 import type { Holiday } from './calendar'
 import { MOOD_EYE } from './mood'
 import type { MoodName } from './mood'
 import type { Bones } from './roll'
-import { HOLIDAY_HATS, POSE_EYE, PROPS, faceFor, frameAt, spriteRows, topRow } from './sprites'
+import { CRUMBS, HOLIDAY_HATS, POSE_EYE, PROPS, SNACK_ART, faceFor, frameAt, spriteRows, topRow } from './sprites'
 import type { Pose, Prop, Wearable } from './sprites'
 
 export const FLINCH_TICKS = 4
 export const CELEBRATE_TICKS = 6
+// A snack is on the hat row for 5 ticks, the last 2 of them as crumbs (Interaction spec section 2).
+export const SNACK_TICKS = 5
+export const CRUMB_TICKS = 2
 // Idle ticks before sleep: 10 minutes by day, 1 at night.
 export const DAY_SLEEP_TICKS = 1_200
 export const NIGHT_SLEEP_TICKS = 120
@@ -29,6 +32,8 @@ export type Scene = {
   holiday: Holiday | null
   heartsFrame: number | null
   saying: boolean
+  // A snack being eaten and the tick it's gone by. Missing reads as none.
+  snack?: { kind: Snack; untilTick: number } | null
 }
 
 export type Drawn = { sprite: string[]; face: string; prop: Prop | null; asleep: boolean }
@@ -40,6 +45,12 @@ export function isAsleep(s: Pick<Scene, 'pose' | 'idleTicks' | 'night' | 'hearts
   return s.idleTicks >= (s.night ? NIGHT_SLEEP_TICKS : DAY_SLEEP_TICKS)
 }
 
+// The hat row's snack at `tick`: the snack, then crumbs for its last CRUMB_TICKS; null once eaten.
+function snackRow(snack: Scene['snack'], tick: number): string | null {
+  if (!snack || tick >= snack.untilTick) return null
+  return snack.untilTick - tick > CRUMB_TICKS ? SNACK_ART[snack.kind] : CRUMBS
+}
+
 export function draw(s: Scene): Drawn {
   const asleep = isAsleep(s)
   const pose: Pose | null = asleep ? 'sleep' : s.pose
@@ -48,6 +59,7 @@ export function draw(s: Scene): Drawn {
   const top = topRow({
     hat: s.bones.hat,
     heartsFrame: s.heartsFrame,
+    snack: snackRow(s.snack, s.tick),
     sparkle: s.bones.shiny ? s.tick : null,
     confetti: pose === 'celebrate' ? s.tick : null,
     zzz: asleep ? s.tick : null,

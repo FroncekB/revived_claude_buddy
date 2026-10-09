@@ -1,6 +1,6 @@
 // Toys (Interaction spec section 2): feed, play, rename and hat. What each does and says, worked
 // out here from the rolls it is given. Pure: no $.
-import type { Buddy, You } from '../types'
+import type { Buddy, Snack, You } from '../types'
 import { ACHIEVEMENTS, EARNED_HAT_NAME, earnedHats } from './achievements'
 import { bonesFor } from './progress'
 import { HATS, rollBones } from './roll'
@@ -104,4 +104,41 @@ export function hatPrompt(hat: Worn): string {
 
 export function hatFallback(hat: Worn): string {
   return hat === 'none' ? 'Cooler up here.' : 'How do I look?'
+}
+
+// Snacks for /buddy feed, and what the prompt calls each.
+export const SNACKS: readonly Snack[] = ['cookie', 'apple', 'fish', 'cheese', 'berries', 'donut']
+const CALLED: Record<Snack, string> = {
+  cookie: 'a cookie',
+  apple: 'an apple',
+  fish: 'a fish',
+  cheese: 'some cheese',
+  berries: 'some berries',
+  donut: 'a donut',
+}
+
+// How long a buddy that ate stays full, and what it says when fed again before then.
+export const FULL_MS = 10 * 60_000
+export const FULL_LINES: readonly string[] = ['Still full, thanks.', 'One more bite and I pop.', 'Ask me again in a bit.']
+
+// The snack for a roll from 0 to 1.
+export function snackOf(roll: number): Snack {
+  return SNACKS[Math.min(SNACKS.length - 1, Math.max(0, Math.floor(roll * SNACKS.length)))]!
+}
+
+// `lastFedAt` is 0 for a buddy this session never fed.
+export function isFull(lastFedAt: number, now: number): boolean {
+  return lastFedAt > 0 && now - lastFedAt < FULL_MS
+}
+
+export function fullLine(n: number): string {
+  return FULL_LINES[((n % FULL_LINES.length) + FULL_LINES.length) % FULL_LINES.length]!
+}
+
+export function feedPrompt(snack: Snack): string {
+  return `The developer just fed you ${CALLED[snack]}. React in one line.`
+}
+
+export function feedFallback(snack: Snack): string {
+  return `Mm. Thanks for the ${snack}.`
 }

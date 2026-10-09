@@ -5,7 +5,8 @@ import type { Engine } from 'claude-code/testing'
 import type { Moment, Saved } from '../types'
 import { SHIMMER } from './layout'
 import { zeroCounts } from './ledger'
-import { EARNED_HAT_ART, HAT_ART, HOLIDAY_HATS, bodyRows, fillEyes, headRow } from './sprites'
+import { CRUMBS, EARNED_HAT_ART, HAT_ART, HOLIDAY_HATS, SNACK_ART, bodyRows, fillEyes, headRow } from './sprites'
+import { FULL_LINES, SNACKS, feedPrompt } from './toys'
 import { TOUR_TICKS } from './tour'
 import { FAIL_PLAIN, FAIL_SNARKY, FALLBACK_NAMES } from './voice'
 
@@ -1205,6 +1206,7 @@ test("the persona hears the buddy's mood and the day", async ($, on) => {
 // A pet and a talk each take one step off the sulk before the buddy answers.
 const SOOTHERS: [string, ($: Engine) => Promise<unknown>][] = [
   ['a pet', $ => runner($)('pet')],
+  ['a feed', $ => runner($)('feed')],
   ['a talk', $ => $.prompt.submit({ text: 'Pip, sorry I was away.', wait: false, origin: { kind: 'composer' } })],
 ]
 
@@ -2300,4 +2302,44 @@ test('a saved hat the buddy cannot wear, from an old or edited record, draws the
   await clock.settle()
   const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
   expect((await drawnSprite(ui)).join('\n')).toContain(HAT_ART.crown)
+})
+
+test('a feed shows its snack, then crumbs, counts as a pet and asks once; fed again soon, the buddy is full', async ($, on) => {
+  const shared = sharedStore(on, CROWNED)
+  const clock = world(on, null)
+  const prompts = model(on, null, 'Crunchy.')
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await runner($)('feed')).toBeUndefined()
+  await clock.settle()
+  const snack = SNACKS.find(s => prompts[0] === feedPrompt(s))
+  expect(snack).toBeDefined()
+  expect((await drawnSprite(ui)).join('\n')).toContain(SNACK_ART[snack!])
+  expect(activeOf(shared.row)?.counts.pets).toBe(1)
+  expect(await bubbleOf(ui)).toBe('Crunchy.')
+  await clock.advance(1_500)
+  expect((await drawnSprite(ui)).join('\n')).toContain(CRUMBS)
+  await clock.advance(1_000)
+  expect((await drawnSprite(ui)).join('\n')).toContain(HAT_ART.crown)
+  // Fed again inside 10 minutes: a canned no-thanks, nothing counted, no model call.
+  expect(await runner($)('feed')).toBeUndefined()
+  await clock.settle()
+  expect(FULL_LINES).toContain(await bubbleOf(ui))
+  expect(prompts).toHaveLength(1)
+  expect(activeOf(shared.row)?.counts.pets).toBe(1)
+  await clock.advance(10 * 60_000)
+  await runner($)('feed')
+  await clock.settle()
+  expect(prompts).toHaveLength(2)
+  expect(activeOf(shared.row)?.counts.pets).toBe(2)
+})
+
+test('a hidden buddy is not fed', async ($, on) => {
+  const clock = world(on, { buddy: { ...SAVED, mode: 'off' } })
+  const prompts = model(on, null, 'Crunchy.')
+  await $.session.start(START)
+  expect(await runner($)('feed')).toBe('Pip is hidden. Run /buddy to bring it back.')
+  await clock.settle()
+  expect(prompts).toEqual([])
 })

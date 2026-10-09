@@ -4,8 +4,8 @@ import type { Buddy, You } from '../types'
 import { zeroCounts } from './ledger'
 import { bonesFor } from './progress'
 import {
-  HAT_NAME, dressed, hatChoice, hatFallback, hatList, hatPrompt, renameFallback, renamePrompt, renameRefusal, wearable,
-  woreLine, wornHat,
+  FULL_LINES, FULL_MS, HAT_NAME, SNACKS, dressed, feedFallback, feedPrompt, fullLine, hatChoice, hatFallback, hatList,
+  hatPrompt, isFull, renameFallback, renamePrompt, renameRefusal, snackOf, wearable, woreLine, wornHat,
 } from './toys'
 
 test('a rename is refused with its reason, or allowed, a change of case included', () => {
@@ -77,4 +77,28 @@ test('the hat list, and what is said around a new hat', () => {
   expect(hatFallback('tophat')).toBe('How do I look?')
   expect(hatFallback('none')).toBe('Cooler up here.')
   expect(Object.keys(HAT_NAME)).toHaveLength(13)
+})
+
+test('a snack for every roll, what the buddy is told it ate, and its fallback', () => {
+  expect(snackOf(0)).toBe('cookie')
+  expect(snackOf(0.5)).toBe('cheese')
+  expect(snackOf(0.999)).toBe('donut')
+  expect(snackOf(1)).toBe('donut')
+  expect(SNACKS.map(feedPrompt)).toEqual([
+    'The developer just fed you a cookie. React in one line.',
+    'The developer just fed you an apple. React in one line.',
+    'The developer just fed you a fish. React in one line.',
+    'The developer just fed you some cheese. React in one line.',
+    'The developer just fed you some berries. React in one line.',
+    'The developer just fed you a donut. React in one line.',
+  ])
+  expect(feedFallback('berries')).toBe('Mm. Thanks for the berries.')
+})
+
+test('a buddy fed in the last 10 minutes is full, and says so in turn', () => {
+  const NOW = 1_000_000_000
+  expect(isFull(0, NOW)).toBe(false)
+  expect(isFull(NOW - FULL_MS + 1, NOW)).toBe(true)
+  expect(isFull(NOW - FULL_MS, NOW)).toBe(false)
+  expect([0, 1, 2, 3].map(fullLine)).toEqual([...FULL_LINES, FULL_LINES[0]])
 })

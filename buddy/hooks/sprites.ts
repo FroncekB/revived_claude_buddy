@@ -1,7 +1,7 @@
 // ASCII art drawn fresh for this mod in the original's format: 5 rows x 12 columns, the hat row
 // just above the head (row 0 for an adult), {E} marking each eye. The bodies live in
 // art-hatchling.ts, art-adult.ts and art-elder.ts, one file per stage.
-import type { Stage } from '../types'
+import type { Snack, Stage } from '../types'
 import { ADULT } from './art-adult'
 import { ELDER } from './art-elder'
 import { HATCHLING } from './art-hatchling'
@@ -80,6 +80,17 @@ const WEARABLE_ART: Record<Wearable, string> = { ...HAT_ART, ...EARNED_HAT_ART }
 export function hatArt(hat: Wearable): string {
   return WEARABLE_ART[hat]
 }
+
+// A snack on the hat row while it's eaten, then its crumbs (Interaction spec section 2).
+export const SNACK_ART: Record<Snack, string> = {
+  cookie: '    (::)',
+  apple: '     (@)',
+  fish: '   ><(((°>',
+  cheese: '    [:::>',
+  berries: '     ooo',
+  donut: '    ( o )',
+}
+export const CRUMBS = '    .  . .'
 
 export const HEARTS: readonly string[] = ['   ♥    ♥', '  ♥   ♥  ♥', ' ♥  ♥   ♥']
 
@@ -216,11 +227,12 @@ export function spriteRows(o: { species: Species; stage: Stage; eye: string; fra
   return rows.map(fit)
 }
 
-// The hat row, the first that applies: hearts, confetti, zZ, a holiday hat, the rolled hat, the sparkle.
+// The hat row, the first that applies: hearts, a snack, confetti, zZ, a holiday hat, the hat, the sparkle.
 export function topRow(o: {
   hat: Wearable | 'none'
   heartsFrame: number | null
   sparkle: number | null
+  snack?: string | null
   confetti?: number | null
   zzz?: number | null
   holidayHat?: string | null
@@ -228,6 +240,7 @@ export function topRow(o: {
   const confetti = o.confetti ?? null
   const zzz = o.zzz ?? null
   if (o.heartsFrame !== null) return fit(HEARTS[o.heartsFrame % HEARTS.length]!)
+  if (o.snack) return fit(o.snack)
   if (confetti !== null) return fit(CONFETTI[confetti % CONFETTI.length]!)
   if (zzz !== null) return fit(ZZZ[Math.floor(zzz / 2) % ZZZ.length]!)
   if (o.holidayHat) return fit(o.holidayHat)

@@ -14,7 +14,7 @@ import {
 } from './layout'
 import { addCounts, countEvent, mergePending, toolGroup, zeroCounts } from './ledger'
 import type { CountEvent } from './ledger'
-import { CELEBRATE_TICKS, FLINCH_TICKS, draw, portrait } from './look'
+import { CELEBRATE_TICKS, FLINCH_TICKS, SNACK_TICKS, draw, portrait } from './look'
 import type { Scene } from './look'
 import { MAX_QUEUED_MOOD, applyMood, moodLine, moodOf, turnMood } from './mood'
 import type { MoodName } from './mood'
@@ -31,8 +31,8 @@ import type { Frame, Prop } from './sprites'
 import { bandSvg } from './svg'
 import { TOUR_STEPS, tourAt } from './tour'
 import {
-  dressed, hatChoice, hatFallback, hatList, hatPrompt, renameFallback, renamePrompt, renameRefusal, wearable, woreLine,
-  wornHat,
+  dressed, feedFallback, feedPrompt, fullLine, hatChoice, hatFallback, hatList, hatPrompt, isFull, renameFallback,
+  renamePrompt, renameRefusal, snackOf, wearable, woreLine, wornHat,
 } from './toys'
 import {
   HEART_TICKS,
@@ -77,6 +77,8 @@ const pendingTurns = atom({ plugin: 'buddy', key: 'pendingTurns' } as const, {})
 const cardSeed = atom({ plugin: 'buddy', key: 'cardSeed' } as const, null)
 const journalSeed = atom({ plugin: 'buddy', key: 'journalSeed' } as const, null)
 const tourStage = atom({ plugin: 'buddy', key: 'tourStage' } as const, 'adult')
+const snackShown = atom({ plugin: 'buddy', key: 'snack' } as const, null)
+const lastFedAt = atom({ plugin: 'buddy', key: 'lastFedAt' } as const, 0)
 
 const CARD = 'card'
 const JOURNAL = 'journal'
@@ -433,18 +435,22 @@ async function reply($: EngineInterface, who: Who, prompt: string, fallback?: st
   const last = await read($, lastReplyAt)
   await update($, lastReplyAt, () => now)
   const text = now - last < REPLY_FLOOR_MS ? null : await ask($, who, bones, prompt, 'reply')
-  const line = text ?? fallback ?? cannedLine(bones, cannedCount++, Math.random())
+  await sayAfterNews($, text ?? fallback ?? cannedLine(bones, cannedCount++, Math.random()))
+}
+
+// Says `line`, after an announcement still showing, in the same bubble (Progression spec section 4).
+async function sayAfterNews($: EngineInterface, line: string) {
   const news = await newsShowing($)
   await showBubble($, news === null ? line : `${news} ${line}`, news ?? undefined)
 }
 
 // A pet or a talk: counted and saved before the reply is asked for. A save in progress holds the
 // soothe in neither the queue nor the record, so a reply asked for meanwhile would hear the old mood.
-async function soothe($: EngineInterface, event: CountEvent, who: Who, prompt: string) {
+async function soothe($: EngineInterface, event: CountEvent, who: Who, prompt: string, fallback?: string) {
   try {
     await countAndFlush($, event, ['soothe'])
   } finally {
-    await reply($, who, prompt)
+    await reply($, who, prompt, fallback)
   }
 }
 
@@ -555,6 +561,23 @@ async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | un
       const now = await read($, tick)
       await update($, heartsUntil, () => now + HEART_TICKS)
       later($, () => soothe($, { kind: 'pet' }, buddy, PET_PROMPT))
+      return undefined
+    }
+    case 'feed': {
+      if (await read($, hatching)) return EGG
+      if (saved.mode === 'off') return hidden
+      const now = await $.clock.now()
+      // Fed in the last 10 minutes: a canned no-thanks, with nothing eaten or counted.
+      if (isFull(await read($, lastFedAt), now)) {
+        await sayAfterNews($, fullLine(cannedCount++))
+        return undefined
+      }
+      const snack = snackOf(Math.random())
+      const t = await read($, tick)
+      await update($, lastFedAt, () => now)
+      await update($, snackShown, () => ({ kind: snack, untilTick: t + SNACK_TICKS }))
+      // Care, like a pet: counted, it eases a sulk, then the reply.
+      later($, () => soothe($, { kind: 'pet' }, buddy, feedPrompt(snack), feedFallback(snack)))
       return undefined
     }
     case 'card': {
@@ -692,6 +715,7 @@ async function liveScene(
     bones,
     stage,
     tick: t,
+    snack: await read($, snackShown),
     mood: await moodNow($, buddy, now),
     pose: posed && t < posed.untilTick ? posed.kind : null,
     idleTicks: t - (await read($, lastActive)),
@@ -756,7 +780,7 @@ export const register: Register = on => {
         name: 'buddy',
         description: 'Hatch, pet, or manage your terminal buddy',
         argumentHint:
-          '[pet | card [who] | journal [who] | dex | swap <who> | rename <name> | hat [hat] | mute | unmute | off | reroll [confirm]]',
+          '[pet | feed | card [who] | journal [who] | dex | swap <who> | rename <name> | hat [hat] | mute | unmute | off | reroll [confirm]]',
         immediate: true,
       })
     } catch {

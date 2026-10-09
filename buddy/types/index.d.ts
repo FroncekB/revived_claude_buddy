@@ -3,6 +3,9 @@ export type Mode = 'on' | 'muted' | 'off'
 // How grown a buddy is, by its level (Progression spec section 2).
 export type Stage = 'hatchling' | 'adult' | 'elder'
 
+// A snack /buddy feed gives (Interaction spec section 2).
+export type Snack = 'cookie' | 'apple' | 'fish' | 'cheese' | 'berries' | 'donut'
+
 export type Soul = { name: string; personality: string; hatchedAt: string }
 
 // The schema 1 record (base spec section 3), read only to migrate it.
@@ -145,6 +148,10 @@ declare module 'claude-code' {
       journalSeed: string | null
       // The stage /buddy debug tours (Progression spec section 5).
       tourStage: Stage
+      // The snack the hat row shows and the tick it's eaten by, and when the buddy last ate, in
+      // ms, 0 for never (Interaction spec section 2).
+      snack: { kind: Snack; untilTick: number } | null
+      lastFedAt: number
     }
   }
 }

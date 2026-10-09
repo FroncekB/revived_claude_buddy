@@ -11,7 +11,7 @@ import type { Worn } from './toys'
 
 export const STORE_KEY = 'buddy'
 export const USAGE =
-  'Usage: /buddy [pet | card [who] | journal [who] | dex | swap <who> | rename <name> | hat [hat] | mute | unmute | off | reroll [confirm]]'
+  'Usage: /buddy [pet | feed | card [who] | journal [who] | dex | swap <who> | rename <name> | hat [hat] | mute | unmute | off | reroll [confirm]]'
 
 // What the store holds, as this build reads it (Foundation spec section 1).
 export type Stored =
@@ -236,7 +236,8 @@ export function applyChange(saved: Saved | null, change: Change, now: number): S
   }
 }
 
-type Plain = 'show' | 'pet' | 'dex' | 'mute' | 'unmute' | 'off' | 'reroll' | 'reroll-confirm' | 'debug-off' | 'usage'
+type Plain =
+  'show' | 'pet' | 'feed' | 'dex' | 'mute' | 'unmute' | 'off' | 'reroll' | 'reroll-confirm' | 'debug-off' | 'usage'
 export type Sub = Plain | 'card' | 'journal' | 'swap' | 'debug' | 'rename' | 'hat'
 
 // A /buddy command as parsed: the subcommand, and what it was given (Progression spec section 7).
@@ -250,7 +251,7 @@ export type Parsed =
   // The hat's words as typed; none lists the hats.
   | { sub: 'hat'; hat?: string }
 
-const SIMPLE: readonly string[] = ['pet', 'dex', 'mute', 'unmute', 'off']
+const SIMPLE: readonly string[] = ['pet', 'feed', 'dex', 'mute', 'unmute', 'off']
 // Subcommands that can name one buddy after them.
 const TARGETED: readonly string[] = ['card', 'journal']
 

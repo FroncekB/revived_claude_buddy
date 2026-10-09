@@ -18,6 +18,8 @@ const sub = (args: string) => parseSub(args).sub
 test('subcommands', () => {
   expect(parseSub('')).toEqual({ sub: 'show' })
   expect(sub('  pet ')).toBe('pet')
+  expect(sub('Feed')).toBe('feed')
+  expect(sub('feed twice')).toBe('usage')
   expect(sub('CARD')).toBe('card')
   expect(sub('journal')).toBe('journal')
   expect(sub('dex')).toBe('dex')
@@ -34,7 +36,7 @@ test('subcommands', () => {
   expect(parseSub('hat')).toEqual({ sub: 'hat' })
   expect(parseSub('HAT Flower  Crown')).toEqual({ sub: 'hat', hat: 'Flower Crown' })
   expect(USAGE).toBe(
-    'Usage: /buddy [pet | card [who] | journal [who] | dex | swap <who> | rename <name> | hat [hat] | mute | unmute | off | reroll [confirm]]',
+    'Usage: /buddy [pet | feed | card [who] | journal [who] | dex | swap <who> | rename <name> | hat [hat] | mute | unmute | off | reroll [confirm]]',
   )
   expect(sub('mute')).toBe('mute')
   expect(sub('unmute')).toBe('unmute')
