@@ -318,6 +318,18 @@ test("the first flush after the upgrade writes the egg count from the XP before 
   expect(crossed.egg).toEqual({ seed: 'egg-1', startedAt: AT, fromTurns: 2_430 })
 })
 
+test("the upgrade flush that crosses 8,100 XP counts the stored XP first, so its own turns earn the egg", () => {
+  const base = migrate(V1)
+  // 809 turns stored is 8,090 XP: no egg's worth, and no count yet.
+  const old: Saved = { ...base, you: { lastDay: null, streak: 0, bestStreak: 0, days: 0 }, buddies: [{ ...base.buddies[0]!, counts: turnOf(809) }] }
+  expect(old.you.eggs).toBeUndefined()
+  // Counted from the stored XP the count is 0, and the flush's turn earns the first egg. Counted
+  // after the flush it would read 1 already, and no egg would start.
+  const saved = applyChange(old, eggFlush(), NOON)!
+  expect(saved.you.eggs).toBe(1)
+  expect(saved.egg).toEqual({ seed: 'egg-1', startedAt: AT, fromTurns: 810 })
+})
+
 test('a flush that crosses 8,100 XP starts an egg from its seed; one with an egg out starts none', () => {
   const first = firstHatch()
   const near: Saved = { ...first, buddies: [{ ...first.buddies[0]!, counts: turnOf(809) }] }
