@@ -32,7 +32,7 @@ import {
 import type { Change, Parsed, Stored } from './record'
 import { RARITY, STATS, rollBones } from './roll'
 import type { Bones } from './roll'
-import { eggRows, frameAt } from './sprites'
+import { EGG_GUTTER, eggGutterRows, eggRows, frameAt } from './sprites'
 import type { Frame, Prop } from './sprites'
 import { bandSvg } from './svg'
 import { TOUR_STEPS, tourAt } from './tour'
@@ -113,6 +113,8 @@ type Look = {
   sayAt: number
   // A holiday prop beside the sprite, while nothing is said.
   prop: Prop | null
+  // The egg being carried, in its gutter's rows; null with none (Breeding spec section 6).
+  egg: string[] | null
 }
 
 // The part of a buddy that speaks: its seed and counts, for its grown bones, its soul, and its
@@ -929,6 +931,28 @@ function eggLook(frame: Frame): Look {
     say: null,
     sayAt: 0,
     prop: null,
+    egg: null,
+  }
+}
+
+// The egg the band carries now: the tour's in its egg phase, none in its others, else the record's,
+// as far along as its turns say, cracked and shaking while it hatches, and still while the buddy
+// sleeps. A throw costs only the egg: the band draws without its gutter (Breeding spec section 9).
+async function carriedEgg(
+  $: EngineInterface,
+  saved: Saved,
+  tour: ReturnType<typeof tourAt>,
+  t: number,
+  asleep: boolean,
+): Promise<string[] | null> {
+  try {
+    if (tour) return tour.egg ? eggGutterRows({ ...tour.egg, tick: tour.tick, still: false }) : null
+    const egg = readEgg(saved)
+    if (!egg) return null
+    const f = eggProgress(saved, egg) / HATCH_TURNS
+    return eggGutterRows({ f, tick: t, hatching: await read($, eggHatching), still: asleep })
+  } catch {
+    return null
   }
 }
 
@@ -1006,6 +1030,7 @@ async function buddyLook($: EngineInterface, saved: Saved, t: number): Promise<L
     say: saying ? said.text : null,
     sayAt: saying ? (t - said.fromTick) / (said.untilTick - said.fromTick) : 0,
     prop: drawn.prop,
+    egg: await carriedEgg($, saved, tour, t, drawn.asleep),
   }
 }
 
@@ -1146,8 +1171,8 @@ export const register: Register = on => {
         return <Text wrap="truncate-end">{compactLine(view.face, view.name, view.say, e.props.bodyColumns, view.sayAt)}</Text>
       }
 
-      const rows = bandRows(view.sprite, view.say, e.props.bodyColumns, view.sayAt)
-      const right = rightRuns(rows.bubble, view.prop)
+      const rows = bandRows(view.sprite, view.say, e.props.bodyColumns, view.sayAt, view.egg ? EGG_GUTTER : 0)
+      const right = rightRuns(rows.bubble, view.prop, view.egg)
       const nameRow = (
         <Box>
           <Text dimColor wrap="truncate-end">{view.label}</Text>

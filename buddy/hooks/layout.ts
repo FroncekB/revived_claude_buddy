@@ -30,12 +30,14 @@ export function paintRuns(art: string, paint = ''): Run[] {
 }
 
 // The band's right-hand column, a row of runs per sprite row: the bubble when it has one, else
-// a holiday prop after a 2-column gap, else a space.
-export function rightRuns(bubble: readonly string[], prop: Prop | null): Run[][] {
+// a holiday prop after a 2-column gap, else a space. An egg being carried stands in a gutter
+// before it (Breeding spec section 6).
+export function rightRuns(bubble: readonly string[], prop: Prop | null, egg: readonly string[] | null = null): Run[][] {
   const quiet = bubble.every(row => !row)
   return bubble.map((row, i) => {
     const art = quiet ? prop?.art[i] : undefined
-    return art ? [{ text: ' '.repeat(PROP_GAP) }, ...paintRuns(art, prop?.paint?.[i])] : [{ text: ' ' + row }]
+    const runs = art ? [{ text: ' '.repeat(PROP_GAP) }, ...paintRuns(art, prop?.paint?.[i])] : [{ text: ' ' + row }]
+    return egg ? [{ text: egg[i] ?? '' }, ...runs] : runs
   })
 }
 
@@ -48,8 +50,9 @@ export function isCompact(maxRows: number, bodyColumns: number): boolean {
   return maxRows < MIN_FULL_ROWS || bodyColumns < MIN_FULL_COLS
 }
 
-export function bubbleWidth(bodyColumns: number): number {
-  return Math.min(bodyColumns - 14, MAX_BUBBLE_W)
+// `gutter` is the columns an egg takes between the sprite and the bubble.
+export function bubbleWidth(bodyColumns: number, gutter = 0): number {
+  return Math.min(bodyColumns - 14 - gutter, MAX_BUBBLE_W)
 }
 
 // Which of `count` pages is up `at` (0 to 1) of the way through a bubble's life: each gets an equal share.
@@ -114,8 +117,9 @@ export function bandRows(
   say: string | null,
   bodyColumns: number,
   at: number,
+  gutter = 0,
 ): { sprite: string[]; bubble: string[] } {
-  const box = say ? bubbleRows(say, bubbleWidth(bodyColumns), at) : []
+  const box = say ? bubbleRows(say, bubbleWidth(bodyColumns, gutter), at) : []
   return {
     sprite: Array.from({ length: 5 }, (_, i) => sprite[i] ?? ''),
     bubble: Array.from({ length: 5 }, (_, i) => box[i] ?? ''),

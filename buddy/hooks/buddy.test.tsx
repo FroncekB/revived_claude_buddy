@@ -699,13 +699,15 @@ test('debug off ends the tour', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: /Pip/ })).toBeDefined()
 })
 
-test('the tour ends by itself after the last mood', async ($, on) => {
+test('the tour ends by itself after its egg hatches', async ($, on) => {
   const clock = world(on, { buddy: RECORD })
   await $.session.start(START)
   await runner($)('debug')
   const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
   await clock.advance(TOUR_TICKS * 500 - 500)
-  expect(await ui.find({ type: 'Text', text: /tour: sulky/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /tour: egg hatching/ })).toBeDefined()
+  // The tour's egg, shaking, though this buddy carries none.
+  expect(await ui.find({ text: /\(\\\/\\\)/ })).toBeDefined()
   await clock.advance(500)
   expect(await ui.find({ type: 'Text', text: /tour/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /Pip/ })).toBeDefined()
@@ -988,6 +990,85 @@ const BROODY: Saved = {
   ],
   egg: { seed: 'egg-seed', startedAt: '2026-10-05T12:00:00.000Z', fromTurns: 1_471 },
 }
+
+test('the band carries the egg in a gutter beside the buddy, on the terminal and the desktop', async ($, on) => {
+  world(on, { buddy: BROODY })
+  model(on, null, 'Hi.')
+  await $.session.start(START)
+  const terminal = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band(10, 80) })
+  // 149 of 150 turns: cracked.
+  expect(await terminal.find({ text: /\(\\\/\\\)/ })).toBeDefined()
+  const desktop = await $.ui.mount({ plugin: 'buddy', surface: 'desktop', ...band(10, 80) })
+  expect(String((await desktop.find({ type: 'Svg' }))?.props.source)).toContain('.-.')
+  // The compact band has no room for it.
+  const short = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band(3, 80) })
+  expect(await short.find({ text: /\.-\./ })).toBeUndefined()
+})
+
+test('an egg that cannot be drawn costs only the egg, never the band', async ($, on) => {
+  world(on, { buddy: BROODY })
+  // Once the session has started, the egg's hatching flag can't be read.
+  let broken = false
+  on('state.get', { plugin: 'buddy', key: 'eggHatching' }, async (_$, e, next) =>
+    broken ? { deny: 'state offline' } : next(e),
+  )
+  await $.session.start(START)
+  broken = true
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band(10, 80) })
+  expect(await ui.find({ text: /Pip/ })).toBeDefined()
+  expect(await ui.find({ text: /\.-\./ })).toBeUndefined()
+})
+
+test('a swap mid-egg keeps the egg in the band, and the buddy swapped in carries it to its hatch', async ($, on) => {
+  const shared = sharedStore(on, BROODY)
+  const clock = world(on, null)
+  on('turn.complete', async (_$, e) => ({ text: e.answer }))
+  const calls = hatchCalls(on, '{"name": "Sprout", "personality": "Fresh out."}')
+  await $.session.start(START)
+  expect(await runner($)('swap mochi')).toBe('Mochi is back.')
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band(10, 80) })
+  expect(await ui.find({ text: /\.-\./ })).toBeDefined()
+  // Mochi's turn is the 150th since the egg started.
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(calls.hatch).toHaveLength(1)
+  const saved = shared.row as Saved
+  expect(saved.active).toBe('swap-1')
+  expect(saved.buddies.at(-1)?.soul.name).toBe('Sprout')
+})
+
+test('with no egg out the band has no gutter', async ($, on) => {
+  const { egg: _, ...none } = BROODY
+  world(on, { buddy: none })
+  await $.session.start(START)
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band(10, 80) })
+  expect(await ui.find({ text: /\.-\./ })).toBeUndefined()
+})
+
+test('the egg shakes, cracked, while its soul call is out', async ($, on) => {
+  const due: Saved = { ...BROODY, egg: { ...BROODY.egg!, fromTurns: 1_400 } }
+  const clock = world(on, { buddy: due })
+  let release!: () => void
+  const gate = new Promise<void>(resolve => {
+    release = resolve
+  })
+  on('model.complete', async () => {
+    await gate
+    return { value: failed() }
+  })
+  await $.session.start(START)
+  for (let i = 0; i < 20; i++) await clock.advance(0)
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band(10, 80) })
+  // The egg's middle row; the ghost's hem zigzags too, but never inside brackets.
+  const middle = async () => (await ui.findAll({ type: 'Text' })).map(t => t.text ?? '').find(text => text.includes('(\\/\\)'))
+  const first = await middle()
+  await clock.advance(500)
+  expect(await middle()).not.toBe(first)
+  release()
+  await clock.settle()
+  expect(await ui.find({ text: /\.-\./ })).toBeUndefined()
+})
 
 test('breed is refused below five in the dex, with the count to go', async ($, on) => {
   world(on, { buddy: TWO })

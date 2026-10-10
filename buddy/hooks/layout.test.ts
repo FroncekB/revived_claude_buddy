@@ -213,6 +213,21 @@ test('the right-hand column: the bubble when there is one, else the prop after a
   expect(rightRuns(['', '', '', '', ''], null)).toEqual(Array.from({ length: 5 }, () => [{ text: ' ' }]))
 })
 
+test('a carried egg stands in a gutter before the bubble or the prop, which shift right to make room', () => {
+  const egg = ['       ', '       ', '  .-.  ', ' (   ) ', "  '-'  "]
+  const prop = { art: ['|*=', '|='], paint: [' br'] }
+  const quiet = rightRuns(['', '', '', '', ''], prop, egg)
+  expect(quiet[0]).toEqual([{ text: '       ' }, { text: '  ' }, { text: '|' }, { text: '*', color: 'blue' }, { text: '=', color: 'red' }])
+  expect(quiet[3]).toEqual([{ text: ' (   ) ' }, { text: ' ' }])
+  expect(bubbleWidth(80, 7)).toBe(59)
+  expect(bubbleWidth(200, 7)).toBe(80)
+  const talking = bandRows(SPRITE, 'x'.repeat(200), 80, 0, 7)
+  expect(talking.bubble[0]).toHaveLength(59)
+  expect(rightRuns(talking.bubble, null, egg).map(row => row.map(r => r.text).join(''))).toEqual(
+    talking.bubble.map((row, i) => egg[i] + ' ' + row),
+  )
+})
+
 test('the journal reads newest first with ages padded, and its text form keeps to 11 lines', () => {
   const noon = new Date(2026, 9, 7, 12).getTime()
   const daysAgo = (d: number) => new Date(2026, 9, 7 - d, 12).toISOString()
