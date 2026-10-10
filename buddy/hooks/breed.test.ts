@@ -151,4 +151,25 @@ test('damaged parents, a missing parent or a loop read as a plain roll and never
   const loop = [entry('p', ['q', 'r']), entry('q', ['p', 'r']), entry('r')]
   expect(bornBones(loop, 'p')).toEqual(breedBones('p', rollBones('q'), rollBones('r')))
   expect(bornBones(loop, 'q')).toEqual(breedBones('q', rollBones('p'), rollBones('r')))
+  // A buddy reached down two paths reads the loop as it meets it on each: its bones are not the
+  // same on both.
+  const both = [...loop, entry('t', ['p', 'q'])]
+  const viaP = breedBones('p', rollBones('q'), rollBones('r'))
+  const viaQ = breedBones('q', rollBones('p'), rollBones('r'))
+  expect(bornBones(both, 't')).toEqual(breedBones('t', viaP, viaQ))
+})
+
+test('an inbred lineage, each buddy bred from the two before it, is worked out without walking it twice', () => {
+  // Walking both parents of every buddy afresh costs the Fibonacci numbers, minutes at 40.
+  const GENERATIONS = 40
+  const lineage = [entry('g0'), entry('g1')]
+  for (let i = 2; i < GENERATIONS; i++) lineage.push(entry(`g${i}`, [`g${i - 2}`, `g${i - 1}`]))
+  const started = Date.now()
+  const last = bornBones(lineage, `g${GENERATIONS - 1}`)
+  expect(Date.now() - started).toBeLessThan(100)
+  // Worked out generation by generation, each from the two before it.
+  const bones = [rollBones('g0'), rollBones('g1')]
+  for (let i = 2; i < GENERATIONS; i++) bones.push(breedBones(`g${i}`, bones[i - 2]!, bones[i - 1]!))
+  expect(last).toEqual(bones[GENERATIONS - 1])
+  expect(bornBones(lineage, 'g9')).toEqual(bones[9])
 })

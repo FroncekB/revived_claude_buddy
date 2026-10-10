@@ -56,19 +56,36 @@ export function parentsOf(buddies: readonly Pick<Buddy, 'seed'>[], raw: unknown)
   return [p0, p1].every(p => buddies.some(b => b.seed === p)) ? [p0, p1] : null
 }
 
+// A buddy's born bones, and whether the walk to them met a loop.
+type Born = { bones: Bones; looped: boolean }
+
 // The bones `seed` was born with: bred from its parents' when it has two in the record, else
-// rolled. `seen` holds the buddies already on this walk, so a hand-made loop reads as a roll.
-function born(buddies: readonly Buddy[], seed: string, seen: ReadonlySet<string>): Bones {
+// rolled. `path` holds the buddies on this walk, so a hand-made loop reads as a roll where it
+// closes. `memo` keeps the bones of each buddy whose lineage met no loop: those can't depend on
+// the path, and a lineage bred from itself would otherwise be walked once per path through it.
+function born(buddies: readonly Buddy[], seed: string, path: ReadonlySet<string>, memo: Map<string, Bones>): Born {
+  const known = memo.get(seed)
+  if (known) return { bones: known, looped: false }
   const parents = parentsOf(buddies, buddies.find(b => b.seed === seed)?.parents)
-  const walked = new Set(seen).add(seed)
-  if (!parents || seen.has(seed) || parents.some(p => walked.has(p))) return rollBones(seed)
-  return breedBones(seed, born(buddies, parents[0], walked), born(buddies, parents[1], walked))
+  const walked = new Set(path).add(seed)
+  let result: Born
+  if (!parents) {
+    result = { bones: rollBones(seed), looped: false }
+  } else if (parents.some(p => walked.has(p))) {
+    result = { bones: rollBones(seed), looped: true }
+  } else {
+    const a = born(buddies, parents[0], walked, memo)
+    const b = born(buddies, parents[1], walked, memo)
+    result = { bones: breedBones(seed, a.bones, b.bones), looped: a.looped || b.looped }
+  }
+  if (!result.looped) memo.set(seed, result.bones)
+  return result
 }
 
 // A buddy's bones before any growth, looked up through the record. Never throws: a damaged
 // `parents`, a parent missing from the record or a loop reads as a plain roll.
 export function bornBones(buddies: readonly Buddy[], seed: string): Bones {
-  return born(buddies, seed, new Set())
+  return born(buddies, seed, new Set(), new Map()).bones
 }
 
 // The bones an egg will hatch into: bred when it has two parents in the record, else rolled, as
