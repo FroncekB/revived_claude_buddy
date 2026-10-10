@@ -330,7 +330,7 @@ async function countAndFlush(
 async function speakUp($: EngineInterface, turn: number) {
   const saved = await read($, record)
   if (!saved || (await read($, hatching))) return
-  const bones = bonesFor(activeBuddy(saved))
+  const bones = bonesFor(activeBuddy(saved), saved.buddies)
   const t = await read($, tick)
   const said = await read($, bubble)
   const say = shouldFlag({
@@ -448,7 +448,7 @@ async function ask(
 // still says so (Progression spec section 4). `fallback` is said when the model isn't asked or
 // doesn't answer; without one, a canned line is.
 async function reply($: EngineInterface, who: Who, prompt: string, fallback?: string) {
-  const bones = bonesFor(who)
+  const bones = bonesFor(who, (await read($, record))?.buddies ?? [])
   const now = await $.clock.now()
   const last = await read($, lastReplyAt)
   await update($, lastReplyAt, () => now)
@@ -550,7 +550,7 @@ async function nudgeDuck($: EngineInterface, duck: DuckDue, ended: number): Prom
   const buddy = activeBuddy(saved)
   const name = buddy.soul.name
   const replied = await read($, lastReplyAt)
-  const text = await ask($, buddy, bonesFor(buddy), duckPrompt(name, duck.tool, duck.n), 'react')
+  const text = await ask($, buddy, bonesFor(buddy, saved.buddies), duckPrompt(name, duck.tool, duck.n), 'react')
   // A reply that came in meanwhile wins, whether it cut the call short or, inside its 5 s floor,
   // asked nothing; so does a swap, which the offer was not for. An answer that comes back over an
   // announcement is dropped.
@@ -602,7 +602,7 @@ async function react($: EngineInterface, summary: TurnSummary, facts: TurnFacts)
   const saved = await read($, record)
   if (!saved || (await read($, hatching))) return
   const buddy = activeBuddy(saved)
-  const bones = bonesFor(buddy)
+  const bones = bonesFor(buddy, saved.buddies)
   const now = await $.clock.now()
   const speak = shouldQuip({
     mode: saved.mode,
@@ -666,7 +666,7 @@ async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | un
   // Another session may have changed the store since this one last looked.
   await adopt($, saved)
   const buddy = activeBuddy(saved)
-  const bones = bonesFor(buddy)
+  const bones = bonesFor(buddy, saved.buddies)
   const name = buddy.soul.name
   const who = `${name}, ${bones.rarity} ${bones.species}`
   const hidden = `${name} is hidden. Run /buddy to bring it back.`
@@ -719,7 +719,7 @@ async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | un
       const shown = shownBuddy(saved, target.seed)
       const progress = cardProgress(saved, shown)
       return [
-        ...cardLines(shown.soul, dressed(shown, saved.you), saved.rerolls, progress),
+        ...cardLines(shown.soul, dressed(shown, saved), saved.rerolls, progress),
         streakLine(saved.you, await countsOf($, shown)),
         achievementsText(progress.earned.length),
       ].join('\n')
@@ -784,8 +784,8 @@ async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | un
     case 'hat': {
       if (await read($, hatching)) return EGG
       if (saved.mode === 'off') return hidden
-      const can = wearable(buddy, saved.you)
-      const worn = wornHat(buddy, saved.you)
+      const can = wearable(buddy, saved)
+      const worn = wornHat(buddy, saved)
       if (parsed.hat === undefined) return hatList(name, worn, can)
       const choice = hatChoice({ name, words: parsed.hat, worn, can })
       if ('reply' in choice) return choice.reply
@@ -861,7 +861,7 @@ async function buddyLook($: EngineInterface, saved: Saved, t: number): Promise<L
   // A running /buddy debug tour dresses the real buddy up; nothing saved changes.
   const started = await read($, tourStart)
   const tour = started === null ? null : tourAt(t - started, await read($, tourStage))
-  const own = bonesFor(buddy)
+  const own = bonesFor(buddy, saved.buddies)
   const bones = tour ? { ...own, ...tour.look } : own
   // The tour draws the stage it was asked for; otherwise the buddy is drawn at its own.
   const stage = tour ? tour.stage : stageOf(levelOf(buddy.counts))
@@ -884,7 +884,7 @@ async function buddyLook($: EngineInterface, saved: Saved, t: number): Promise<L
         heartsFrame,
         saying,
       }
-    : await liveScene($, buddy, { ...own, hat: wornHat(buddy, saved.you) }, stage, t, heartsFrame, saying)
+    : await liveScene($, buddy, { ...own, hat: wornHat(buddy, saved) }, stage, t, heartsFrame, saying)
   const drawn = draw(scene)
   const { label, stars } = nameLine(name, bones, tour ? null : levelOf(buddy.counts))
   const sprite = spriteTint(bones, animTick)
@@ -1090,7 +1090,7 @@ export const register: Register = on => {
       if (!saved) return <Text dimColor>{NO_BUDDY}</Text>
 
       const buddy = shownBuddy(saved, await read($, cardSeed))
-      const bones = dressed(buddy, saved.you)
+      const bones = dressed(buddy, saved)
       const progress = cardProgress(saved, buddy)
       const history = { you: saved.you, counts: await countsOf($, buddy) }
       if (e.surface !== 'terminal') {
@@ -1168,7 +1168,7 @@ export const register: Register = on => {
       const rows = journalRows(buddy.journal, await $.clock.now())
       if (e.surface !== 'terminal') {
         const { Svg } = $.ui.resolve(e)
-        return <Svg source={journalSvg(name, bonesFor(buddy), rows)} alt={journalAlt(name, rows)} />
+        return <Svg source={journalSvg(name, bonesFor(buddy, saved.buddies), rows)} alt={journalAlt(name, rows)} />
       }
 
       return (

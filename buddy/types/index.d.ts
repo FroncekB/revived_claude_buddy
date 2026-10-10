@@ -104,6 +104,9 @@ export type Buddy = {
   // The hat it wears: a rolled or earned hat's id, or 'none' (Interaction spec section 2).
   // Missing, or a hat it can't wear, reads as the hat it rolled.
   hat?: string
+  // A bred buddy's parents, copied from its egg: [the active buddy when they brooded it, its
+  // partner] (Breeding spec section 1). Its bones are bred from theirs.
+  parents?: [string, string]
 }
 
 // The `$.store` key `buddy` (Foundation spec section 1).

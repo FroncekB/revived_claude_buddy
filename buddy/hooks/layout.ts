@@ -275,7 +275,7 @@ export function dexRows(saved: Saved, now: number): DexRow[] {
     return {
       number: i + 1,
       name: b.soul.name,
-      bones: dressed(b, saved.you),
+      bones: dressed(b, saved),
       level,
       stage: stageOf(level),
       dates: `${shortDate(b.soul.hatchedAt, year)} – ${end}`,

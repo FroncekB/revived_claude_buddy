@@ -4,8 +4,8 @@ import { earn } from './achievements'
 import { addMoments, awayMoment, bestsOf, milestones, noticeTurns } from './journal'
 import { addCounts, localDay, visit, zeroCounts } from './ledger'
 import { applyMood, sulkFor, withSulk } from './mood'
+import { bornBones } from './breed'
 import { STAGES, grewMoments } from './progress'
-import { rollBones } from './roll'
 import type { Worn } from './sprites'
 import { readPlay, wearable, wornHat } from './toys'
 import type { Game, Side, Throw } from './toys'
@@ -221,8 +221,8 @@ export function applyChange(saved: Saved | null, change: Change, now: number): S
     case 'hat': {
       const b = saved?.buddies.find(x => x.seed === change.seed)
       // Judged on the fresh record: a hat it can wear, and a change from what it wears.
-      if (!saved || !b || !wearable(b, saved.you).includes(change.hat) || wornHat(b, saved.you) === change.hat) return null
-      const rolled = rollBones(b.seed).hat
+      if (!saved || !b || !wearable(b, saved).includes(change.hat) || wornHat(b, saved) === change.hat) return null
+      const rolled = bornBones(saved.buddies, b.seed).hat
       return {
         ...saved,
         buddies: saved.buddies.map(x => {
@@ -315,7 +315,7 @@ export function notFound(saved: Saved, who: string, found: Exclude<Found, { kind
     const number = NUMBER.exec(who)
     return number ? `No buddy #${Number(number[1])} in the dex.` : `No buddy named ${who} in the dex.`
   }
-  const each = found.numbers.map(n => `#${n} ${rollBones(saved.buddies[n - 1]!.seed).species}`)
+  const each = found.numbers.map(n => `#${n} ${bornBones(saved.buddies, saved.buddies[n - 1]!.seed).species}`)
   const name = saved.buddies[found.numbers[0]! - 1]!.soul.name
   return `${found.numbers.length} buddies are named ${name}: ${each.join(', ')}. Run /buddy ${command} #${found.numbers.at(-1)}.`
 }
