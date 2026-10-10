@@ -315,6 +315,17 @@ test('a memory reads as one prompt line, and a talk carries the three newest', (
   expect(talkMemories(JOURNAL.slice(0, 1), NOON)).toHaveLength(3)
 })
 
+test('brooding names the partner by dex number when it has the dex, and nobody when it has not', () => {
+  const buddies = [{ soul: { name: 'Pip', personality: 'x', hatchedAt: AT } }, { soul: { name: 'Mochi', personality: 'x', hatchedAt: AT } }]
+  const brooded: Moment = { at: AT, kind: 'brooded', n: 2 }
+  expect(momentText(brooded, buddies)).toBe('brooded an egg with Mochi')
+  expect(momentText(brooded)).toBe('brooded an egg')
+  expect(momentText({ ...brooded, n: 3 }, buddies)).toBe('brooded an egg')
+  expect(readable([brooded])).toEqual([brooded])
+  expect(memoryLine(brooded, NOON, buddies)).toContain(': brooded an egg with Mochi. Bring it up')
+  expect(talkMemories([brooded], NOON, buddies)).toContain('- today: brooded an egg with Mochi')
+})
+
 test('a hatch reads as words, and a journal keeps it', () => {
   expect(momentText({ at: AT, kind: 'hatched', n: 150 })).toBe('hatched after 150 turns in the egg')
   expect(readable([{ at: AT, kind: 'hatched', n: 150 }])).toEqual([{ at: AT, kind: 'hatched', n: 150 }])

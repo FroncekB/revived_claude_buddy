@@ -84,6 +84,14 @@ export function eggXpSoFar(saved: Eggs): number {
   return Math.min(EGG_XP, Math.max(0, lifetimeXp(saved) - eggsOf(saved) * EGG_XP))
 }
 
+// Breeding unlocks with this many buddies in the dex, Collector's mark (section 4).
+export const BREED_DEX = 5
+
+// "It hatches in 110 turns.": what is left of an egg's 150 turns.
+export function hatchesIn(left: number): string {
+  return left > 0 ? `It hatches in ${left} turn${left === 1 ? '' : 's'}.` : 'It hatches any moment now.'
+}
+
 // The one reroll (section 2): while the dex has one buddy, under level 2, and nothing rerolled.
 export function mulliganOpen(saved: Pick<Saved, 'buddies' | 'rerolls'>): boolean {
   const only: Buddy | undefined = saved.buddies[0]

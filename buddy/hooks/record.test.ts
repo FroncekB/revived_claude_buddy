@@ -3,7 +3,9 @@ import { expect, test } from 'claude-code/testing'
 import type { Bests, Saved, TurnFacts } from '../types'
 import { newsOf } from './achievements'
 import { countEvent, zeroCounts } from './ledger'
-import { USAGE, activeBuddy, applyChange, classify, findBuddy, migrate, parseSub, shownBuddy, targetOf } from './record'
+import {
+  USAGE, activeBuddy, applyChange, breedChoice, classify, findBuddy, migrate, parseSub, shownBuddy, targetOf,
+} from './record'
 import type { Change } from './record'
 
 const SOUL = { name: 'Pip', personality: 'x', hatchedAt: '2026-10-07T00:00:00.000Z' }
@@ -41,13 +43,17 @@ test('subcommands', () => {
   expect(parseSub('swap #2')).toEqual({ sub: 'swap', target: '#2' })
   expect(sub('swap')).toBe('usage')
   expect(sub('swap Pip now')).toBe('usage')
+  expect(parseSub('breed Mochi')).toEqual({ sub: 'breed', target: 'Mochi' })
+  expect(parseSub('BREED #3')).toEqual({ sub: 'breed', target: '#3' })
+  expect(sub('breed')).toBe('usage')
+  expect(sub('breed Pip Mochi')).toBe('usage')
   expect(parseSub('rename Mochi')).toEqual({ sub: 'rename', name: 'Mochi' })
   expect(parseSub('RENAME  Sir   Pip')).toEqual({ sub: 'rename', name: 'Sir Pip' })
   expect(sub('rename')).toBe('usage')
   expect(parseSub('hat')).toEqual({ sub: 'hat' })
   expect(parseSub('HAT Flower  Crown')).toEqual({ sub: 'hat', hat: 'Flower Crown' })
   expect(USAGE).toBe(
-    'Usage: /buddy [pet | feed | play [game] | card [who] | journal [who] | dex | swap <who> | rename <name> | hat [hat] | mute | unmute | off | reroll [confirm]]',
+    'Usage: /buddy [pet | feed | play [game] | card [who] | journal [who] | dex | swap <who> | breed <who> | rename <name> | hat [hat] | mute | unmute | off | reroll [confirm]]',
   )
   expect(sub('mute')).toBe('mute')
   expect(sub('unmute')).toBe('unmute')
@@ -514,6 +520,65 @@ test('a hatch writes nothing for another egg, an egg not yet due, or parents its
   const { egg: _, ...none } = carrying()
   expect(applyChange(none, hatchEgg(), NOON)).toBeNull()
   expect(applyChange(null, hatchEgg(), NOON)).toBeNull()
+})
+
+// Five in the dex: Pip ('a', retired) and Bix ('b', here), adults at 810 turns each, then three
+// hatchlings, Nib, Dot and Moss. An egg 40 turns in, with no parents yet, unless `egg` says
+// otherwise; `egg: null` leaves none.
+function brood(egg?: Saved['egg'] | null): Saved {
+  const base = pair(YESTERDAY)
+  const adult = { ...zeroCounts(), turns: 810 }
+  const young = (seed: string, name: string) => ({ seed, soul: { ...SOUL, name }, retiredAt: AT, counts: zeroCounts() })
+  return {
+    ...base,
+    buddies: [
+      { ...base.buddies[0]!, counts: adult },
+      { ...base.buddies[1]!, counts: adult },
+      young('c', 'Nib'),
+      young('d', 'Dot'),
+      young('e', 'Moss'),
+    ],
+    you: { ...base.you, eggs: 2 },
+    ...(egg === null ? {} : { egg: egg ?? { seed: 'egg', startedAt: AT, fromTurns: 1_580 } }),
+  }
+}
+
+test('breeding is refused, in order, until five are in the dex, an egg waits for parents, and both are adults', () => {
+  const reply = (saved: Saved, who: string) => {
+    const choice = breedChoice(saved, who)
+    return choice.kind === 'no' ? choice.reply : choice.partner
+  }
+  const four: Saved = { ...brood(), buddies: brood().buddies.slice(0, 4) }
+  expect(reply(four, 'Pip')).toBe('Breeding unlocks at 5 buddies in the dex: 1 to go.')
+  expect(reply(pair(YESTERDAY), 'Pip')).toBe('Breeding unlocks at 5 buddies in the dex: 3 to go.')
+  expect(reply(brood(null), 'Pip')).toBe('No egg to brood. Your next egg comes in 8,100 xp.')
+  const brooding = brood({ seed: 'egg', startedAt: AT, fromTurns: 1_580, parents: ['b', 'a'] })
+  expect(reply(brooding, 'Pip')).toBe('Bix and Pip are already brooding this egg.')
+  expect(reply(brood(), 'Rex')).toBe('No buddy named Rex in the dex.')
+  expect(reply(brood(), 'bix')).toBe("Bix can't breed with itself. Pick one from /buddy dex.")
+  expect(reply(brood(), 'Nib')).toBe('Nib is level 1. Buddies breed from level 10.')
+  const youngHere: Saved = { ...brood(), active: 'c' }
+  expect(reply(youngHere, 'Pip')).toBe('Nib is level 1. Buddies breed from level 10.')
+  expect(reply(brood(), 'pip')).toBe('a')
+  expect(reply(brood(), '#1')).toBe('a')
+})
+
+test('breeding sets the egg parents, active first, and logs it on both, with no visit', () => {
+  const before = brood()
+  const saved = applyChange(before, { kind: 'breed', partner: 'a' }, NOON)!
+  expect(saved.egg).toEqual({ seed: 'egg', startedAt: AT, fromTurns: 1_580, parents: ['b', 'a'] })
+  expect(saved.buddies[0]?.journal).toEqual([{ at: AT, kind: 'brooded', n: 2 }])
+  expect(saved.buddies[1]?.journal).toEqual([{ at: AT, kind: 'brooded', n: 1 }])
+  expect(saved.buddies.slice(2).every(b => b.journal === undefined)).toBe(true)
+  expect(saved.you).toEqual(before.you)
+  // Parents can't change once set, and the refusals write nothing.
+  expect(applyChange(saved, { kind: 'breed', partner: 'a' }, NOON)).toBeNull()
+  expect(applyChange(brood(null), { kind: 'breed', partner: 'a' }, NOON)).toBeNull()
+  expect(applyChange(brood(), { kind: 'breed', partner: 'b' }, NOON)).toBeNull()
+  expect(applyChange(brood(), { kind: 'breed', partner: 'c' }, NOON)).toBeNull()
+  expect(applyChange(brood(), { kind: 'breed', partner: 'gone' }, NOON)).toBeNull()
+  expect(applyChange({ ...before, buddies: before.buddies.slice(0, 4) }, { kind: 'breed', partner: 'a' }, NOON)).toBeNull()
+  expect(applyChange(null, { kind: 'breed', partner: 'a' }, NOON)).toBeNull()
 })
 
 test("a rename changes only that buddy's name, with no visit, and nothing when the name or seed is wrong", () => {

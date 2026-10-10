@@ -43,7 +43,11 @@ const KINDS = {
   away: true,
   grew: true,
   hatched: true,
+  brooded: true,
 } satisfies Record<MomentKind, true>
+
+// The dex, for the names a moment's words use: `brooded` names its partner by dex number.
+export type Names = readonly Pick<Buddy, 'soul'>[]
 
 const NOUN: Record<ToolGroup, string> = {
   shell: 'shell commands',
@@ -180,8 +184,9 @@ export function readable(journal: readonly Moment[] | undefined): Moment[] {
   )
 }
 
-// A moment's words, with no date: "Claude failed 18 shell commands in a row".
-export function momentText(m: Moment): string {
+// A moment's words, with no date: "Claude failed 18 shell commands in a row". `buddies` names a
+// brooding partner; without it, or for a number out of range, the moment names nobody.
+export function momentText(m: Moment, buddies?: Names): string {
   const n = withCommas(m.n)
   switch (m.kind) {
     case 'failRun':
@@ -202,6 +207,10 @@ export function momentText(m: Moment): string {
       return m.n >= 2 ? 'grew into an elder' : 'grew into an adult'
     case 'hatched':
       return `hatched after ${n} turns in the egg`
+    case 'brooded': {
+      const partner = buddies?.[m.n - 1]?.soul.name
+      return partner ? `brooded an egg with ${partner}` : 'brooded an egg'
+    }
   }
 }
 
@@ -263,17 +272,17 @@ export function recall(o: {
 }
 
 // The quip prompt's line for a recalled memory.
-export function memoryLine(m: Moment, now: number): string {
-  return `A memory (${ageText(m.at, now)}): ${momentText(m)}. Bring it up if it fits, as "remember when...", without a date.`
+export function memoryLine(m: Moment, now: number, buddies?: Names): string {
+  return `A memory (${ageText(m.at, now)}): ${momentText(m, buddies)}. Bring it up if it fits, as "remember when...", without a date.`
 }
 
 // The talk prompt's lines: the newest TALK_MEMORIES memories, newest first; none for an empty journal.
-export function talkMemories(journal: readonly Moment[] | undefined, now: number): string[] {
+export function talkMemories(journal: readonly Moment[] | undefined, now: number, buddies?: Names): string[] {
   const newest = readable(journal).slice(-TALK_MEMORIES).reverse()
   if (newest.length === 0) return []
   return [
     'Your memories, newest first:',
-    ...newest.map(m => `- ${ageText(m.at, now)}: ${momentText(m)}`),
+    ...newest.map(m => `- ${ageText(m.at, now)}: ${momentText(m, buddies)}`),
     'Mention one only if it fits what they said.',
   ]
 }

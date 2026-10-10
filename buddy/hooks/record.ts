@@ -1,19 +1,19 @@
 // The saved record and the /buddy subcommands. Pure: no $.
 import type { Buddy, Counts, Mode, MoodEvent, Saved, SavedV1, Soul, Stage, TurnFacts } from '../types'
 import { earn } from './achievements'
-import { HATCH_TURNS, dueEgg, mulliganOpen, startEgg, withEggCount } from './eggs'
+import { BREED_DEX, HATCH_TURNS, dueEgg, eggStatus, mulliganOpen, readEgg, startEgg, withEggCount } from './eggs'
 import { addMoments, awayMoment, bestsOf, milestones, noticeTurns } from './journal'
 import { addCounts, localDay, visit, zeroCounts } from './ledger'
 import { applyMood, sulkFor, withSulk } from './mood'
 import { bornBones } from './breed'
-import { STAGES, grewMoments } from './progress'
+import { ADULT_LEVEL, STAGES, grewMoments, levelOf } from './progress'
 import type { Worn } from './sprites'
 import { readPlay, wearable, wornHat } from './toys'
 import type { Game, Side, Throw } from './toys'
 
 export const STORE_KEY = 'buddy'
 export const USAGE =
-  'Usage: /buddy [pet | feed | play [game] | card [who] | journal [who] | dex | swap <who> | rename <name> | hat [hat] | mute | unmute | off | reroll [confirm]]'
+  'Usage: /buddy [pet | feed | play [game] | card [who] | journal [who] | dex | swap <who> | breed <who> | rename <name> | hat [hat] | mute | unmute | off | reroll [confirm]]'
 
 // What the store holds, as this build reads it (Foundation spec section 1).
 export type Stored =
@@ -97,6 +97,8 @@ export type Change =
   // A new name for one buddy, and the hat it wears (Interaction spec section 2).
   | { kind: 'rename'; seed: string; name: string }
   | { kind: 'hat'; seed: string; hat: Worn }
+  // The active buddy and `partner` brooding the egg incubating (Breeding spec section 4).
+  | { kind: 'breed'; partner: string }
   // The egg hatching into the dex, with the parents its soul was made for (Breeding spec section 3).
   | { kind: 'hatchEgg'; seed: string; parents: [string, string] | null; soul: Soul; eggSeed?: string }
 
@@ -229,6 +231,25 @@ export function applyChange(saved: Saved | null, change: Change, now: number): S
         buddies: saved.buddies.map(b => (b.seed === change.seed ? { ...b, soul: { ...b.soul, name: change.name } } : b)),
       }
     }
+    case 'breed': {
+      if (!saved || breedChoice(saved, change.partner, true).kind !== 'ok') return null
+      const egg = saved.egg!
+      const partner = change.partner
+      const number = (seed: string) => saved.buddies.findIndex(b => b.seed === seed) + 1
+      const at = new Date(now).toISOString()
+      const brooded = (b: Buddy, other: string): Buddy => ({
+        ...b,
+        journal: addMoments(b.journal, [{ at, kind: 'brooded', n: number(other) }]),
+      })
+      // Parents can't change once set (Breeding spec section 4). No visit, as a rename makes none.
+      return {
+        ...saved,
+        egg: { ...egg, parents: [saved.active, partner] },
+        buddies: saved.buddies.map(b =>
+          b.seed === saved.active ? brooded(b, partner) : b.seed === partner ? brooded(b, saved.active) : b,
+        ),
+      }
+    }
     case 'hatchEgg': {
       const egg = saved && dueEgg(saved)
       // Judged on the fresh record: this egg, still due, with the parents its soul was made for.
@@ -265,6 +286,33 @@ export function applyChange(saved: Saved | null, change: Change, now: number): S
   }
 }
 
+// What /buddy breed <who> does (Breeding spec section 4): the partner to brood with, or the line
+// refusing it, checked in the spec's order. `bySeed` takes `who` as a seed, as the change does.
+export type BreedChoice = { kind: 'ok'; partner: string } | { kind: 'no'; reply: string }
+
+export function breedChoice(saved: Saved, who: string, bySeed = false): BreedChoice {
+  const no = (reply: string): BreedChoice => ({ kind: 'no', reply })
+  const short = BREED_DEX - saved.buddies.length
+  if (short > 0) return no(`Breeding unlocks at ${BREED_DEX} buddies in the dex: ${short} to go.`)
+  const egg = readEgg(saved)
+  if (!egg) return no(`No egg to brood. ${eggStatus(saved)}`)
+  const nameOf = (seed: string) => saved.buddies.find(b => b.seed === seed)?.soul.name ?? 'Buddy'
+  if (egg.parents) return no(`${nameOf(egg.parents[0])} and ${nameOf(egg.parents[1])} are already brooding this egg.`)
+  const found: Found = bySeed
+    ? saved.buddies.some(b => b.seed === who)
+      ? { kind: 'one', seed: who }
+      : { kind: 'none' }
+    : findBuddy(saved, who)
+  if (found.kind !== 'one') return no(notFound(saved, who, found, 'breed'))
+  const active = activeBuddy(saved)
+  if (found.seed === active.seed) return no(`${active.soul.name} can't breed with itself. Pick one from /buddy dex.`)
+  for (const b of [active, saved.buddies.find(x => x.seed === found.seed)!]) {
+    const level = levelOf(b.counts)
+    if (level < ADULT_LEVEL) return no(`${b.soul.name} is level ${level}. Buddies breed from level ${ADULT_LEVEL}.`)
+  }
+  return { kind: 'ok', partner: found.seed }
+}
+
 // Both absent, or the same two seeds in the same order.
 function sameParents(a: readonly string[] | undefined, b: readonly string[] | null): boolean {
   return a === undefined || b === null ? a === undefined && b === null : a[0] === b[0] && a[1] === b[1]
@@ -272,13 +320,13 @@ function sameParents(a: readonly string[] | undefined, b: readonly string[] | nu
 
 type Plain =
   'show' | 'pet' | 'feed' | 'dex' | 'mute' | 'unmute' | 'off' | 'reroll' | 'reroll-confirm' | 'debug-off' | 'usage'
-export type Sub = Plain | 'card' | 'journal' | 'swap' | 'debug' | 'rename' | 'hat' | 'play'
+export type Sub = Plain | 'card' | 'journal' | 'swap' | 'breed' | 'debug' | 'rename' | 'hat' | 'play'
 
 // A /buddy command as parsed: the subcommand, and what it was given (Progression spec section 7).
 export type Parsed =
   | { sub: Plain }
   | { sub: 'card' | 'journal'; target?: string }
-  | { sub: 'swap'; target: string }
+  | { sub: 'swap' | 'breed'; target: string }
   | { sub: 'debug'; stage?: Stage }
   // Everything after `rename`, as typed: validName refuses more than one word.
   | { sub: 'rename'; name: string }
@@ -310,6 +358,7 @@ export function parseSub(args: string): Parsed {
     return stage ? { sub: 'debug', stage } : { sub: 'usage' }
   }
   if (first === 'swap') return words.length === 2 ? { sub: 'swap', target: words[1]! } : { sub: 'usage' }
+  if (first === 'breed') return words.length === 2 ? { sub: 'breed', target: words[1]! } : { sub: 'usage' }
   if (first === 'rename') return words.length >= 2 ? { sub: 'rename', name: words.slice(1).join(' ') } : { sub: 'usage' }
   if (first === 'hat') return words.length === 1 ? { sub: 'hat' } : { sub: 'hat', hat: words.slice(1).join(' ') }
   if (first === 'play') {

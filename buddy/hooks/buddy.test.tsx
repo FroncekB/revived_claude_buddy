@@ -973,6 +973,68 @@ test('an egg left due hatches when a session starts', async ($, on) => {
   expect((shared.row as Saved).buddies.map(b => b.soul.name)).toEqual(['Pip', 'Sprout'])
 })
 
+// Five in the dex: Pip, here, and Mochi, retired, adults at 810 turns each, and three hatchlings;
+// an egg 149 turns along with no parents yet.
+const ADULT_COUNTS = { ...zeroCounts(), turns: 810 }
+const BROODY: Saved = {
+  ...SAVED,
+  you: { ...SAVED.you, lastDay: '2026-10-07', eggs: 2, earned: { grownUp: '2026-10-01T12:00:00.000Z', collector: '2026-10-01T12:00:00.000Z' } },
+  buddies: [
+    { ...SAVED.buddies[0]!, counts: ADULT_COUNTS },
+    { seed: 'swap-1', soul: { ...RECORD.soul, name: 'Mochi', personality: 'Naps on the stack.' }, retiredAt: '2026-10-05T12:00:00.000Z', counts: ADULT_COUNTS },
+    { seed: 'young-1', soul: { ...RECORD.soul, name: 'Nib' }, retiredAt: '2026-10-05T12:00:00.000Z', counts: zeroCounts() },
+    { seed: 'young-2', soul: { ...RECORD.soul, name: 'Dot' }, retiredAt: '2026-10-05T12:00:00.000Z', counts: zeroCounts() },
+    { seed: 'young-3', soul: { ...RECORD.soul, name: 'Moss' }, retiredAt: '2026-10-05T12:00:00.000Z', counts: zeroCounts() },
+  ],
+  egg: { seed: 'egg-seed', startedAt: '2026-10-05T12:00:00.000Z', fromTurns: 1_471 },
+}
+
+test('breed is refused below five in the dex, with the count to go', async ($, on) => {
+  world(on, { buddy: TWO })
+  await $.session.start(START)
+  expect(await runner($)('breed pip')).toBe('Breeding unlocks at 5 buddies in the dex: 3 to go.')
+})
+
+test('breed sets the parents with no model call, and the hatch hears about both', async ($, on) => {
+  const shared = sharedStore(on, BROODY)
+  const clock = world(on, null)
+  on('turn.complete', async (_$, e) => ({ text: e.answer }))
+  const calls = hatchCalls(on, '{"name": "Sprout", "personality": "Takes after both."}')
+  await $.session.start(START)
+  await clock.settle()
+  const run = runner($)
+  expect(await run('breed mochi')).toBe('Pip and Mochi are brooding the egg. It hatches in 1 turn.')
+  expect(calls.hatch.length + calls.other.length).toBe(0)
+  expect((shared.row as Saved).egg?.parents).toEqual(['test-seed', 'swap-1'])
+  expect(await run('breed mochi')).toBe('Pip and Mochi are already brooding this egg.')
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(calls.hatch).toHaveLength(1)
+  expect(calls.hatch[0]).toContain('Parents: Pip, ')
+  expect(calls.hatch[0]).toContain(', and Mochi, ')
+  expect(calls.hatch[0]).toContain('("Naps on the stack.")')
+  const saved = shared.row as Saved
+  expect(saved.buddies.at(-1)).toMatchObject({ soul: { name: 'Sprout' }, parents: ['test-seed', 'swap-1'] })
+})
+
+test('breed while the egg is hatching is told to wait', async ($, on) => {
+  const due: Saved = { ...BROODY, egg: { ...BROODY.egg!, fromTurns: 1_470 } }
+  const clock = world(on, { buddy: due })
+  let release!: () => void
+  const gate = new Promise<void>(resolve => {
+    release = resolve
+  })
+  on('model.complete', async () => {
+    await gate
+    return { value: failed() }
+  })
+  await $.session.start(START)
+  for (let i = 0; i < 20; i++) await clock.advance(0)
+  expect(await runner($)('breed mochi')).toBe('The egg is hatching.')
+  release()
+  await clock.settle()
+})
+
 test('a main turn saves its counts when it completes; a denied call is not counted', async ($, on) => {
   const shared = sharedStore(on, RECORD)
   const clock = world(on, null)

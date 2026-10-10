@@ -134,7 +134,15 @@ export function talkPrompt(message: string, memories: readonly string[] = [], du
   return [...lines, 'Reply in one line.'].join('\n')
 }
 
-export function hatchRequest(b: Bones): { system: string; prompt: string } {
+// A bred buddy's parent, as its hatch prompt describes it (Breeding spec section 4).
+export type Parent = { name: string; species: string; personality: string }
+
+// The hatch request. A brooded egg's carries its parents, so the child can take after them.
+export function hatchRequest(b: Bones, parents?: readonly [Parent, Parent]): { system: string; prompt: string } {
+  const stats =
+    `Species: ${b.species}. Rarity: ${b.rarity}. Shiny: ${b.shiny ? 'yes' : 'no'}. ` +
+    `Highest stat: ${b.peak} (${b.stats[b.peak]}). Lowest stat: ${b.low} (${b.stats[b.low]}).`
+  const parent = (p: Parent) => `${p.name}, ${withArticle(p.species)} ("${p.personality}")`
   return {
     system: [
       'You name and describe a small ASCII pet that lives in a developer terminal.',
@@ -142,9 +150,9 @@ export function hatchRequest(b: Bones): { system: string; prompt: string } {
       'name: one word, letters only, at most 12 characters.',
       "personality: at most 160 characters, written in the pet's own voice, shaped by its highest and lowest stats.",
     ].join('\n'),
-    prompt:
-      `Species: ${b.species}. Rarity: ${b.rarity}. Shiny: ${b.shiny ? 'yes' : 'no'}. ` +
-      `Highest stat: ${b.peak} (${b.stats[b.peak]}). Lowest stat: ${b.low} (${b.stats[b.low]}).`,
+    prompt: parents
+      ? `${stats}\nParents: ${parent(parents[0])}, and ${parent(parents[1])}. Take after them a little; the name is your own.`
+      : stats,
   }
 }
 

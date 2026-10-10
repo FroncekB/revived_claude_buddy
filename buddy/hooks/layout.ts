@@ -2,6 +2,7 @@
 import type { Buddy, Counts, Moment, Saved, Soul, Stage, You } from '../types'
 import { ACHIEVEMENTS, earnedOf, knownEarned } from './achievements'
 import { ageText, momentText, readable } from './journal'
+import type { Names } from './journal'
 import { RARITY, STATS } from './roll'
 import type { Bones } from './roll'
 import { totalCalls, withCommas } from './ledger'
@@ -220,18 +221,24 @@ export const journalHeader = (name: string) => `${name}'s journal`
 export const emptyJournal = (name: string) => `Nothing in ${name}'s journal yet.`
 
 // A journal's moments newest first, with their ages padded to the widest (Memory spec section 5).
-export function journalRows(journal: readonly Moment[] | undefined, now: number): JournalRow[] {
+export function journalRows(journal: readonly Moment[] | undefined, now: number, buddies?: Names): JournalRow[] {
   const rows = readable(journal)
     .reverse()
-    .map(m => ({ age: ageText(m.at, now), text: momentText(m) }))
+    .map(m => ({ age: ageText(m.at, now), text: momentText(m, buddies) }))
   const width = Math.max(0, ...rows.map(r => r.age.length))
   return rows.map(r => ({ ...r, age: r.age.padEnd(width) }))
 }
 
 // The journal as text, where no pane is placed: the header and the newest `limit` moments, inside
 // the 12 lines the card's text keeps to.
-export function journalLines(name: string, journal: readonly Moment[] | undefined, now: number, limit = 10): string[] {
-  const rows = journalRows(journal, now).slice(0, limit)
+export function journalLines(
+  name: string,
+  journal: readonly Moment[] | undefined,
+  now: number,
+  buddies?: Names,
+  limit = 10,
+): string[] {
+  const rows = journalRows(journal, now, buddies).slice(0, limit)
   if (rows.length === 0) return [journalHeader(name), emptyJournal(name)]
   return [journalHeader(name), ...rows.map(r => `${r.age}   ${r.text}`)]
 }
