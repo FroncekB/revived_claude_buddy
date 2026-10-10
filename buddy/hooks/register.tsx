@@ -231,7 +231,13 @@ async function commitNow($: EngineInterface, change: Change): Promise<string | n
   if (refused) return refused
   const before = base.kind === 'ok' ? base.saved : null
   const saved = applyChange(before, change, await $.clock.now())
-  if (!saved) return null
+  if (!saved) {
+    // A hatch another session won leaves nothing to write, but this one adopts the record it
+    // read, so its band stops drawing the egg (Breeding spec section 3). It says nothing, and
+    // the next adopting commit is the next check for a due egg.
+    if (change.kind === 'hatchEgg' && before) await adopt($, before)
+    return null
+  }
   await adopt($, saved)
   // Only the session whose commit made the change announces it, whether or not the write lands.
   await announce($, before, saved)

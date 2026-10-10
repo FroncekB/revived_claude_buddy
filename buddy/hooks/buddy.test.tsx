@@ -962,6 +962,10 @@ test('an egg another session hatched first is not hatched again, and nothing is 
   expect((shared.row as Saved).buddies.map(b => b.soul.name)).toEqual(['Pip', 'Rex'])
   const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
   expect(await bubbleOf(ui)).toBe('')
+  // It adopted their record, so its band no longer draws a cracked egg, and nothing hatches again.
+  expect(await ui.find({ text: /\.-\./ })).toBeUndefined()
+  await clock.settle()
+  expect(calls.hatch).toHaveLength(1)
 })
 
 test('an egg left due hatches when a session starts', async ($, on) => {
