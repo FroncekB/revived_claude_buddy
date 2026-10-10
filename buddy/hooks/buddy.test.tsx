@@ -879,6 +879,100 @@ test('a record from before eggs has its mulligan spent, and its first save start
   expect((shared.row as Saved).egg).toBeUndefined()
 })
 
+// RECORD's buddy at 959 turns, carrying an egg one turn from its hatch, already visited today so
+// no streak greeting takes the bubble.
+const NEARLY_HATCHED: Saved = {
+  ...SAVED,
+  you: { ...SAVED.you, lastDay: '2026-10-07', eggs: 1, earned: { grownUp: '2026-10-01T12:00:00.000Z' } },
+  buddies: [{ ...SAVED.buddies[0]!, counts: { ...zeroCounts(), turns: 959 } }],
+  egg: { seed: 'egg-seed', startedAt: '2026-10-05T12:00:00.000Z', fromTurns: 810 },
+}
+
+// Answers $.model.complete, keeping the hatch calls apart from the rest: a hatch gets `soul`.
+function hatchCalls(on: On, soul: string, onHatch: () => void = () => undefined) {
+  const calls = { hatch: [] as string[], other: [] as string[] }
+  on('model.complete', async (_$, e) => {
+    if (e.system?.includes('JSON only')) {
+      calls.hatch.push(e.prompt)
+      onHatch()
+      return { value: ok(soul) }
+    }
+    calls.other.push(e.prompt)
+    return { value: failed() }
+  })
+  return calls
+}
+
+test('the turn that carries the egg to 150 hatches it into the dex, and the buddy here stays', async ($, on) => {
+  const shared = sharedStore(on, NEARLY_HATCHED)
+  const clock = world(on, null)
+  on('turn.complete', async (_$, e) => ({ text: e.answer }))
+  const calls = hatchCalls(on, '{"name": "Sprout", "personality": "Fresh out."}')
+  await $.session.start(START)
+  await clock.settle()
+  expect(calls.hatch).toHaveLength(0)
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(calls.hatch).toHaveLength(1)
+  const saved = shared.row as Saved
+  expect(saved.egg).toBeUndefined()
+  expect(saved.active).toBe('test-seed')
+  expect(saved.buddies.map(b => b.soul.name)).toEqual(['Pip', 'Sprout'])
+  expect(saved.buddies[1]?.retiredAt).toBe(saved.buddies[1]?.soul.hatchedAt)
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await bubbleOf(ui)).toMatch(/^The egg hatched! Meet Sprout, an? [a-z ]+\. Run \/buddy swap Sprout\.$/)
+  expect(await ui.find({ text: /Pip/ })).toBeDefined()
+  // No hello: the hatchling isn't here.
+  await clock.settle()
+  expect(calls.hatch).toHaveLength(1)
+})
+
+test('a muted hatch celebrates without a bubble', async ($, on) => {
+  const shared = sharedStore(on, { ...NEARLY_HATCHED, mode: 'muted' })
+  const clock = world(on, null)
+  on('turn.complete', async (_$, e) => ({ text: e.answer }))
+  const calls = hatchCalls(on, '{"name": "Sprout", "personality": "Fresh out."}')
+  await $.session.start(START)
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(calls.hatch).toHaveLength(1)
+  expect((shared.row as Saved).buddies).toHaveLength(2)
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await bubbleOf(ui)).toBe('')
+})
+
+test('an egg another session hatched first is not hatched again, and nothing is announced', async ($, on) => {
+  const shared = sharedStore(on, NEARLY_HATCHED)
+  const clock = world(on, null)
+  on('turn.complete', async (_$, e) => ({ text: e.answer }))
+  // The other session's hatch lands while this one waits for the model.
+  const theirs = () => {
+    const now = shared.row as Saved
+    const { egg: _, ...rest } = now
+    const rex = { ...now.buddies[0]!, seed: 'egg-seed', soul: { ...now.buddies[0]!.soul, name: 'Rex' } }
+    shared.row = { ...rest, buddies: [...now.buddies, rex] }
+  }
+  const calls = hatchCalls(on, '{"name": "Sprout", "personality": "Fresh out."}', theirs)
+  await $.session.start(START)
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(calls.hatch).toHaveLength(1)
+  expect((shared.row as Saved).buddies.map(b => b.soul.name)).toEqual(['Pip', 'Rex'])
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await bubbleOf(ui)).toBe('')
+})
+
+test('an egg left due hatches when a session starts', async ($, on) => {
+  const due: Saved = { ...NEARLY_HATCHED, buddies: [{ ...NEARLY_HATCHED.buddies[0]!, counts: { ...zeroCounts(), turns: 960 } }] }
+  const shared = sharedStore(on, due)
+  const clock = world(on, null)
+  const calls = hatchCalls(on, '{"name": "Sprout", "personality": "Fresh out."}')
+  await $.session.start(START)
+  await clock.settle()
+  expect(calls.hatch).toHaveLength(1)
+  expect((shared.row as Saved).buddies.map(b => b.soul.name)).toEqual(['Pip', 'Sprout'])
+})
+
 test('a main turn saves its counts when it completes; a denied call is not counted', async ($, on) => {
   const shared = sharedStore(on, RECORD)
   const clock = world(on, null)
@@ -1786,7 +1880,8 @@ const NEARLY: Saved = {
   you: { lastDay: null, streak: 0, bestStreak: 0, days: 0 },
 }
 const CONFETTI_ROWS = [' *  .  *  . ', ' .  *  .  * ']
-const NEWS_10 = 'Level 10! I grew into an adult. Earned Grown up.'
+// Its 8,100 XP also earn the first egg (Breeding spec section 2).
+const NEWS_10 = 'Level 10! I grew into an adult. An egg! It hatches in 150 turns. Earned Grown up.'
 
 test('the turn that reaches level 10 is announced once, under confetti, and saved as growing up', async ($, on) => {
   const shared = sharedStore(on, NEARLY)
@@ -2155,7 +2250,7 @@ test("a swap clears the bubble, so the hello never follows the last buddy's news
   const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
   await $.turn.complete(TURN)
   await clock.settle()
-  expect(await bubbleOf(ui)).toBe('Level 10! I grew into an adult. Earned Grown up.')
+  expect(await bubbleOf(ui)).toBe(NEWS_10)
   expect(await runner($)('swap pip')).toBe('Pip is back.')
   await clock.settle()
   expect(await bubbleOf(ui)).toBe('Missed you.')

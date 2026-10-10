@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { Buddy } from '../types'
-import { breedBones, bornBones, parentsOf, statRange } from './breed'
+import { breedBones, bornBones, eggBones, parentsOf, statRange } from './breed'
 import { zeroCounts } from './ledger'
 import { RARITIES, STATS, rollBones } from './roll'
 import type { Bones } from './roll'
@@ -129,6 +129,16 @@ test("a buddy's born bones are rolled, bred from its parents', or bred down the 
   expect(bornBones(buddies, 'g')).toEqual(breedBones('g', breedBones('c', rollBones('a'), rollBones('b')), rollBones('a')))
   // A seed with no entry at all, as a buddy just hatched has, is rolled.
   expect(bornBones(buddies, 'new')).toEqual(rollBones('new'))
+})
+
+test("an egg's bones are rolled, or bred from its parents', as the hatchling's entry will be", () => {
+  const buddies = [entry('a'), entry('b')]
+  expect(eggBones(buddies, { seed: 'e' })).toEqual(rollBones('e'))
+  const bred = eggBones(buddies, { seed: 'e', parents: ['a', 'b'] })
+  expect(bred).toEqual(breedBones('e', rollBones('a'), rollBones('b')))
+  expect(bornBones([...buddies, entry('e', ['a', 'b'])], 'e')).toEqual(bred)
+  // Parents not in the record read as none.
+  expect(eggBones(buddies, { seed: 'e', parents: ['a', 'gone'] })).toEqual(rollBones('e'))
 })
 
 test('damaged parents, a missing parent or a loop read as a plain roll and never throw', () => {

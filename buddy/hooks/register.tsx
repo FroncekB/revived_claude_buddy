@@ -9,7 +9,8 @@ import { dayInfo } from './calendar'
 import { cardAlt, cardSvg, dexAlt, dexSvg, journalAlt, journalSvg, meter } from './card'
 import { DUCK_MS, duckDue, duckFallback, duckLine, duckPrompt, failsByTool, shouldNudge } from './duck'
 import type { DuckDue } from './duck'
-import { MULLIGAN_NOTE, closedLine, mulliganOpen } from './eggs'
+import { eggBones } from './breed'
+import { MULLIGAN_NOTE, closedLine, dueEgg, mulliganOpen } from './eggs'
 import {
   MAX_QUEUED_TURNS, addCall, isRough, memoryLine, momentKey, noCalls, recall, talkMemories, turnFacts,
 } from './journal'
@@ -87,6 +88,7 @@ const lastFedAt = atom({ plugin: 'buddy', key: 'lastFedAt' } as const, 0)
 const duckUntil = atom({ plugin: 'buddy', key: 'duckUntil' } as const, 0)
 const duckTool = atom({ plugin: 'buddy', key: 'duckTool' } as const, null)
 const lastNudgeAt = atom({ plugin: 'buddy', key: 'lastNudgeAt' } as const, 0)
+const eggHatching = atom({ plugin: 'buddy', key: 'eggHatching' } as const, false)
 
 const CARD = 'card'
 const JOURNAL = 'journal'
@@ -144,6 +146,9 @@ let stretch: Stretch | null = null
 let prevFails: Record<string, number> = {}
 // The last commit this session started. The next one waits for it to settle.
 let lastCommit: Promise<unknown> = Promise.resolve()
+// True from the moment this session starts hatching the egg, before any await, so a second check
+// can never start a second hatch (Breeding spec section 3).
+let eggBusy = false
 
 function startTimer($: EngineInterface) {
   timer?.cancel()
@@ -226,6 +231,8 @@ async function commitNow($: EngineInterface, change: Change): Promise<string | n
   await adopt($, saved)
   // Only the session whose commit made the change announces it, whether or not the write lands.
   await announce($, before, saved)
+  // An egg this record carries to its hatch hatches after the commit, never inside it.
+  if (dueEgg(saved)) later($, () => hatchIfDue($))
   try {
     await $.store.set(STORE_KEY, saved)
     await update($, unsaved, () => false)
@@ -623,6 +630,55 @@ async function react($: EngineInterface, summary: TurnSummary, facts: TurnFacts)
   if (text && (await newsShowing($)) === null) await showBubble($, text)
 }
 
+// A new buddy's name and personality: one Haiku call, or the fallback when it fails (base spec
+// section 5). Never throws: hatching never fails.
+async function askSoul($: EngineInterface, seed: string, bones: Bones): Promise<{ name: string; personality: string }> {
+  const fallback = fallbackSoul(seed, bones)
+  try {
+    const request = hatchRequest(bones)
+    const result = await $.model.complete({
+      model: 'haiku',
+      system: request.system,
+      prompt: request.prompt,
+      maxTokens: 200,
+      timeoutMs: 8000,
+    })
+    return (result.isAnswered ? parseSoul(result.text) : null) ?? fallback
+  } catch {
+    return fallback
+  }
+}
+
+// Hatches the egg once it is due (Breeding spec section 3): the hatch path's one soul call, then
+// the hatchEgg commit, whose news announces it. The active buddy stays on screen and its events
+// still count. Not while off or while a buddy hatches; a throw leaves the egg due for the next try.
+async function hatchIfDue($: EngineInterface) {
+  if (eggBusy) return
+  eggBusy = true
+  try {
+    const saved = await read($, record)
+    if (!saved || saved.mode === 'off' || (await read($, hatching))) return
+    const egg = dueEgg(saved)
+    if (!egg) return
+    await update($, eggHatching, () => true)
+    const soul = await askSoul($, egg.seed, eggBones(saved.buddies, egg))
+    const hatchedAt = new Date(await $.clock.now()).toISOString()
+    const change: Change = {
+      kind: 'hatchEgg',
+      seed: egg.seed,
+      parents: egg.parents ?? null,
+      soul: { ...soul, hatchedAt },
+      eggSeed: crypto.randomUUID(),
+    }
+    await commit($, change)
+  } catch {
+    // The egg stays due: the next check tries again.
+  } finally {
+    eggBusy = false
+    await update($, eggHatching, () => false)
+  }
+}
+
 async function hatch($: EngineInterface, kind: 'hatch' | 'reroll'): Promise<string> {
   const seed = crypto.randomUUID()
   const bones = rollBones(seed)
@@ -631,20 +687,7 @@ async function hatch($: EngineInterface, kind: 'hatch' | 'reroll'): Promise<stri
     // A new buddy is shown as itself, not mid-tour. Adopting it clears the rough turns.
     await update($, tourStart, () => null)
     if (!timer) startTimer($)
-    let soul = fallbackSoul(seed, bones)
-    try {
-      const request = hatchRequest(bones)
-      const result = await $.model.complete({
-        model: 'haiku',
-        system: request.system,
-        prompt: request.prompt,
-        maxTokens: 200,
-        timeoutMs: 8000,
-      })
-      if (result.isAnswered) soul = parseSoul(result.text) ?? soul
-    } catch {
-      // Keep the fallback soul: hatching never fails.
-    }
+    const soul = await askSoul($, seed, bones)
     const hatchedAt = new Date(await $.clock.now()).toISOString()
     const born: Who = { seed, soul: { ...soul, hatchedAt } }
     const note = await commit($, { kind, ...born })
@@ -934,8 +977,9 @@ export const register: Register = on => {
       // A refused registration costs the slash command, not the buddy on screen.
     }
     try {
-      // A reload in the middle of a hatch leaves the egg flag set with nobody to clear it.
+      // A reload in the middle of a hatch leaves the egg flags set with nobody to clear them.
       await update($, hatching, () => false)
+      await update($, eggHatching, () => false)
       // A session start is activity: a session never opens on a sleeping buddy.
       await stir($)
       // A write that failed before a reload left the only copy in state: current() keeps it.
@@ -945,6 +989,8 @@ export const register: Register = on => {
       if (saved && saved.mode !== 'off') {
         startTimer($)
         later($, () => visitToday($))
+        // An egg left due, by another session or a reload mid-hatch, hatches now.
+        later($, () => hatchIfDue($))
       }
     } catch {
       // The buddy never holds up a session.

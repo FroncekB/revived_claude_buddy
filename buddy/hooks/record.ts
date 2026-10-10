@@ -1,7 +1,7 @@
 // The saved record and the /buddy subcommands. Pure: no $.
 import type { Buddy, Counts, Mode, MoodEvent, Saved, SavedV1, Soul, Stage, TurnFacts } from '../types'
 import { earn } from './achievements'
-import { mulliganOpen, startEgg, withEggCount } from './eggs'
+import { HATCH_TURNS, dueEgg, mulliganOpen, startEgg, withEggCount } from './eggs'
 import { addMoments, awayMoment, bestsOf, milestones, noticeTurns } from './journal'
 import { addCounts, localDay, visit, zeroCounts } from './ledger'
 import { applyMood, sulkFor, withSulk } from './mood'
@@ -97,6 +97,8 @@ export type Change =
   // A new name for one buddy, and the hat it wears (Interaction spec section 2).
   | { kind: 'rename'; seed: string; name: string }
   | { kind: 'hat'; seed: string; hat: Worn }
+  // The egg hatching into the dex, with the parents its soul was made for (Breeding spec section 3).
+  | { kind: 'hatchEgg'; seed: string; parents: [string, string] | null; soul: Soul; eggSeed?: string }
 
 // Today's visit (Foundation spec section 3). A new day after two or more missed ones leaves the
 // active buddy sulking (Alive spec section 2), and after three or more it goes in that buddy's
@@ -124,8 +126,10 @@ function arrive(saved: Saved, now: number): Saved {
 
 // A retired buddy coming back (Progression spec section 7): out of retirement, sulking for the
 // days it was left, and with "away" in its journal after three or more missed days, as a visit
-// gives. A retirement time that doesn't parse leaves neither.
+// gives. A retirement time that doesn't parse leaves neither. A hatchling never yet active,
+// retired the moment it hatched, waited for nobody, so it gets neither (Breeding spec section 3).
 function welcomeBack(b: Buddy, today: string, now: number): Buddy {
+  if (b.retiredAt === b.soul.hatchedAt) return { ...b, retiredAt: null }
   const left = b.retiredAt !== null && Number.isFinite(Date.parse(b.retiredAt)) ? localDay(Date.parse(b.retiredAt)) : null
   const sulk = sulkFor(left, today)
   const away = awayMoment(left, today, now)
@@ -225,6 +229,23 @@ export function applyChange(saved: Saved | null, change: Change, now: number): S
         buddies: saved.buddies.map(b => (b.seed === change.seed ? { ...b, soul: { ...b.soul, name: change.name } } : b)),
       }
     }
+    case 'hatchEgg': {
+      const egg = saved && dueEgg(saved)
+      // Judged on the fresh record: this egg, still due, with the parents its soul was made for.
+      if (!saved || !egg || egg.seed !== change.seed || !sameParents(egg.parents, change.parents)) return null
+      const { egg: _, ...rest } = saved
+      // It joins the dex retired the moment it hatched; the active buddy stays (Breeding spec
+      // section 3). Collector is earned here, then the next owed egg starts.
+      const hatchling: Buddy = {
+        seed: change.seed,
+        soul: change.soul,
+        retiredAt: change.soul.hatchedAt,
+        counts: zeroCounts(),
+        ...(egg.parents ? { parents: egg.parents } : {}),
+        journal: [{ at: new Date(now).toISOString(), kind: 'hatched', n: HATCH_TURNS }],
+      }
+      return startEgg(earn({ ...rest, buddies: [...saved.buddies, hatchling] }, now), change.eggSeed, now)
+    }
     case 'hat': {
       const b = saved?.buddies.find(x => x.seed === change.seed)
       // Judged on the fresh record: a hat it can wear, and a change from what it wears.
@@ -242,6 +263,11 @@ export function applyChange(saved: Saved | null, change: Change, now: number): S
       }
     }
   }
+}
+
+// Both absent, or the same two seeds in the same order.
+function sameParents(a: readonly string[] | undefined, b: readonly string[] | null): boolean {
+  return a === undefined || b === null ? a === undefined && b === null : a[0] === b[0] && a[1] === b[1]
 }
 
 type Plain =

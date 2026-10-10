@@ -2,8 +2,11 @@
 // six of which unlock a hat no roll gives. Earned ones are saved on `you` with the time each was
 // earned; everything else here is worked out from the record. Pure: no $.
 import type { Counts, Saved, Stage, You } from '../types'
+import { bornBones } from './breed'
+import { readEgg } from './eggs'
 import { addCounts, zeroCounts } from './ledger'
 import { ADULT_LEVEL, ELDER_LEVEL, asNumber, isObject, levelOf, safeCounts, stageOf } from './progress'
+import type { Rarity, Species } from './roll'
 import type { EarnedHat } from './sprites'
 
 export type AchievementId =
@@ -97,11 +100,34 @@ export function earnedHats(you: You): EarnedHat[] {
   return knownEarned(you).flatMap(a => (a.hat ? [a.hat] : []))
 }
 
-// What a commit changed worth saying (Progression spec section 4): the active buddy's new level,
-// its new stage when that rose too, and what was newly earned, in table order.
-export type News = { level: number | null; stage: Stage | null; earned: AchievementId[] }
+// A hatchling the news names (Breeding spec section 5), and what to swap to it by: its name, or its
+// dex number when another buddy shares the name.
+export type Hatched = { name: string; rarity: Rarity; species: Species; shiny: boolean; swapBy: string }
 
-// Null when nothing rose, on a first hatch, or when the active buddy changed (a reroll or a swap).
+// What a commit changed worth saying (Progression spec section 4): the active buddy's new level,
+// its new stage when that rose too, and what was newly earned, in table order; and a hatchling
+// that joined the dex, and an egg that started (Breeding spec section 5).
+export type News = {
+  level: number | null
+  stage: Stage | null
+  earned: AchievementId[]
+  hatched?: Hatched
+  egg?: true
+}
+
+// The buddy `after` has that `before` didn't, as the news names it; null when there is none.
+function hatchedOf(before: Saved, after: Saved): Hatched | null {
+  const i = after.buddies.findIndex(b => !before.buddies.some(x => x.seed === b.seed))
+  const b = after.buddies[i]
+  if (!b) return null
+  const bones = bornBones(after.buddies, b.seed)
+  const name = b.soul.name
+  const shared = after.buddies.filter(x => x.soul.name.toLowerCase() === name.toLowerCase()).length > 1
+  return { name, rarity: bones.rarity, species: bones.species, shiny: bones.shiny, swapBy: shared ? `#${i + 1}` : name }
+}
+
+// Null when nothing rose, joined or started, on a first hatch, or when the active buddy changed
+// (the mulligan or a swap).
 export function newsOf(before: Saved | null, after: Saved): News | null {
   if (!before || before.active !== after.active) return null
   const countsOf = (s: Saved) => s.buddies.find(b => b.seed === s.active)?.counts
@@ -113,5 +139,9 @@ export function newsOf(before: Saved | null, after: Saved): News | null {
   const earned = knownEarned(after.you)
     .filter(a => !Object.hasOwn(had, a.id))
     .map(a => a.id)
-  return level === null && earned.length === 0 ? null : { level, stage, earned }
+  const hatched = hatchedOf(before, after)
+  const egg = readEgg(after)
+  const started = egg !== null && egg.seed !== readEgg(before)?.seed
+  if (level === null && earned.length === 0 && !hatched && !started) return null
+  return { level, stage, earned, ...(hatched ? { hatched } : {}), ...(started ? { egg: true as const } : {}) }
 }

@@ -1,7 +1,7 @@
 // Breeding (Breeding spec section 4): a bred buddy's bones, drawn from its own seed and its
 // parents' bones, and the lookup that finds any buddy's bones through the record. Bones are
 // never saved, so a bred buddy is worked out afresh from its parents every time. Pure: no $.
-import type { Buddy } from '../types'
+import type { Buddy, Egg } from '../types'
 import { RARITIES, RARITY, STATS, int, pick, pickRarity, rngFor, rollBones } from './roll'
 import type { Bones, Rarity, StatName } from './roll'
 
@@ -69,4 +69,12 @@ function born(buddies: readonly Buddy[], seed: string, seen: ReadonlySet<string>
 // `parents`, a parent missing from the record or a loop reads as a plain roll.
 export function bornBones(buddies: readonly Buddy[], seed: string): Bones {
   return born(buddies, seed, new Set())
+}
+
+// The bones an egg will hatch into: bred when it has two parents in the record, else rolled, as
+// the hatchling's own entry will give once it joins the dex.
+export function eggBones(buddies: readonly Buddy[], egg: Pick<Egg, 'seed' | 'parents'>): Bones {
+  const parents = parentsOf(buddies, egg.parents)
+  if (!parents) return rollBones(egg.seed)
+  return breedBones(egg.seed, bornBones(buddies, parents[0]), bornBones(buddies, parents[1]))
 }

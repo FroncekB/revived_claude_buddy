@@ -440,6 +440,82 @@ test('a swap on a new day keeps the streak but earns nothing; the next flush ear
   expect(newsOf(swapped, flushed)?.earned).toEqual(['regular'])
 })
 
+test('a hatchling never yet active comes in from the dex with no sulk and no away', () => {
+  // It joined the dex retired the moment it hatched, five days ago.
+  const hatchedAt = new Date(2026, 9, 2, 12).toISOString()
+  const waiting = pair(hatchedAt, '2026-10-04')
+  const fresh: Saved = { ...waiting, buddies: [{ ...waiting.buddies[0]!, soul: { ...SOUL, hatchedAt } }, waiting.buddies[1]!] }
+  const saved = applyChange(fresh, { kind: 'swap', seed: 'a' }, NOON)!
+  expect(saved.active).toBe('a')
+  expect(saved.buddies[0]?.retiredAt).toBeNull()
+  expect(saved.buddies[0]?.mood).toBeUndefined()
+  expect(saved.buddies[0]?.journal).toBeUndefined()
+})
+
+// Bix ('b', active, 960 turns) carrying an egg started at 810: 150 turns in, so due. `parents`,
+// when given, are the egg's.
+function carrying(parents?: [string, string]): Saved {
+  const base = pair(YESTERDAY)
+  return {
+    ...base,
+    buddies: [base.buddies[0]!, { ...base.buddies[1]!, counts: { ...zeroCounts(), turns: 960 } }],
+    you: { ...base.you, eggs: 1 },
+    egg: { seed: 'e', startedAt: AT, fromTurns: 810, ...(parents ? { parents } : {}) },
+  }
+}
+const HATCHED_AT = new Date(NOON - 5_000).toISOString()
+const hatchEgg = (o: Partial<Extract<Change, { kind: 'hatchEgg' }>> = {}): Change => ({
+  kind: 'hatchEgg',
+  seed: 'e',
+  parents: null,
+  soul: { ...SOUL, name: 'Sprout', hatchedAt: HATCHED_AT },
+  eggSeed: 'next-egg',
+  ...o,
+})
+
+test('a due egg hatches into the dex, retired as it hatched, and the active buddy stays', () => {
+  const before = carrying()
+  const saved = applyChange(before, hatchEgg(), NOON)!
+  expect(saved.active).toBe('b')
+  expect(saved.mode).toBe(before.mode)
+  expect(saved.egg).toBeUndefined()
+  expect(saved.buddies.map(b => b.seed)).toEqual(['a', 'b', 'e'])
+  expect(saved.buddies[2]).toEqual({
+    seed: 'e',
+    soul: { ...SOUL, name: 'Sprout', hatchedAt: HATCHED_AT },
+    retiredAt: HATCHED_AT,
+    counts: zeroCounts(),
+    journal: [{ at: AT, kind: 'hatched', n: 150 }],
+  })
+  expect(saved.you.eggs).toBe(1)
+  // A brooded egg's parents go with it.
+  const bred = applyChange(carrying(['b', 'a']), hatchEgg({ parents: ['b', 'a'] }), NOON)!
+  expect(bred.buddies[2]?.parents).toEqual(['b', 'a'])
+})
+
+test('a hatch starts the next owed egg, and the fifth buddy earns Collector', () => {
+  const base = carrying()
+  // 1,620 turns is 16,200 XP: a second egg is owed and waiting.
+  const owing: Saved = { ...base, buddies: [base.buddies[0]!, { ...base.buddies[1]!, counts: { ...zeroCounts(), turns: 1_620 } }], egg: { ...base.egg!, fromTurns: 1_470 } }
+  const saved = applyChange(owing, hatchEgg(), NOON)!
+  expect(saved.egg).toEqual({ seed: 'next-egg', startedAt: AT, fromTurns: 1_620 })
+  expect(saved.you.eggs).toBe(2)
+  const four: Saved = { ...base, buddies: [...base.buddies, { ...base.buddies[0]!, seed: 'c' }, { ...base.buddies[0]!, seed: 'd' }] }
+  expect(applyChange(four, hatchEgg(), NOON)?.you.earned).toMatchObject({ collector: AT })
+})
+
+test('a hatch writes nothing for another egg, an egg not yet due, or parents its soul was not made for', () => {
+  expect(applyChange(carrying(), hatchEgg({ seed: 'other' }), NOON)).toBeNull()
+  const early = carrying()
+  expect(applyChange({ ...early, egg: { ...early.egg!, fromTurns: 811 } }, hatchEgg(), NOON)).toBeNull()
+  expect(applyChange(carrying(['b', 'a']), hatchEgg(), NOON)).toBeNull()
+  expect(applyChange(carrying(), hatchEgg({ parents: ['b', 'a'] }), NOON)).toBeNull()
+  expect(applyChange(carrying(['b', 'a']), hatchEgg({ parents: ['a', 'b'] }), NOON)).toBeNull()
+  const { egg: _, ...none } = carrying()
+  expect(applyChange(none, hatchEgg(), NOON)).toBeNull()
+  expect(applyChange(null, hatchEgg(), NOON)).toBeNull()
+})
+
 test("a rename changes only that buddy's name, with no visit, and nothing when the name or seed is wrong", () => {
   const before = pair(YESTERDAY)
   const saved = applyChange(before, { kind: 'rename', seed: 'b', name: 'Mochi' }, NOON)!

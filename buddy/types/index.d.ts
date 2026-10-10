@@ -66,14 +66,14 @@ export type MoodEvent = 'fail' | 'clean' | 'longClean' | 'soothe'
 
 // A notable moment in a buddy's life (Memory spec section 2), kept as data: its words are made
 // when it is shown, so they can change without touching saves.
-export type MomentKind = 'failRun' | 'longTurn' | 'busyTurn' | 'turns' | 'calls' | 'comeback' | 'away' | 'grew'
+export type MomentKind = 'failRun' | 'longTurn' | 'busyTurn' | 'turns' | 'calls' | 'comeback' | 'away' | 'grew' | 'hatched'
 
 export type Moment = {
   // When the save or visit that wrote it happened.
   at: string
   kind: MomentKind
   // What the kind counts: the run, the minutes, the calls, the mark, the rough turns, the days,
-  // the stage grown into (1 adult, 2 elder).
+  // the stage grown into (1 adult, 2 elder), the turns spent in the egg.
   n: number
   // failRun only, when the whole run was in one group.
   group?: ToolGroup
@@ -177,6 +177,8 @@ declare module 'claude-code' {
       duckUntil: number
       duckTool: string | null
       lastNudgeAt: number
+      // True while the egg's soul call is in flight: the band shows it cracked (Breeding spec section 3).
+      eggHatching: boolean
     }
   }
 }
