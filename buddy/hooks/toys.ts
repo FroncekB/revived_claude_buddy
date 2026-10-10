@@ -1,9 +1,10 @@
 // Toys (Interaction spec section 2): feed, play, rename and hat. What each does and says, worked
 // out here from the rolls it is given. Pure: no $.
-import type { Buddy, Snack, You } from '../types'
+import type { Buddy, Saved, Snack } from '../types'
 import { ACHIEVEMENTS, EARNED_HAT_NAME, earnedHats } from './achievements'
+import { bornBones } from './breed'
 import { bonesFor } from './progress'
-import { HATS, rollBones } from './roll'
+import { HATS } from './roll'
 import { EARNED_HATS } from './sprites'
 import type { Dressed, Wearable, Worn } from './sprites'
 import { RESERVED_NAMES, nth, validName } from './voice'
@@ -39,23 +40,27 @@ export const HAT_NAME: Record<Wearable, string> = {
 const WEARABLES: readonly Wearable[] = [...HATS, ...EARNED_HATS]
 const isEarned = (hat: Worn) => (EARNED_HATS as readonly string[]).includes(hat)
 
+// What a hat is judged against: your achievements, and the dex, where a bred buddy's parents are.
+export type Kin = Pick<Saved, 'you' | 'buddies'>
+
 // What `buddy` can wear: its own rolled hat if it rolled one, every hat you've earned in table
-// order, then none. Never another buddy's rolled hat, so a tiny duck still means legendary.
-export function wearable(buddy: Pick<Buddy, 'seed'>, you: You): Worn[] {
-  const rolled = rollBones(buddy.seed).hat
-  return [...(rolled === 'none' ? [] : [rolled]), ...earnedHats(you), 'none']
+// order, then none. Never another buddy's rolled hat, so a tiny duck still means legendary. A
+// bred buddy's rolled hat is the one its bred bones give (Breeding spec section 4).
+export function wearable(buddy: Pick<Buddy, 'seed'>, kin: Kin): Worn[] {
+  const rolled = bornBones(kin.buddies, buddy.seed).hat
+  return [...(rolled === 'none' ? [] : [rolled]), ...earnedHats(kin.you), 'none']
 }
 
 // The hat `buddy` wears: its saved choice when it can wear that, else the hat it rolled. A choice
 // it can't wear (unknown, not earned, another buddy's, or not a string) stays saved but unseen.
-export function wornHat(buddy: Pick<Buddy, 'seed' | 'hat'>, you: You): Worn {
+export function wornHat(buddy: Pick<Buddy, 'seed' | 'hat'>, kin: Kin): Worn {
   const choice: unknown = buddy.hat
-  return wearable(buddy, you).find(h => h === choice) ?? rollBones(buddy.seed).hat
+  return wearable(buddy, kin).find(h => h === choice) ?? bornBones(kin.buddies, buddy.seed).hat
 }
 
 // A buddy's bones as the band, card and dex draw them: grown by its counts, in the hat it wears.
-export function dressed(buddy: Pick<Buddy, 'seed' | 'counts' | 'hat'>, you: You): Dressed {
-  return { ...bonesFor(buddy), hat: wornHat(buddy, you) }
+export function dressed(buddy: Pick<Buddy, 'seed' | 'counts' | 'hat'>, kin: Kin): Dressed {
+  return { ...bonesFor(buddy, kin.buddies), hat: wornHat(buddy, kin) }
 }
 
 // The answer to /buddy hat with no hat named.

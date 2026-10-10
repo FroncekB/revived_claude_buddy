@@ -1,18 +1,21 @@
 // The saved record and the /buddy subcommands. Pure: no $.
 import type { Buddy, Counts, Mode, MoodEvent, Saved, SavedV1, Soul, Stage, TurnFacts } from '../types'
 import { earn } from './achievements'
+import {
+  BREED_DEX, HATCH_TURNS, dueEgg, eggStatus, mulliganOpen, neverActive, readEgg, startEgg, withEggCount,
+} from './eggs'
 import { addMoments, awayMoment, bestsOf, milestones, noticeTurns } from './journal'
 import { addCounts, localDay, visit, zeroCounts } from './ledger'
 import { applyMood, sulkFor, withSulk } from './mood'
-import { STAGES, grewMoments } from './progress'
-import { rollBones } from './roll'
+import { bornBones } from './breed'
+import { ADULT_LEVEL, STAGES, grewMoments, levelOf } from './progress'
 import type { Worn } from './sprites'
 import { readPlay, wearable, wornHat } from './toys'
 import type { Game, Side, Throw } from './toys'
 
 export const STORE_KEY = 'buddy'
 export const USAGE =
-  'Usage: /buddy [pet | feed | play [game] | card [who] | journal [who] | dex | swap <who> | rename <name> | hat [hat] | mute | unmute | off | reroll [confirm]]'
+  'Usage: /buddy [pet | feed | play [game] | card [who] | journal [who] | dex | swap <who> | breed <who> | rename <name> | hat [hat] | mute | unmute | off | reroll [confirm]]'
 
 // What the store holds, as this build reads it (Foundation spec section 1).
 export type Stored =
@@ -63,7 +66,7 @@ function fresh(seed: string, soul: Soul, rerolls: number): Saved {
     rerolls,
     active: seed,
     buddies: [{ seed, soul, retiredAt: null, counts: zeroCounts() }],
-    you: { lastDay: null, streak: 0, bestStreak: 0, days: 0 },
+    you: { lastDay: null, streak: 0, bestStreak: 0, days: 0, eggs: 0 },
   }
 }
 
@@ -77,6 +80,7 @@ export function activeBuddy(saved: Saved): Buddy {
 }
 
 export type Change =
+  // A first hatch, or the one mulligan (Breeding spec section 2).
   | { kind: 'hatch' | 'reroll'; seed: string; soul: Soul }
   | { kind: 'mode'; mode: Mode }
   | {
@@ -86,6 +90,8 @@ export type Change =
       mood?: Readonly<Record<string, readonly MoodEvent[]>>
       // Finished main turns by seed, for the journal (Memory spec section 3).
       turns?: Readonly<Record<string, readonly TurnFacts[]>>
+      // The seed an owed egg starts from, if one starts (Breeding spec section 2).
+      eggSeed?: string
     }
   | { kind: 'visit' }
   // A retired buddy made active again (Progression spec section 7).
@@ -93,6 +99,10 @@ export type Change =
   // A new name for one buddy, and the hat it wears (Interaction spec section 2).
   | { kind: 'rename'; seed: string; name: string }
   | { kind: 'hat'; seed: string; hat: Worn }
+  // The active buddy and `partner` brooding the egg incubating (Breeding spec section 4).
+  | { kind: 'breed'; partner: string }
+  // The egg hatching into the dex, with the parents its soul was made for (Breeding spec section 3).
+  | { kind: 'hatchEgg'; seed: string; parents: [string, string] | null; soul: Soul; eggSeed?: string }
 
 // Today's visit (Foundation spec section 3). A new day after two or more missed ones leaves the
 // active buddy sulking (Alive spec section 2), and after three or more it goes in that buddy's
@@ -120,8 +130,10 @@ function arrive(saved: Saved, now: number): Saved {
 
 // A retired buddy coming back (Progression spec section 7): out of retirement, sulking for the
 // days it was left, and with "away" in its journal after three or more missed days, as a visit
-// gives. A retirement time that doesn't parse leaves neither.
+// gives. A retirement time that doesn't parse leaves neither. A hatchling never yet active,
+// retired the moment it hatched, waited for nobody, so it gets neither (Breeding spec section 3).
 function welcomeBack(b: Buddy, today: string, now: number): Buddy {
+  if (neverActive(b)) return { ...b, retiredAt: null }
   const left = b.retiredAt !== null && Number.isFinite(Date.parse(b.retiredAt)) ? localDay(Date.parse(b.retiredAt)) : null
   const sulk = sulkFor(left, today)
   const away = awayMoment(left, today, now)
@@ -145,19 +157,17 @@ export function applyChange(saved: Saved | null, change: Change, now: number): S
         const born = fresh(change.seed, change.soul, counted)
         return { ...born, you: visit(born.you, today) }
       }
-      // The visit comes first, so a sulk from days away lands on the buddy that was left alone,
-      // never on the new one (Alive spec section 2).
+      // A hatch only makes the first record: new buddies come from eggs (Breeding spec section 2).
+      // A reroll is the one mulligan, judged on the fresh record.
+      if (change.kind === 'hatch' || !mulliganOpen(saved)) return null
+      // It replaces buddy #1 in place, so it adds no dex entry. The visit is still made.
       const arrived = arrive(saved, now)
-      const retiredAt = new Date(now).toISOString()
       return {
         ...arrived,
         mode: 'on',
-        rerolls: arrived.rerolls + counted,
+        rerolls: arrived.rerolls + 1,
         active: change.seed,
-        buddies: [
-          ...arrived.buddies.map(b => (b.seed === arrived.active ? { ...b, retiredAt } : b)),
-          { seed: change.seed, soul: change.soul, retiredAt: null, counts: zeroCounts() },
-        ],
+        buddies: [{ seed: change.seed, soul: change.soul, retiredAt: null, counts: zeroCounts() }],
       }
     }
     case 'mode':
@@ -186,8 +196,13 @@ export function applyChange(saved: Saved | null, change: Change, now: number): S
           ...(moments.length > 0 ? { journal: addMoments(b.journal, moments) } : {}),
         }
       })
-      // Achievements are judged last, on every buddy's new totals (Progression spec section 4).
-      return added || arrived !== saved ? earn({ ...arrived, buddies }, now) : null
+      if (!added && arrived === saved) return null
+      // The egg count is written from the counts as stored, before this flush's are added, so an
+      // existing record's clock runs from its XP at upgrade (Breeding spec section 2).
+      const counted = withEggCount(arrived)
+      // Achievements are judged on every buddy's new totals (Progression spec section 4), then an
+      // owed egg starts when none is incubating.
+      return startEgg(earn({ ...counted, buddies }, now), change.eggSeed, now)
     }
     case 'visit': {
       if (!saved) return null
@@ -218,11 +233,47 @@ export function applyChange(saved: Saved | null, change: Change, now: number): S
         buddies: saved.buddies.map(b => (b.seed === change.seed ? { ...b, soul: { ...b.soul, name: change.name } } : b)),
       }
     }
+    case 'breed': {
+      if (!saved || breedChoice(saved, change.partner, true).kind !== 'ok') return null
+      const egg = saved.egg!
+      const partner = change.partner
+      const number = (seed: string) => saved.buddies.findIndex(b => b.seed === seed) + 1
+      const at = new Date(now).toISOString()
+      const brooded = (b: Buddy, other: string): Buddy => ({
+        ...b,
+        journal: addMoments(b.journal, [{ at, kind: 'brooded', n: number(other) }]),
+      })
+      // Parents can't change once set (Breeding spec section 4). No visit, as a rename makes none.
+      return {
+        ...saved,
+        egg: { ...egg, parents: [saved.active, partner] },
+        buddies: saved.buddies.map(b =>
+          b.seed === saved.active ? brooded(b, partner) : b.seed === partner ? brooded(b, saved.active) : b,
+        ),
+      }
+    }
+    case 'hatchEgg': {
+      const egg = saved && dueEgg(saved)
+      // Judged on the fresh record: this egg, still due, with the parents its soul was made for.
+      if (!saved || !egg || egg.seed !== change.seed || !sameParents(egg.parents, change.parents)) return null
+      const { egg: _, ...rest } = saved
+      // It joins the dex retired the moment it hatched; the active buddy stays (Breeding spec
+      // section 3). Collector is earned here, then the next owed egg starts.
+      const hatchling: Buddy = {
+        seed: change.seed,
+        soul: change.soul,
+        retiredAt: change.soul.hatchedAt,
+        counts: zeroCounts(),
+        ...(egg.parents ? { parents: egg.parents } : {}),
+        journal: [{ at: new Date(now).toISOString(), kind: 'hatched', n: HATCH_TURNS }],
+      }
+      return startEgg(earn({ ...rest, buddies: [...saved.buddies, hatchling] }, now), change.eggSeed, now)
+    }
     case 'hat': {
       const b = saved?.buddies.find(x => x.seed === change.seed)
       // Judged on the fresh record: a hat it can wear, and a change from what it wears.
-      if (!saved || !b || !wearable(b, saved.you).includes(change.hat) || wornHat(b, saved.you) === change.hat) return null
-      const rolled = rollBones(b.seed).hat
+      if (!saved || !b || !wearable(b, saved).includes(change.hat) || wornHat(b, saved) === change.hat) return null
+      const rolled = bornBones(saved.buddies, b.seed).hat
       return {
         ...saved,
         buddies: saved.buddies.map(x => {
@@ -237,15 +288,47 @@ export function applyChange(saved: Saved | null, change: Change, now: number): S
   }
 }
 
+// What /buddy breed <who> does (Breeding spec section 4): the partner to brood with, or the line
+// refusing it, checked in the spec's order. `bySeed` takes `who` as a seed, as the change does.
+export type BreedChoice = { kind: 'ok'; partner: string } | { kind: 'no'; reply: string }
+
+export function breedChoice(saved: Saved, who: string, bySeed = false): BreedChoice {
+  const no = (reply: string): BreedChoice => ({ kind: 'no', reply })
+  const short = BREED_DEX - saved.buddies.length
+  if (short > 0) return no(`Breeding unlocks at ${BREED_DEX} buddies in the dex: ${short} to go.`)
+  const egg = readEgg(saved)
+  if (!egg) return no(`No egg to brood. ${eggStatus(saved)}`)
+  const nameOf = (seed: string) => saved.buddies.find(b => b.seed === seed)?.soul.name ?? 'Buddy'
+  if (egg.parents) return no(`${nameOf(egg.parents[0])} and ${nameOf(egg.parents[1])} are already brooding this egg.`)
+  const found: Found = bySeed
+    ? saved.buddies.some(b => b.seed === who)
+      ? { kind: 'one', seed: who }
+      : { kind: 'none' }
+    : findBuddy(saved, who)
+  if (found.kind !== 'one') return no(notFound(saved, who, found, 'breed'))
+  const active = activeBuddy(saved)
+  if (found.seed === active.seed) return no(`${active.soul.name} can't breed with itself. Pick one from /buddy dex.`)
+  for (const b of [active, saved.buddies.find(x => x.seed === found.seed)!]) {
+    const level = levelOf(b.counts)
+    if (level < ADULT_LEVEL) return no(`${b.soul.name} is level ${level}. Buddies breed from level ${ADULT_LEVEL}.`)
+  }
+  return { kind: 'ok', partner: found.seed }
+}
+
+// Both absent, or the same two seeds in the same order.
+function sameParents(a: readonly string[] | undefined, b: readonly string[] | null): boolean {
+  return a === undefined || b === null ? a === undefined && b === null : a[0] === b[0] && a[1] === b[1]
+}
+
 type Plain =
   'show' | 'pet' | 'feed' | 'dex' | 'mute' | 'unmute' | 'off' | 'reroll' | 'reroll-confirm' | 'debug-off' | 'usage'
-export type Sub = Plain | 'card' | 'journal' | 'swap' | 'debug' | 'rename' | 'hat' | 'play'
+export type Sub = Plain | 'card' | 'journal' | 'swap' | 'breed' | 'debug' | 'rename' | 'hat' | 'play'
 
 // A /buddy command as parsed: the subcommand, and what it was given (Progression spec section 7).
 export type Parsed =
   | { sub: Plain }
   | { sub: 'card' | 'journal'; target?: string }
-  | { sub: 'swap'; target: string }
+  | { sub: 'swap' | 'breed'; target: string }
   | { sub: 'debug'; stage?: Stage }
   // Everything after `rename`, as typed: validName refuses more than one word.
   | { sub: 'rename'; name: string }
@@ -277,6 +360,7 @@ export function parseSub(args: string): Parsed {
     return stage ? { sub: 'debug', stage } : { sub: 'usage' }
   }
   if (first === 'swap') return words.length === 2 ? { sub: 'swap', target: words[1]! } : { sub: 'usage' }
+  if (first === 'breed') return words.length === 2 ? { sub: 'breed', target: words[1]! } : { sub: 'usage' }
   if (first === 'rename') return words.length >= 2 ? { sub: 'rename', name: words.slice(1).join(' ') } : { sub: 'usage' }
   if (first === 'hat') return words.length === 1 ? { sub: 'hat' } : { sub: 'hat', hat: words.slice(1).join(' ') }
   if (first === 'play') {
@@ -315,7 +399,7 @@ export function notFound(saved: Saved, who: string, found: Exclude<Found, { kind
     const number = NUMBER.exec(who)
     return number ? `No buddy #${Number(number[1])} in the dex.` : `No buddy named ${who} in the dex.`
   }
-  const each = found.numbers.map(n => `#${n} ${rollBones(saved.buddies[n - 1]!.seed).species}`)
+  const each = found.numbers.map(n => `#${n} ${bornBones(saved.buddies, saved.buddies[n - 1]!.seed).species}`)
   const name = saved.buddies[found.numbers[0]! - 1]!.soul.name
   return `${found.numbers.length} buddies are named ${name}: ${each.join(', ')}. Run /buddy ${command} #${found.numbers.at(-1)}.`
 }

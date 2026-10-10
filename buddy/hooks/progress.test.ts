@@ -1,6 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
-import type { Counts } from '../types'
+import type { Buddy, Counts } from '../types'
+import { breedBones } from './breed'
 import { zeroCounts } from './ledger'
 import {
   ADULT_LEVEL, ELDER_LEVEL, MAX_LEVEL, bonesFor, floorAt, grewMoments, grow, levelOf, safeCounts, stageOf, xpForLevel,
@@ -92,16 +93,31 @@ test('each level lifts the floor a point, to 60 at most, and never to the peak',
 })
 
 test("a buddy's bones are its seed's, grown by its saved counts", () => {
-  expect(bonesFor({ seed: 'test-seed' })).toEqual(rollBones('test-seed'))
+  expect(bonesFor({ seed: 'test-seed' }, [])).toEqual(rollBones('test-seed'))
   // 'test-seed' rolls a common ghost: DEBUGGING 7, PATIENCE 30, CHAOS 31, WISDOM 59 (its peak)
   // and SNARK 9. Level 40 lifts all but the peak to 34.
-  expect(bonesFor({ seed: 'test-seed', counts: worth(152_100) }).stats).toEqual({
+  expect(bonesFor({ seed: 'test-seed', counts: worth(152_100) }, []).stats).toEqual({
     DEBUGGING: 34,
     PATIENCE: 34,
     CHAOS: 34,
     WISDOM: 59,
     SNARK: 34,
   })
+})
+
+test("a bred buddy's bones are bred from its parents' in the record, then grown", () => {
+  const entry = (seed: string, parents?: [string, string]): Buddy => ({
+    seed,
+    soul: { name: seed, personality: 'x', hatchedAt: '2026-10-07T00:00:00.000Z' },
+    retiredAt: null,
+    counts: zeroCounts(),
+    ...(parents ? { parents } : {}),
+  })
+  const child = { ...entry('golden-child', ['tint-11', 'hat-10']), counts: worth(152_100) }
+  const buddies = [entry('tint-11'), entry('hat-10'), child]
+  expect(bonesFor(child, buddies)).toEqual(grow(breedBones('golden-child', rollBones('tint-11'), rollBones('hat-10')), 40))
+  // Without its parents in the list, it is its seed's roll.
+  expect(bonesFor(child, [child])).toEqual(grow(rollBones('golden-child'), 40))
 })
 
 const NOON = new Date(2026, 9, 7, 12).getTime()

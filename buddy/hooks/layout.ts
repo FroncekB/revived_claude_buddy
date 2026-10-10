@@ -1,7 +1,10 @@
 // The band's text layout: bubble wrapping, full and compact rows, and the card.
 import type { Buddy, Counts, Moment, Saved, Soul, Stage, You } from '../types'
 import { ACHIEVEMENTS, earnedOf, knownEarned } from './achievements'
+import { parentsOf } from './breed'
+import { EGG_XP, HATCH_TURNS, eggProgress, eggXpSoFar, neverActive, readEgg } from './eggs'
 import { ageText, momentText, readable } from './journal'
+import type { Names } from './journal'
 import { RARITY, STATS } from './roll'
 import type { Bones } from './roll'
 import { totalCalls, withCommas } from './ledger'
@@ -29,12 +32,14 @@ export function paintRuns(art: string, paint = ''): Run[] {
 }
 
 // The band's right-hand column, a row of runs per sprite row: the bubble when it has one, else
-// a holiday prop after a 2-column gap, else a space.
-export function rightRuns(bubble: readonly string[], prop: Prop | null): Run[][] {
+// a holiday prop after a 2-column gap, else a space. An egg being carried stands in a gutter
+// before it (Breeding spec section 6).
+export function rightRuns(bubble: readonly string[], prop: Prop | null, egg: readonly string[] | null = null): Run[][] {
   const quiet = bubble.every(row => !row)
   return bubble.map((row, i) => {
     const art = quiet ? prop?.art[i] : undefined
-    return art ? [{ text: ' '.repeat(PROP_GAP) }, ...paintRuns(art, prop?.paint?.[i])] : [{ text: ' ' + row }]
+    const runs = art ? [{ text: ' '.repeat(PROP_GAP) }, ...paintRuns(art, prop?.paint?.[i])] : [{ text: ' ' + row }]
+    return egg ? [{ text: egg[i] ?? '' }, ...runs] : runs
   })
 }
 
@@ -47,8 +52,9 @@ export function isCompact(maxRows: number, bodyColumns: number): boolean {
   return maxRows < MIN_FULL_ROWS || bodyColumns < MIN_FULL_COLS
 }
 
-export function bubbleWidth(bodyColumns: number): number {
-  return Math.min(bodyColumns - 14, MAX_BUBBLE_W)
+// `gutter` is the columns an egg takes between the sprite and the bubble.
+export function bubbleWidth(bodyColumns: number, gutter = 0): number {
+  return Math.min(bodyColumns - 14 - gutter, MAX_BUBBLE_W)
 }
 
 // Which of `count` pages is up `at` (0 to 1) of the way through a bubble's life: each gets an equal share.
@@ -113,8 +119,9 @@ export function bandRows(
   say: string | null,
   bodyColumns: number,
   at: number,
+  gutter = 0,
 ): { sprite: string[]; bubble: string[] } {
-  const box = say ? bubbleRows(say, bubbleWidth(bodyColumns), at) : []
+  const box = say ? bubbleRows(say, bubbleWidth(bodyColumns, gutter), at) : []
   return {
     sprite: Array.from({ length: 5 }, (_, i) => sprite[i] ?? ''),
     bubble: Array.from({ length: 5 }, (_, i) => box[i] ?? ''),
@@ -152,15 +159,26 @@ export function compactLine(face: string, name: string, say: string | null, colu
   return `${head}: ${lines[page]}${page < lines.length - 1 ? ' …' : ''}`
 }
 
-// The shown buddy's growth and your achievements, for the card (Progression spec section 6).
+// A buddy as the card names it: its dex number and name.
+export type DexName = { number: number; name: string }
+
+// Your egg, for the card (Breeding spec section 6): the XP toward the next one, or the one
+// incubating, its turns and, once brooded, its parents' names.
+export type CardEgg = { kind: 'next'; xp: number } | { kind: 'carrying'; turns: number; parents: [string, string] | null }
+
+// The shown buddy's growth and your achievements, for the card (Progression spec section 6), and
+// its parents and your egg (Breeding spec section 6). Missing parents or egg draw no row.
 export type CardProgress = {
   level: number
   stage: Stage
   xp: number
   // Earned achievement titles, newest first.
   earned: readonly string[]
-  // When the shown buddy was retired; null for the active one.
+  // When the shown buddy was retired; null for the active one and for one never yet active.
   retiredAt: string | null
+  // A bred buddy's parents; null for a rolled one.
+  parents?: [DexName, DexName] | null
+  egg?: CardEgg
 }
 
 export function cardProgress(saved: Saved, buddy: Buddy): CardProgress {
@@ -171,7 +189,43 @@ export function cardProgress(saved: Saved, buddy: Buddy): CardProgress {
   const earned = knownEarned(saved.you)
     .sort((a, b) => (when(b.id) > when(a.id) ? 1 : when(b.id) < when(a.id) ? -1 : 0))
     .map(a => a.title)
-  return { level, stage: stageOf(level), xp: xpOf(buddy.counts), earned, retiredAt: buddy.retiredAt }
+  const dexName = (seed: string): DexName => {
+    const i = saved.buddies.findIndex(b => b.seed === seed)
+    return { number: i + 1, name: saved.buddies[i]?.soul.name ?? 'Buddy' }
+  }
+  const pair = parentsOf(saved.buddies, buddy.parents)
+  const egg = readEgg(saved)
+  return {
+    level,
+    stage: stageOf(level),
+    xp: xpOf(buddy.counts),
+    earned,
+    retiredAt: neverActive(buddy) ? null : buddy.retiredAt,
+    parents: pair ? [dexName(pair[0]), dexName(pair[1])] : null,
+    egg: egg
+      ? {
+          kind: 'carrying',
+          turns: eggProgress(saved, egg),
+          parents: egg.parents ? [dexName(egg.parents[0]).name, dexName(egg.parents[1]).name] : null,
+        }
+      : { kind: 'next', xp: eggXpSoFar(saved) },
+  }
+}
+
+// "Next egg 3,200 / 8,100 xp", or "Egg 40 / 150 turns".
+export function eggText(egg: CardEgg): string {
+  return egg.kind === 'next'
+    ? `Next egg ${withCommas(egg.xp)} / ${withCommas(EGG_XP)} xp`
+    : `Egg ${egg.turns} / ${HATCH_TURNS} turns`
+}
+
+// The card's hatch line, with a bred buddy's parents and a retired buddy's retirement:
+// "Hatched 2026-10-09 from #1 Pip and #3 Mochi   Rerolls: 1   Retired 2026-10-10".
+export function hatchLine(soul: Soul, rerolls: number, progress?: CardProgress): string {
+  const p = progress?.parents
+  const from = p ? ` from #${p[0].number} ${p[0].name} and #${p[1].number} ${p[1].name}` : ''
+  const retired = progress?.retiredAt ? `   Retired ${progress.retiredAt.slice(0, 10)}` : ''
+  return `Hatched ${soul.hatchedAt.slice(0, 10)}${from}   Rerolls: ${rerolls}${retired}`
 }
 
 // "Lv 12 adult · 12,345 / 14,400 xp": the XP so far over the XP for the next level.
@@ -180,20 +234,20 @@ export function levelText(p: Pick<CardProgress, 'level' | 'stage' | 'xp'>): stri
   return `Lv ${p.level} ${p.stage} · ${withCommas(p.xp)}${next !== null ? ` / ${withCommas(next)}` : ''} xp`
 }
 
-export function achievementsText(earned: number): string {
-  return `Achievements: ${earned} of ${ACHIEVEMENTS.length}`
+// The egg rides on the achievements line, so the text card keeps to 12 lines (Breeding spec section 6).
+export function achievementsText(earned: number, egg?: CardEgg): string {
+  return `Achievements: ${earned} of ${ACHIEVEMENTS.length}${egg ? ` · ${eggText(egg)}` : ''}`
 }
 
 export function cardLines(soul: Soul, bones: Dressed, rerolls: number, progress?: CardProgress): string[] {
   const bar = (v: number) => '#'.repeat(Math.round(v / 5)).padEnd(20, '-')
-  const retired = progress?.retiredAt ? `   Retired ${progress.retiredAt.slice(0, 10)}` : ''
   return [
     `${soul.name}, ${bones.rarity} ${bones.species} ${'★'.repeat(RARITY[bones.rarity].stars)}${bones.shiny ? ' (shiny)' : ''}`,
     ...(progress ? [levelText(progress)] : []),
     `Hat: ${bones.hat}   Eyes: ${bones.eye}`,
     soul.personality,
     ...STATS.map(s => `${s.padEnd(10)} ${bar(bones.stats[s])} ${String(bones.stats[s]).padStart(3)}`),
-    `Hatched ${soul.hatchedAt.slice(0, 10)}   Rerolls: ${rerolls}${retired}`,
+    hatchLine(soul, rerolls, progress),
   ]
 }
 
@@ -220,18 +274,24 @@ export const journalHeader = (name: string) => `${name}'s journal`
 export const emptyJournal = (name: string) => `Nothing in ${name}'s journal yet.`
 
 // A journal's moments newest first, with their ages padded to the widest (Memory spec section 5).
-export function journalRows(journal: readonly Moment[] | undefined, now: number): JournalRow[] {
+export function journalRows(journal: readonly Moment[] | undefined, now: number, buddies?: Names): JournalRow[] {
   const rows = readable(journal)
     .reverse()
-    .map(m => ({ age: ageText(m.at, now), text: momentText(m) }))
+    .map(m => ({ age: ageText(m.at, now), text: momentText(m, buddies) }))
   const width = Math.max(0, ...rows.map(r => r.age.length))
   return rows.map(r => ({ ...r, age: r.age.padEnd(width) }))
 }
 
 // The journal as text, where no pane is placed: the header and the newest `limit` moments, inside
 // the 12 lines the card's text keeps to.
-export function journalLines(name: string, journal: readonly Moment[] | undefined, now: number, limit = 10): string[] {
-  const rows = journalRows(journal, now).slice(0, limit)
+export function journalLines(
+  name: string,
+  journal: readonly Moment[] | undefined,
+  now: number,
+  buddies?: Names,
+  limit = 10,
+): string[] {
+  const rows = journalRows(journal, now, buddies).slice(0, limit)
   if (rows.length === 0) return [journalHeader(name), emptyJournal(name)]
   return [journalHeader(name), ...rows.map(r => `${r.age}   ${r.text}`)]
 }
@@ -259,7 +319,8 @@ export type DexRow = {
   bones: Dressed
   level: number
   stage: Stage
-  // "Oct 7 – Nov 2", or "Oct 7 – now" for the active buddy.
+  // "Oct 7 – Nov 2", "Oct 7 – now" for the active buddy, or "hatched Oct 9" for one never yet
+  // active (Breeding spec section 3).
   dates: string
   active: boolean
 }
@@ -272,13 +333,14 @@ export function dexRows(saved: Saved, now: number): DexRow[] {
     const level = levelOf(b.counts)
     const active = b.seed === saved.active
     const end = active || b.retiredAt === null ? 'now' : shortDate(b.retiredAt, year)
+    const hatched = shortDate(b.soul.hatchedAt, year)
     return {
       number: i + 1,
       name: b.soul.name,
-      bones: dressed(b, saved.you),
+      bones: dressed(b, saved),
       level,
       stage: stageOf(level),
-      dates: `${shortDate(b.soul.hatchedAt, year)} – ${end}`,
+      dates: !active && neverActive(b) ? `hatched ${hatched}` : `${hatched} – ${end}`,
       active,
     }
   })

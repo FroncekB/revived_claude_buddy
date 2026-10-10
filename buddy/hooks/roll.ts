@@ -77,15 +77,15 @@ export function rngFor(seed: string): () => number {
   return mulberry32(fnv1a32(seed + SALT))
 }
 
-function int(rng: () => number, n: number): number {
+export function int(rng: () => number, n: number): number {
   return Math.floor(rng() * n)
 }
 
-function pick<T>(rng: () => number, list: readonly T[]): T {
+export function pick<T>(rng: () => number, list: readonly T[]): T {
   return list[int(rng, list.length)]!
 }
 
-function pickRarity(rng: () => number): Rarity {
+export function pickRarity(rng: () => number): Rarity {
   let roll = rng() * 100
   for (const rarity of RARITIES) {
     roll -= RARITY[rarity].weight

@@ -229,3 +229,37 @@ test('an announcement reads the level, the stage, then what was earned and any h
     'Level 10! I grew into an adult. Earned Grown up.',
   )
 })
+
+test("a brooded egg's hatch request carries both parents; a wild one's carries none", () => {
+  const bones = rollBones('voice-seed')
+  const wild = hatchRequest(bones)
+  expect(wild.prompt).not.toContain('Parents')
+  const parents = [
+    { name: 'Pip', species: 'owl', personality: 'Counts semicolons.' },
+    { name: 'Mochi', species: 'axolotl', personality: 'Naps on the stack.' },
+  ] as const
+  const bred = hatchRequest(bones, parents)
+  expect(bred.system).toBe(wild.system)
+  expect(bred.prompt).toBe(
+    `${wild.prompt}\nParents: Pip, an owl ("Counts semicolons."), and Mochi, an axolotl ("Naps on the stack."). ` +
+      'Take after them a little; the name is your own.',
+  )
+})
+
+test('an announcement reads a hatch first, an egg after the level, and breeding after Collector', () => {
+  const news = (o: Partial<News>): News => ({ level: null, stage: null, earned: [], ...o })
+  const sprout = { name: 'Sprout', rarity: 'rare' as const, species: 'owl' as const, shiny: false, swapBy: 'Sprout' }
+  expect(newsLine(news({ hatched: sprout }))).toBe('The egg hatched! Meet Sprout, a rare owl. Run /buddy swap Sprout.')
+  expect(newsLine(news({ hatched: { ...sprout, rarity: 'uncommon', shiny: true, swapBy: '#6' } }))).toBe(
+    'The egg hatched! Meet Sprout, a shiny uncommon owl. Run /buddy swap #6.',
+  )
+  expect(newsLine(news({ hatched: { ...sprout, rarity: 'epic' } }))).toBe(
+    'The egg hatched! Meet Sprout, an epic owl. Run /buddy swap Sprout.',
+  )
+  expect(newsLine(news({ hatched: sprout, earned: ['collector'] }))).toBe(
+    'The egg hatched! Meet Sprout, a rare owl. Run /buddy swap Sprout. Earned Collector. Breeding unlocked.',
+  )
+  expect(newsLine(news({ level: 10, stage: 'adult', egg: true, earned: ['grownUp'] }))).toBe(
+    'Level 10! I grew into an adult. An egg! It hatches in 150 turns. Earned Grown up.',
+  )
+})

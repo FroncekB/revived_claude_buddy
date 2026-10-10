@@ -3,6 +3,7 @@
 import type { Mode, Soul, TurnReason, You } from '../types'
 import { ACHIEVEMENTS, EARNED_HAT_NAME } from './achievements'
 import type { News } from './achievements'
+import { HATCH_TURNS } from './eggs'
 import { STATS, rngFor } from './roll'
 import type { Bones, StatName, Stats } from './roll'
 
@@ -133,7 +134,15 @@ export function talkPrompt(message: string, memories: readonly string[] = [], du
   return [...lines, 'Reply in one line.'].join('\n')
 }
 
-export function hatchRequest(b: Bones): { system: string; prompt: string } {
+// A bred buddy's parent, as its hatch prompt describes it (Breeding spec section 4).
+export type Parent = { name: string; species: string; personality: string }
+
+// The hatch request. A brooded egg's carries its parents, so the child can take after them.
+export function hatchRequest(b: Bones, parents?: readonly [Parent, Parent]): { system: string; prompt: string } {
+  const stats =
+    `Species: ${b.species}. Rarity: ${b.rarity}. Shiny: ${b.shiny ? 'yes' : 'no'}. ` +
+    `Highest stat: ${b.peak} (${b.stats[b.peak]}). Lowest stat: ${b.low} (${b.stats[b.low]}).`
+  const parent = (p: Parent) => `${p.name}, ${withArticle(p.species)} ("${p.personality}")`
   return {
     system: [
       'You name and describe a small ASCII pet that lives in a developer terminal.',
@@ -141,9 +150,9 @@ export function hatchRequest(b: Bones): { system: string; prompt: string } {
       'name: one word, letters only, at most 12 characters.',
       "personality: at most 160 characters, written in the pet's own voice, shaped by its highest and lowest stats.",
     ].join('\n'),
-    prompt:
-      `Species: ${b.species}. Rarity: ${b.rarity}. Shiny: ${b.shiny ? 'yes' : 'no'}. ` +
-      `Highest stat: ${b.peak} (${b.stats[b.peak]}). Lowest stat: ${b.low} (${b.stats[b.low]}).`,
+    prompt: parents
+      ? `${stats}\nParents: ${parent(parents[0])}, and ${parent(parents[1])}. Take after them a little; the name is your own.`
+      : stats,
   }
 }
 
@@ -257,17 +266,25 @@ function listOf(items: readonly string[]): string {
   return items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`
 }
 
-// An announcement, said with no model call (Progression spec section 4): the level, the stage it
-// brought, then what was earned and any hats it unlocked.
+// An announcement, said with no model call (Progression spec section 4, Breeding spec section 5):
+// a hatchling, the level and the stage it brought, an egg that started, then what was earned and
+// any hats it unlocked, and breeding once Collector unlocks it.
 export function newsLine(news: News): string {
   const parts: string[] = []
+  const h = news.hatched
+  if (h) {
+    const kind = `${withArticle(`${h.shiny ? 'shiny ' : ''}${h.rarity}`)} ${h.species}`
+    parts.push(`The egg hatched! Meet ${h.name}, ${kind}. Run /buddy swap ${h.swapBy}.`)
+  }
   if (news.level !== null) parts.push(`Level ${news.level}!`)
   if (news.stage === 'adult') parts.push('I grew into an adult.')
   if (news.stage === 'elder') parts.push("I'm an elder now.")
+  if (news.egg) parts.push(`An egg! It hatches in ${HATCH_TURNS} turns.`)
   const got = ACHIEVEMENTS.filter(a => news.earned.includes(a.id))
   if (got.length > 0) {
     const hats = got.flatMap(a => (a.hat ? [EARNED_HAT_NAME[a.hat]] : []))
     parts.push(`Earned ${listOf(got.map(a => a.title))}${hats.length > 0 ? `, and ${listOf(hats)}` : ''}.`)
   }
+  if (news.earned.includes('collector')) parts.push('Breeding unlocked.')
   return parts.join(' ')
 }

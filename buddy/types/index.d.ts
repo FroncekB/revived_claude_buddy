@@ -38,6 +38,20 @@ export type You = {
   days: number
   // Achievement id to the ISO time it was earned (Progression spec section 3). Missing reads as none.
   earned?: Record<string, string>
+  // Eggs started so far (Breeding spec section 2). Missing reads as the eggs your XP has earned,
+  // so none is owed until a flush writes it.
+  eggs?: number
+}
+
+// The egg incubating (Breeding spec section 1). It hatches into `seed` once the turns summed over
+// every buddy are HATCH_TURNS past `fromTurns`.
+export type Egg = {
+  seed: string
+  // When it started incubating.
+  startedAt: string
+  fromTurns: number
+  // Set by /buddy breed: [the active buddy then, its partner]. Missing for a wild egg.
+  parents?: [string, string]
 }
 
 // A buddy's mood (Alive spec section 2): failures push the meter toward anxious, long clean
@@ -52,14 +66,16 @@ export type MoodEvent = 'fail' | 'clean' | 'longClean' | 'soothe'
 
 // A notable moment in a buddy's life (Memory spec section 2), kept as data: its words are made
 // when it is shown, so they can change without touching saves.
-export type MomentKind = 'failRun' | 'longTurn' | 'busyTurn' | 'turns' | 'calls' | 'comeback' | 'away' | 'grew'
+export type MomentKind =
+  | 'failRun' | 'longTurn' | 'busyTurn' | 'turns' | 'calls' | 'comeback' | 'away' | 'grew' | 'hatched' | 'brooded'
 
 export type Moment = {
   // When the save or visit that wrote it happened.
   at: string
   kind: MomentKind
   // What the kind counts: the run, the minutes, the calls, the mark, the rough turns, the days,
-  // the stage grown into (1 adult, 2 elder).
+  // the stage grown into (1 adult, 2 elder), the turns spent in the egg, the dex number of the
+  // buddy brooding with it.
   n: number
   // failRun only, when the whole run was in one group.
   group?: ToolGroup
@@ -104,6 +120,9 @@ export type Buddy = {
   // The hat it wears: a rolled or earned hat's id, or 'none' (Interaction spec section 2).
   // Missing, or a hat it can't wear, reads as the hat it rolled.
   hat?: string
+  // A bred buddy's parents, copied from its egg: [the active buddy when they brooded it, its
+  // partner] (Breeding spec section 1). Its bones are bred from theirs.
+  parents?: [string, string]
 }
 
 // The `$.store` key `buddy` (Foundation spec section 1).
@@ -114,6 +133,8 @@ export type Saved = {
   active: string
   buddies: Buddy[]
   you: You
+  // At most one; missing when none is incubating.
+  egg?: Egg
 }
 
 // `news` is the announcement a bubble carries (Progression spec section 4): a quip never replaces
@@ -158,6 +179,8 @@ declare module 'claude-code' {
       duckUntil: number
       duckTool: string | null
       lastNudgeAt: number
+      // True while the egg's soul call is in flight: the band shows it cracked (Breeding spec section 3).
+      eggHatching: boolean
     }
   }
 }

@@ -9,12 +9,14 @@ import { dayInfo } from './calendar'
 import { cardAlt, cardSvg, dexAlt, dexSvg, journalAlt, journalSvg, meter } from './card'
 import { DUCK_MS, duckDue, duckFallback, duckLine, duckPrompt, failsByTool, shouldNudge } from './duck'
 import type { DuckDue } from './duck'
+import { bornBones, eggBones } from './breed'
+import { HATCH_TURNS, MULLIGAN_NOTE, closedLine, dueEgg, eggProgress, hatchesIn, mulliganOpen, readEgg } from './eggs'
 import {
   MAX_QUEUED_TURNS, addCall, isRough, memoryLine, momentKey, noCalls, recall, talkMemories, turnFacts,
 } from './journal'
 import {
-  achievementsText, bandRows, cardLines, cardProgress, compactLine, dexLines, dexRows, dexText, emptyJournal, isCompact,
-  journalHeader, journalLines, journalRows, levelText, nameLine, rightRuns, spriteTint, streakLine,
+  achievementsText, bandRows, cardLines, cardProgress, compactLine, dexLines, dexRows, dexText, emptyJournal, hatchLine,
+  isCompact, journalHeader, journalLines, journalRows, levelText, nameLine, rightRuns, spriteTint, streakLine,
 } from './layout'
 import { addCounts, countEvent, mergePending, toolGroup, zeroCounts } from './ledger'
 import type { CountEvent } from './ledger'
@@ -25,12 +27,12 @@ import type { MoodName } from './mood'
 import { bonesFor, levelOf, stageOf } from './progress'
 import { mergeQueues, queueNewest } from './queue'
 import {
-  STORE_KEY, USAGE, activeBuddy, applyChange, classify, findBuddy, notFound, parseSub, shownBuddy, targetOf,
+  STORE_KEY, USAGE, activeBuddy, applyChange, breedChoice, classify, findBuddy, notFound, parseSub, shownBuddy, targetOf,
 } from './record'
 import type { Change, Parsed, Stored } from './record'
 import { RARITY, STATS, rollBones } from './roll'
 import type { Bones } from './roll'
-import { eggRows, frameAt } from './sprites'
+import { EGG_GUTTER, eggGutterRows, eggRows, frameAt } from './sprites'
 import type { Frame, Prop } from './sprites'
 import { bandSvg } from './svg'
 import { TOUR_STEPS, tourAt } from './tour'
@@ -61,7 +63,7 @@ import {
   talkPrompt,
   withArticle,
 } from './voice'
-import type { TurnSummary } from './voice'
+import type { Parent, TurnSummary } from './voice'
 
 const record = atom({ plugin: 'buddy', key: 'record' } as const, null)
 // True while the record in state is newer than the store's: the last write failed.
@@ -86,6 +88,7 @@ const lastFedAt = atom({ plugin: 'buddy', key: 'lastFedAt' } as const, 0)
 const duckUntil = atom({ plugin: 'buddy', key: 'duckUntil' } as const, 0)
 const duckTool = atom({ plugin: 'buddy', key: 'duckTool' } as const, null)
 const lastNudgeAt = atom({ plugin: 'buddy', key: 'lastNudgeAt' } as const, 0)
+const eggHatching = atom({ plugin: 'buddy', key: 'eggHatching' } as const, false)
 
 const CARD = 'card'
 const JOURNAL = 'journal'
@@ -93,6 +96,8 @@ const DEX = 'dex'
 const NO_BUDDY = 'No buddy yet. Run /buddy to hatch one.'
 const EGG = 'Wait for the egg to hatch.'
 const SAVE_FAILED = 'Could not save your buddy; it lives for this session only.'
+const SNAG = 'Your buddy hit a snag. Try again.'
+const EGG_HATCHING = 'The egg is hatching.'
 
 type Look = {
   sprite: string[]
@@ -108,6 +113,8 @@ type Look = {
   sayAt: number
   // A holiday prop beside the sprite, while nothing is said.
   prop: Prop | null
+  // The egg being carried, in its gutter's rows; null with none (Breeding spec section 6).
+  egg: string[] | null
 }
 
 // The part of a buddy that speaks: its seed and counts, for its grown bones, its soul, and its
@@ -143,6 +150,9 @@ let stretch: Stretch | null = null
 let prevFails: Record<string, number> = {}
 // The last commit this session started. The next one waits for it to settle.
 let lastCommit: Promise<unknown> = Promise.resolve()
+// True from the moment this session starts hatching the egg, before any await, so a second check
+// can never start a second hatch (Breeding spec section 3).
+let eggBusy = false
 
 function startTimer($: EngineInterface) {
   timer?.cancel()
@@ -221,10 +231,18 @@ async function commitNow($: EngineInterface, change: Change): Promise<string | n
   if (refused) return refused
   const before = base.kind === 'ok' ? base.saved : null
   const saved = applyChange(before, change, await $.clock.now())
-  if (!saved) return null
+  if (!saved) {
+    // A hatch another session won leaves nothing to write, but this one adopts the record it
+    // read, so its band stops drawing the egg (Breeding spec section 3). It says nothing, and
+    // the next adopting commit is the next check for a due egg.
+    if (change.kind === 'hatchEgg' && before) await adopt($, before)
+    return null
+  }
   await adopt($, saved)
   // Only the session whose commit made the change announces it, whether or not the write lands.
   await announce($, before, saved)
+  // An egg this record carries to its hatch hatches after the commit, never inside it.
+  if (dueEgg(saved)) later($, () => hatchIfDue($))
   try {
     await $.store.set(STORE_KEY, saved)
     await update($, unsaved, () => false)
@@ -302,7 +320,8 @@ async function flush($: EngineInterface) {
     return {}
   })
   try {
-    await commit($, { kind: 'flush', pending: taken, mood: felt, turns })
+    // A fresh seed rides along in case this save starts an owed egg (Breeding spec section 2).
+    await commit($, { kind: 'flush', pending: taken, mood: felt, turns, eggSeed: crypto.randomUUID() })
   } catch {
     await update($, pending, p => mergePending(taken, p))
     await update($, pendingMood, p => mergeQueues(felt, p, MAX_QUEUED_MOOD))
@@ -330,7 +349,7 @@ async function countAndFlush(
 async function speakUp($: EngineInterface, turn: number) {
   const saved = await read($, record)
   if (!saved || (await read($, hatching))) return
-  const bones = bonesFor(activeBuddy(saved))
+  const bones = bonesFor(activeBuddy(saved), saved.buddies)
   const t = await read($, tick)
   const said = await read($, bubble)
   const say = shouldFlag({
@@ -448,7 +467,7 @@ async function ask(
 // still says so (Progression spec section 4). `fallback` is said when the model isn't asked or
 // doesn't answer; without one, a canned line is.
 async function reply($: EngineInterface, who: Who, prompt: string, fallback?: string) {
-  const bones = bonesFor(who)
+  const bones = bonesFor(who, (await read($, record))?.buddies ?? [])
   const now = await $.clock.now()
   const last = await read($, lastReplyAt)
   await update($, lastReplyAt, () => now)
@@ -474,12 +493,18 @@ async function soothe($: EngineInterface, event: CountEvent, who: Who, prompt: s
 
 // The journal line a quip carries, if any (Memory spec section 4), noted in `recalled` so the
 // same memory isn't carried again within the hour. A throw costs the memory, never the quip.
-function quipMemory(journal: readonly Moment[] | undefined, facts: TurnFacts, now: number, bones: Bones): string | null {
+function quipMemory(
+  journal: readonly Moment[] | undefined,
+  facts: TurnFacts,
+  now: number,
+  bones: Bones,
+  buddies: readonly Buddy[],
+): string | null {
   try {
     const m = recall({ journal, facts, now, stats: bones.stats, roll: Math.random(), pick: Math.random(), recalled })
     if (!m) return null
     recalled = { ...recalled, [momentKey(m)]: now }
-    return memoryLine(m, now)
+    return memoryLine(m, now, buddies)
   } catch {
     return null
   }
@@ -488,7 +513,7 @@ function quipMemory(journal: readonly Moment[] | undefined, facts: TurnFacts, no
 // The journal lines a talk carries (Memory spec section 4). A throw costs the memories, never the reply.
 async function talkMemoryLines($: EngineInterface, journal: readonly Moment[] | undefined): Promise<string[]> {
   try {
-    return talkMemories(journal, await $.clock.now())
+    return talkMemories(journal, await $.clock.now(), (await read($, record))?.buddies)
   } catch {
     return []
   }
@@ -550,7 +575,7 @@ async function nudgeDuck($: EngineInterface, duck: DuckDue, ended: number): Prom
   const buddy = activeBuddy(saved)
   const name = buddy.soul.name
   const replied = await read($, lastReplyAt)
-  const text = await ask($, buddy, bonesFor(buddy), duckPrompt(name, duck.tool, duck.n), 'react')
+  const text = await ask($, buddy, bonesFor(buddy, saved.buddies), duckPrompt(name, duck.tool, duck.n), 'react')
   // A reply that came in meanwhile wins, whether it cut the call short or, inside its 5 s floor,
   // asked nothing; so does a swap, which the offer was not for. An answer that comes back over an
   // announcement is dropped.
@@ -602,7 +627,7 @@ async function react($: EngineInterface, summary: TurnSummary, facts: TurnFacts)
   const saved = await read($, record)
   if (!saved || (await read($, hatching))) return
   const buddy = activeBuddy(saved)
-  const bones = bonesFor(buddy)
+  const bones = bonesFor(buddy, saved.buddies)
   const now = await $.clock.now()
   const speak = shouldQuip({
     mode: saved.mode,
@@ -615,10 +640,70 @@ async function react($: EngineInterface, summary: TurnSummary, facts: TurnFacts)
   })
   if (!speak) return
   await update($, lastQuipAt, () => now)
-  const memory = quipMemory(buddy.journal, facts, now, bones)
+  const memory = quipMemory(buddy.journal, facts, now, bones, saved.buddies)
   const text = await ask($, buddy, bones, reactionPrompt(summary, memory), 'react')
   // An announcement keeps the bubble: a quip that comes back over one is dropped.
   if (text && (await newsShowing($)) === null) await showBubble($, text)
+}
+
+// A new buddy's name and personality: one Haiku call, or the fallback when it fails (base spec
+// section 5). Never throws: hatching never fails.
+async function askSoul(
+  $: EngineInterface,
+  seed: string,
+  bones: Bones,
+  parents?: readonly [Parent, Parent],
+): Promise<{ name: string; personality: string }> {
+  const fallback = fallbackSoul(seed, bones)
+  try {
+    const request = hatchRequest(bones, parents)
+    const result = await $.model.complete({
+      model: 'haiku',
+      system: request.system,
+      prompt: request.prompt,
+      maxTokens: 200,
+      timeoutMs: 8000,
+    })
+    return (result.isAnswered ? parseSoul(result.text) : null) ?? fallback
+  } catch {
+    return fallback
+  }
+}
+
+// Hatches the egg once it is due (Breeding spec section 3): the hatch path's one soul call, then
+// the hatchEgg commit, whose news announces it. The active buddy stays on screen and its events
+// still count. Not while off or while a buddy hatches; a throw leaves the egg due for the next try.
+async function hatchIfDue($: EngineInterface) {
+  if (eggBusy) return
+  eggBusy = true
+  try {
+    const saved = await read($, record)
+    if (!saved || saved.mode === 'off' || (await read($, hatching))) return
+    const egg = dueEgg(saved)
+    if (!egg) return
+    await update($, eggHatching, () => true)
+    // A brooded egg's child hears who its parents are (Breeding spec section 4).
+    const parentOf = (seed: string): Parent => {
+      const b = saved.buddies.find(x => x.seed === seed)
+      return { name: b?.soul.name ?? 'Buddy', species: bornBones(saved.buddies, seed).species, personality: b?.soul.personality ?? '' }
+    }
+    const parents = egg.parents ? ([parentOf(egg.parents[0]), parentOf(egg.parents[1])] as const) : undefined
+    const soul = await askSoul($, egg.seed, eggBones(saved.buddies, egg), parents)
+    const hatchedAt = new Date(await $.clock.now()).toISOString()
+    const change: Change = {
+      kind: 'hatchEgg',
+      seed: egg.seed,
+      parents: egg.parents ?? null,
+      soul: { ...soul, hatchedAt },
+      eggSeed: crypto.randomUUID(),
+    }
+    await commit($, change)
+  } catch {
+    // The egg stays due: the next check tries again.
+  } finally {
+    eggBusy = false
+    await update($, eggHatching, () => false)
+  }
 }
 
 async function hatch($: EngineInterface, kind: 'hatch' | 'reroll'): Promise<string> {
@@ -629,32 +714,42 @@ async function hatch($: EngineInterface, kind: 'hatch' | 'reroll'): Promise<stri
     // A new buddy is shown as itself, not mid-tour. Adopting it clears the rough turns.
     await update($, tourStart, () => null)
     if (!timer) startTimer($)
-    let soul = fallbackSoul(seed, bones)
-    try {
-      const request = hatchRequest(bones)
-      const result = await $.model.complete({
-        model: 'haiku',
-        system: request.system,
-        prompt: request.prompt,
-        maxTokens: 200,
-        timeoutMs: 8000,
-      })
-      if (result.isAnswered) soul = parseSoul(result.text) ?? soul
-    } catch {
-      // Keep the fallback soul: hatching never fails.
-    }
+    const soul = await askSoul($, seed, bones)
     const hatchedAt = new Date(await $.clock.now()).toISOString()
     const born: Who = { seed, soul: { ...soul, hatchedAt } }
     const note = await commit($, { kind, ...born })
     // Refused: nothing was written or adopted, so there is no buddy to say hello.
     if (note !== null && note !== SAVE_FAILED) return note
+    // Nothing was written: another session hatched first, or the mulligan's window shut meanwhile.
+    if ((await read($, record))?.active !== seed) return unhatched($, kind)
     await update($, bubble, () => null)
     later($, () => reply($, born, HELLO_PROMPT))
-    return note ?? `${soul.name}, ${withArticle(bones.rarity)}${bones.shiny ? ' shiny' : ''} ${bones.species}, hatched.`
+    const said = `${soul.name}, ${withArticle(bones.rarity)}${bones.shiny ? ' shiny' : ''} ${bones.species}, hatched.`
+    // A first hatch says the mulligan is there (Breeding spec section 2).
+    return note ?? (kind === 'hatch' ? `${said} ${MULLIGAN_NOTE}` : said)
   } finally {
     // The egg never stays out, whatever went wrong above.
     await update($, hatching, () => false)
   }
+}
+
+// What /buddy breed answers when its commit wrote nothing: the reason, from the record as it now
+// stands, adopted, since another session may have set the egg's parents first.
+async function unbred($: EngineInterface, who: string): Promise<string> {
+  const stored = await current($)
+  if (stored.kind !== 'ok') return refusal(stored) ?? NO_BUDDY
+  await adopt($, stored.saved)
+  const choice = breedChoice(stored.saved, who)
+  return choice.kind === 'no' ? choice.reply : SNAG
+}
+
+// What a hatch or a reroll answers when its commit wrote nothing: the record as it now stands,
+// adopted, so this session shows the buddy that is really there.
+async function unhatched($: EngineInterface, kind: 'hatch' | 'reroll'): Promise<string> {
+  const stored = await current($)
+  if (stored.kind !== 'ok') return refusal(stored) ?? NO_BUDDY
+  await adopt($, stored.saved)
+  return kind === 'hatch' ? `${activeBuddy(stored.saved).soul.name} is already here.` : closedLine(stored.saved)
 }
 
 async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | undefined> {
@@ -666,7 +761,7 @@ async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | un
   // Another session may have changed the store since this one last looked.
   await adopt($, saved)
   const buddy = activeBuddy(saved)
-  const bones = bonesFor(buddy)
+  const bones = bonesFor(buddy, saved.buddies)
   const name = buddy.soul.name
   const who = `${name}, ${bones.rarity} ${bones.species}`
   const hidden = `${name} is hidden. Run /buddy to bring it back.`
@@ -719,9 +814,9 @@ async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | un
       const shown = shownBuddy(saved, target.seed)
       const progress = cardProgress(saved, shown)
       return [
-        ...cardLines(shown.soul, dressed(shown, saved.you), saved.rerolls, progress),
+        ...cardLines(shown.soul, dressed(shown, saved), saved.rerolls, progress),
         streakLine(saved.you, await countsOf($, shown)),
-        achievementsText(progress.earned.length),
+        achievementsText(progress.earned.length, progress.egg),
       ].join('\n')
     }
     case 'journal': {
@@ -732,7 +827,7 @@ async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | un
       // A surface that places no panes gets the newest ten as text instead.
       if (opened.isPlaced) return undefined
       const shown = shownBuddy(saved, target.seed)
-      return journalLines(shown.soul.name, shown.journal, await $.clock.now()).join('\n')
+      return journalLines(shown.soul.name, shown.journal, await $.clock.now(), saved.buddies).join('\n')
     }
     case 'dex': {
       const opened = await $.ui.open({ id: DEX, title: 'Buddydex', closeOnEscape: true })
@@ -746,10 +841,12 @@ async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | un
       return (await commit($, { kind: 'mode', mode: 'on' })) ?? `${name} can talk again.`
     case 'off':
       return (await commit($, { kind: 'mode', mode: 'off' })) ?? hidden
+    // The one mulligan (Breeding spec section 2); after it, eggs are the only way to a new buddy.
     case 'reroll':
-      return `This retires ${who}. Run /buddy reroll confirm.`
+      if (!mulliganOpen(saved)) return closedLine(saved)
+      return `This replaces ${name}, ${withArticle(bones.rarity)} ${bones.species}, for good. Run /buddy reroll confirm.`
     case 'reroll-confirm':
-      return hatch($, 'reroll')
+      return mulliganOpen(saved) ? hatch($, 'reroll') : closedLine(saved)
     case 'swap': {
       if (await read($, hatching)) return EGG
       const found = findBuddy(saved, parsed.target)
@@ -769,6 +866,23 @@ async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | un
       later($, () => reply($, back, HELLO_PROMPT))
       return note ?? `${back.soul.name} is back.`
     }
+    case 'breed': {
+      if (await read($, hatching)) return EGG
+      if (await read($, eggHatching)) return EGG_HATCHING
+      if (saved.mode === 'off') return hidden
+      const choice = breedChoice(saved, parsed.target)
+      if (choice.kind === 'no') return choice.reply
+      const note = await commit($, { kind: 'breed', partner: choice.partner })
+      // Refused: nothing was written or adopted.
+      if (note !== null && note !== SAVE_FAILED) return note
+      const after = await read($, record)
+      const egg = after && readEgg(after)
+      if (!after || egg?.parents?.[1] !== choice.partner) return unbred($, parsed.target)
+      await feel($, [], 'celebrate')
+      const partner = shownBuddy(after, choice.partner).soul.name
+      const left = HATCH_TURNS - eggProgress(after, egg)
+      return note ?? `${name} and ${partner} are brooding the egg. ${hatchesIn(left)}`
+    }
     case 'rename': {
       if (await read($, hatching)) return EGG
       if (saved.mode === 'off') return hidden
@@ -784,8 +898,8 @@ async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | un
     case 'hat': {
       if (await read($, hatching)) return EGG
       if (saved.mode === 'off') return hidden
-      const can = wearable(buddy, saved.you)
-      const worn = wornHat(buddy, saved.you)
+      const can = wearable(buddy, saved)
+      const worn = wornHat(buddy, saved)
       if (parsed.hat === undefined) return hatList(name, worn, can)
       const choice = hatChoice({ name, words: parsed.hat, worn, can })
       if ('reply' in choice) return choice.reply
@@ -823,6 +937,28 @@ function eggLook(frame: Frame): Look {
     say: null,
     sayAt: 0,
     prop: null,
+    egg: null,
+  }
+}
+
+// The egg the band carries now: the tour's in its egg phase, none in its others, else the record's,
+// as far along as its turns say, cracked and shaking while it hatches, and still while the buddy
+// sleeps. A throw costs only the egg: the band draws without its gutter (Breeding spec section 9).
+async function carriedEgg(
+  $: EngineInterface,
+  saved: Saved,
+  tour: ReturnType<typeof tourAt>,
+  t: number,
+  asleep: boolean,
+): Promise<string[] | null> {
+  try {
+    if (tour) return tour.egg ? eggGutterRows({ ...tour.egg, tick: tour.tick, still: false }) : null
+    const egg = readEgg(saved)
+    if (!egg) return null
+    const f = eggProgress(saved, egg) / HATCH_TURNS
+    return eggGutterRows({ f, tick: t, hatching: await read($, eggHatching), still: asleep })
+  } catch {
+    return null
   }
 }
 
@@ -861,7 +997,7 @@ async function buddyLook($: EngineInterface, saved: Saved, t: number): Promise<L
   // A running /buddy debug tour dresses the real buddy up; nothing saved changes.
   const started = await read($, tourStart)
   const tour = started === null ? null : tourAt(t - started, await read($, tourStage))
-  const own = bonesFor(buddy)
+  const own = bonesFor(buddy, saved.buddies)
   const bones = tour ? { ...own, ...tour.look } : own
   // The tour draws the stage it was asked for; otherwise the buddy is drawn at its own.
   const stage = tour ? tour.stage : stageOf(levelOf(buddy.counts))
@@ -884,7 +1020,7 @@ async function buddyLook($: EngineInterface, saved: Saved, t: number): Promise<L
         heartsFrame,
         saying,
       }
-    : await liveScene($, buddy, { ...own, hat: wornHat(buddy, saved.you) }, stage, t, heartsFrame, saying)
+    : await liveScene($, buddy, { ...own, hat: wornHat(buddy, saved) }, stage, t, heartsFrame, saying)
   const drawn = draw(scene)
   const { label, stars } = nameLine(name, bones, tour ? null : levelOf(buddy.counts))
   const sprite = spriteTint(bones, animTick)
@@ -900,6 +1036,7 @@ async function buddyLook($: EngineInterface, saved: Saved, t: number): Promise<L
     say: saying ? said.text : null,
     sayAt: saying ? (t - said.fromTick) / (said.untilTick - said.fromTick) : 0,
     prop: drawn.prop,
+    egg: await carriedEgg($, saved, tour, t, drawn.asleep),
   }
 }
 
@@ -910,15 +1047,16 @@ export const register: Register = on => {
         name: 'buddy',
         description: 'Hatch, pet, or manage your terminal buddy',
         argumentHint:
-          '[pet | feed | play [game] | card [who] | journal [who] | dex | swap <who> | rename <name> | hat [hat] | mute | unmute | off | reroll [confirm]]',
+          '[pet | feed | play [game] | card [who] | journal [who] | dex | swap <who> | breed <who> | rename <name> | hat [hat] | mute | unmute | off | reroll [confirm]]',
         immediate: true,
       })
     } catch {
       // A refused registration costs the slash command, not the buddy on screen.
     }
     try {
-      // A reload in the middle of a hatch leaves the egg flag set with nobody to clear it.
+      // A reload in the middle of a hatch leaves the egg flags set with nobody to clear them.
       await update($, hatching, () => false)
+      await update($, eggHatching, () => false)
       // A session start is activity: a session never opens on a sleeping buddy.
       await stir($)
       // A write that failed before a reload left the only copy in state: current() keeps it.
@@ -928,6 +1066,8 @@ export const register: Register = on => {
       if (saved && saved.mode !== 'off') {
         startTimer($)
         later($, () => visitToday($))
+        // An egg left due, by another session or a reload mid-hatch, hatches now.
+        later($, () => hatchIfDue($))
       }
     } catch {
       // The buddy never holds up a session.
@@ -1037,8 +1177,8 @@ export const register: Register = on => {
         return <Text wrap="truncate-end">{compactLine(view.face, view.name, view.say, e.props.bodyColumns, view.sayAt)}</Text>
       }
 
-      const rows = bandRows(view.sprite, view.say, e.props.bodyColumns, view.sayAt)
-      const right = rightRuns(rows.bubble, view.prop)
+      const rows = bandRows(view.sprite, view.say, e.props.bodyColumns, view.sayAt, view.egg ? EGG_GUTTER : 0)
+      const right = rightRuns(rows.bubble, view.prop, view.egg)
       const nameRow = (
         <Box>
           <Text dimColor wrap="truncate-end">{view.label}</Text>
@@ -1090,7 +1230,7 @@ export const register: Register = on => {
       if (!saved) return <Text dimColor>{NO_BUDDY}</Text>
 
       const buddy = shownBuddy(saved, await read($, cardSeed))
-      const bones = dressed(buddy, saved.you)
+      const bones = dressed(buddy, saved)
       const progress = cardProgress(saved, buddy)
       const history = { you: saved.you, counts: await countsOf($, buddy) }
       if (e.surface !== 'terminal') {
@@ -1121,10 +1261,7 @@ export const register: Register = on => {
           <Text>{buddy.soul.personality}</Text>
         </Box>
       )
-      const retired = progress.retiredAt ? `   Retired ${progress.retiredAt.slice(0, 10)}` : ''
-      const footer = (
-        <Text dimColor>{`Hatched ${buddy.soul.hatchedAt.slice(0, 10)}   Rerolls: ${saved.rerolls}${retired}`}</Text>
-      )
+      const footer = <Text dimColor>{hatchLine(buddy.soul, saved.rerolls, progress)}</Text>
       const cells = Math.max(8, Math.min(30, e.props.bodyColumns - 18))
       return (
         <Box flexDirection="column">
@@ -1147,7 +1284,7 @@ export const register: Register = on => {
           <Text> </Text>
           {footer}
           <Text dimColor>{streakLine(history.you, history.counts)}</Text>
-          <Text dimColor>{achievementsText(progress.earned.length)}</Text>
+          <Text dimColor>{achievementsText(progress.earned.length, progress.egg)}</Text>
           {progress.earned.length > 0 ? [<Text>{progress.earned.join(' · ')}</Text>] : []}
         </Box>
       )
@@ -1165,10 +1302,10 @@ export const register: Register = on => {
 
       const buddy = shownBuddy(saved, await read($, journalSeed))
       const name = buddy.soul.name
-      const rows = journalRows(buddy.journal, await $.clock.now())
+      const rows = journalRows(buddy.journal, await $.clock.now(), saved.buddies)
       if (e.surface !== 'terminal') {
         const { Svg } = $.ui.resolve(e)
-        return <Svg source={journalSvg(name, bonesFor(buddy), rows)} alt={journalAlt(name, rows)} />
+        return <Svg source={journalSvg(name, bonesFor(buddy, saved.buddies), rows)} alt={journalAlt(name, rows)} />
       }
 
       return (
