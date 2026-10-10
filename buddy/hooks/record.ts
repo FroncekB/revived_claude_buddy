@@ -1,6 +1,7 @@
 // The saved record and the /buddy subcommands. Pure: no $.
 import type { Buddy, Counts, Mode, MoodEvent, Saved, SavedV1, Soul, Stage, TurnFacts } from '../types'
 import { earn } from './achievements'
+import { mulliganOpen, startEgg, withEggCount } from './eggs'
 import { addMoments, awayMoment, bestsOf, milestones, noticeTurns } from './journal'
 import { addCounts, localDay, visit, zeroCounts } from './ledger'
 import { applyMood, sulkFor, withSulk } from './mood'
@@ -63,7 +64,7 @@ function fresh(seed: string, soul: Soul, rerolls: number): Saved {
     rerolls,
     active: seed,
     buddies: [{ seed, soul, retiredAt: null, counts: zeroCounts() }],
-    you: { lastDay: null, streak: 0, bestStreak: 0, days: 0 },
+    you: { lastDay: null, streak: 0, bestStreak: 0, days: 0, eggs: 0 },
   }
 }
 
@@ -77,6 +78,7 @@ export function activeBuddy(saved: Saved): Buddy {
 }
 
 export type Change =
+  // A first hatch, or the one mulligan (Breeding spec section 2).
   | { kind: 'hatch' | 'reroll'; seed: string; soul: Soul }
   | { kind: 'mode'; mode: Mode }
   | {
@@ -86,6 +88,8 @@ export type Change =
       mood?: Readonly<Record<string, readonly MoodEvent[]>>
       // Finished main turns by seed, for the journal (Memory spec section 3).
       turns?: Readonly<Record<string, readonly TurnFacts[]>>
+      // The seed an owed egg starts from, if one starts (Breeding spec section 2).
+      eggSeed?: string
     }
   | { kind: 'visit' }
   // A retired buddy made active again (Progression spec section 7).
@@ -145,19 +149,17 @@ export function applyChange(saved: Saved | null, change: Change, now: number): S
         const born = fresh(change.seed, change.soul, counted)
         return { ...born, you: visit(born.you, today) }
       }
-      // The visit comes first, so a sulk from days away lands on the buddy that was left alone,
-      // never on the new one (Alive spec section 2).
+      // A hatch only makes the first record: new buddies come from eggs (Breeding spec section 2).
+      // A reroll is the one mulligan, judged on the fresh record.
+      if (change.kind === 'hatch' || !mulliganOpen(saved)) return null
+      // It replaces buddy #1 in place, so it adds no dex entry. The visit is still made.
       const arrived = arrive(saved, now)
-      const retiredAt = new Date(now).toISOString()
       return {
         ...arrived,
         mode: 'on',
-        rerolls: arrived.rerolls + counted,
+        rerolls: arrived.rerolls + 1,
         active: change.seed,
-        buddies: [
-          ...arrived.buddies.map(b => (b.seed === arrived.active ? { ...b, retiredAt } : b)),
-          { seed: change.seed, soul: change.soul, retiredAt: null, counts: zeroCounts() },
-        ],
+        buddies: [{ seed: change.seed, soul: change.soul, retiredAt: null, counts: zeroCounts() }],
       }
     }
     case 'mode':
@@ -186,8 +188,13 @@ export function applyChange(saved: Saved | null, change: Change, now: number): S
           ...(moments.length > 0 ? { journal: addMoments(b.journal, moments) } : {}),
         }
       })
-      // Achievements are judged last, on every buddy's new totals (Progression spec section 4).
-      return added || arrived !== saved ? earn({ ...arrived, buddies }, now) : null
+      if (!added && arrived === saved) return null
+      // The egg count is written from the counts as stored, before this flush's are added, so an
+      // existing record's clock runs from its XP at upgrade (Breeding spec section 2).
+      const counted = withEggCount(arrived)
+      // Achievements are judged on every buddy's new totals (Progression spec section 4), then an
+      // owed egg starts when none is incubating.
+      return startEgg(earn({ ...counted, buddies }, now), change.eggSeed, now)
     }
     case 'visit': {
       if (!saved) return null

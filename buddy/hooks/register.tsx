@@ -9,6 +9,7 @@ import { dayInfo } from './calendar'
 import { cardAlt, cardSvg, dexAlt, dexSvg, journalAlt, journalSvg, meter } from './card'
 import { DUCK_MS, duckDue, duckFallback, duckLine, duckPrompt, failsByTool, shouldNudge } from './duck'
 import type { DuckDue } from './duck'
+import { MULLIGAN_NOTE, closedLine, mulliganOpen } from './eggs'
 import {
   MAX_QUEUED_TURNS, addCall, isRough, memoryLine, momentKey, noCalls, recall, talkMemories, turnFacts,
 } from './journal'
@@ -302,7 +303,8 @@ async function flush($: EngineInterface) {
     return {}
   })
   try {
-    await commit($, { kind: 'flush', pending: taken, mood: felt, turns })
+    // A fresh seed rides along in case this save starts an owed egg (Breeding spec section 2).
+    await commit($, { kind: 'flush', pending: taken, mood: felt, turns, eggSeed: crypto.randomUUID() })
   } catch {
     await update($, pending, p => mergePending(taken, p))
     await update($, pendingMood, p => mergeQueues(felt, p, MAX_QUEUED_MOOD))
@@ -648,13 +650,26 @@ async function hatch($: EngineInterface, kind: 'hatch' | 'reroll'): Promise<stri
     const note = await commit($, { kind, ...born })
     // Refused: nothing was written or adopted, so there is no buddy to say hello.
     if (note !== null && note !== SAVE_FAILED) return note
+    // Nothing was written: another session hatched first, or the mulligan's window shut meanwhile.
+    if ((await read($, record))?.active !== seed) return unhatched($, kind)
     await update($, bubble, () => null)
     later($, () => reply($, born, HELLO_PROMPT))
-    return note ?? `${soul.name}, ${withArticle(bones.rarity)}${bones.shiny ? ' shiny' : ''} ${bones.species}, hatched.`
+    const said = `${soul.name}, ${withArticle(bones.rarity)}${bones.shiny ? ' shiny' : ''} ${bones.species}, hatched.`
+    // A first hatch says the mulligan is there (Breeding spec section 2).
+    return note ?? (kind === 'hatch' ? `${said} ${MULLIGAN_NOTE}` : said)
   } finally {
     // The egg never stays out, whatever went wrong above.
     await update($, hatching, () => false)
   }
+}
+
+// What a hatch or a reroll answers when its commit wrote nothing: the record as it now stands,
+// adopted, so this session shows the buddy that is really there.
+async function unhatched($: EngineInterface, kind: 'hatch' | 'reroll'): Promise<string> {
+  const stored = await current($)
+  if (stored.kind !== 'ok') return refusal(stored) ?? NO_BUDDY
+  await adopt($, stored.saved)
+  return kind === 'hatch' ? `${activeBuddy(stored.saved).soul.name} is already here.` : closedLine(stored.saved)
 }
 
 async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | undefined> {
@@ -746,10 +761,12 @@ async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | un
       return (await commit($, { kind: 'mode', mode: 'on' })) ?? `${name} can talk again.`
     case 'off':
       return (await commit($, { kind: 'mode', mode: 'off' })) ?? hidden
+    // The one mulligan (Breeding spec section 2); after it, eggs are the only way to a new buddy.
     case 'reroll':
-      return `This retires ${who}. Run /buddy reroll confirm.`
+      if (!mulliganOpen(saved)) return closedLine(saved)
+      return `This replaces ${name}, ${withArticle(bones.rarity)} ${bones.species}, for good. Run /buddy reroll confirm.`
     case 'reroll-confirm':
-      return hatch($, 'reroll')
+      return mulliganOpen(saved) ? hatch($, 'reroll') : closedLine(saved)
     case 'swap': {
       if (await read($, hatching)) return EGG
       const found = findBuddy(saved, parsed.target)

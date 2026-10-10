@@ -141,7 +141,9 @@ test('hatching names the buddy and draws it on terminal and desktop', async ($, 
   const clock = world(on)
   model(on, '{"name": "Pip", "personality": "Counts semicolons."}', 'Hello there.')
   await $.session.start(START)
-  expect(await runner($)('')).toMatch(/^Pip, (a (common|rare|legendary)|an (uncommon|epic)) .* hatched\.$/)
+  expect(await runner($)('')).toMatch(
+    /^Pip, (a (common|rare|legendary)|an (uncommon|epic)) .* hatched\. Not the one\? \/buddy reroll works once, before level 2\.$/,
+  )
   await clock.settle()
   const terminal = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
   expect(await terminal.find({ text: /Pip/ })).toBeDefined()
@@ -301,17 +303,19 @@ test('where no pane can be placed, card prints the text card with the streak', a
   expect(card).toMatch(/\nStreak 1 day \(best 1\) · 0 turns · 0 tool calls\nAchievements: 0 of 17$/)
 })
 
-test('reroll asks first, then replaces the buddy and counts the reroll', async ($, on) => {
+test('reroll asks first, then replaces the buddy and counts the reroll, once', async ($, on) => {
   world(on, { buddy: RECORD })
   model(on, '{"name": "Bix", "personality": "New here."}', 'Hi.')
   await $.session.start(START)
   const run = runner($)
-  expect(await run('reroll')).toMatch(/^This retires Pip, \w+ \w+\. Run \/buddy reroll confirm\.$/)
+  expect(await run('reroll')).toMatch(/^This replaces Pip, an? \w+ \w+, for good\. Run \/buddy reroll confirm\.$/)
   expect(await cardText($)).toMatch(/Rerolls: 0/)
-  expect(await run('reroll confirm')).toMatch(/^Bix, an? /)
+  expect(await run('reroll confirm')).toMatch(/^Bix, an? [^.]* hatched\.$/)
   const card = await cardText($)
   expect(card).toMatch(/^Bix\b/m)
   expect(card).toMatch(/Rerolls: 1/)
+  expect(await run('reroll')).toBe('No more rerolls. Your next egg comes in 8,100 xp.')
+  expect(await run('reroll confirm')).toBe('No more rerolls. Your next egg comes in 8,100 xp.')
 })
 
 test('off hides the buddy and /buddy brings it back', async ($, on) => {
@@ -760,17 +764,45 @@ test('a schema 1 record is upgraded by the first save', async ($, on) => {
   })
 })
 
-test('a reroll retires the old buddy and keeps it', async ($, on) => {
+test('the mulligan replaces buddy #1 in place, adding nobody to the dex', async ($, on) => {
   const shared = sharedStore(on, RECORD)
   world(on, null)
   model(on, '{"name": "Bix", "personality": "New here."}', 'Hi.')
   await $.session.start(START)
   expect(await runner($)('reroll confirm')).toMatch(/^Bix, an? /)
   const saved = shared.row as Saved
-  expect(saved.buddies.map(b => b.soul.name)).toEqual(['Pip', 'Bix'])
-  expect(typeof saved.buddies[0]?.retiredAt).toBe('string')
-  expect(saved.buddies[1]?.retiredAt).toBeNull()
-  expect(saved).toMatchObject({ active: saved.buddies[1]?.seed, rerolls: 1, mode: 'on' })
+  expect(saved.buddies.map(b => b.soul.name)).toEqual(['Bix'])
+  expect(saved.buddies[0]?.retiredAt).toBeNull()
+  expect(saved).toMatchObject({ active: saved.buddies[0]?.seed, rerolls: 1, mode: 'on' })
+})
+
+test('a mulligan whose window another session shut writes nothing and says so', async ($, on) => {
+  const shared = sharedStore(on, RECORD)
+  world(on, null)
+  on('model.complete', async () => {
+    // Another session rerolls while this one waits for the model.
+    shared.row = { ...RECORD, rerolls: 1 }
+    return { value: ok('{"name": "Bix", "personality": "New here."}') }
+  })
+  await $.session.start(START)
+  expect(await runner($)('reroll confirm')).toBe('No more rerolls. Your next egg comes in 8,100 xp.')
+  expect(shared.row).toMatchObject({ rerolls: 1, seed: 'test-seed' })
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await ui.find({ text: /Pip/ })).toBeDefined()
+})
+
+test('a hatch that finds another session hatched first keeps that buddy', async ($, on) => {
+  const shared = sharedStore(on, undefined)
+  world(on, null)
+  on('model.complete', async () => {
+    shared.row = { ...RECORD, soul: { ...RECORD.soul, name: 'Rex' } }
+    return { value: ok('{"name": "Bix", "personality": "New here."}') }
+  })
+  await $.session.start(START)
+  expect(await runner($)('')).toBe('Rex is already here.')
+  expect(shared.writes).toBe(0)
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await ui.find({ text: /Rex/ })).toBeDefined()
 })
 
 test('a record that turns damaged during a hatch is not written over, and nobody says hello', async ($, on) => {
@@ -810,6 +842,42 @@ const ADULT: Saved = {
 }
 // ADULT, with another seed's buddy.
 const adultAs = (seed: string): Saved => ({ ...ADULT, active: seed, buddies: [{ ...ADULT.buddies[0]!, seed }] })
+
+test('a turn that carries your XP to 8,100 starts an egg', async ($, on) => {
+  // RECORD's buddy one turn short of 8,100 XP, with no egg started yet.
+  const near: Saved = {
+    ...SAVED,
+    you: { ...SAVED.you, eggs: 0 },
+    buddies: [{ ...SAVED.buddies[0]!, counts: { ...zeroCounts(), turns: 809 } }],
+  }
+  const shared = sharedStore(on, near)
+  const clock = world(on, null)
+  on('turn.complete', async (_$, e) => ({ text: e.answer }))
+  model(on, null, null)
+  await $.session.start(START)
+  await $.turn.complete(TURN)
+  await clock.settle()
+  const saved = shared.row as Saved
+  expect(saved.you.eggs).toBe(1)
+  expect(saved.egg).toMatchObject({ fromTurns: 810 })
+  expect(typeof saved.egg?.seed).toBe('string')
+  expect(await runner($)('reroll')).toBe('No more rerolls. An egg is on the way: 0 of 150 turns.')
+})
+
+test('a record from before eggs has its mulligan spent, and its first save starts the egg clock', async ($, on) => {
+  // 2,000 turns is 20,000 XP: two eggs' worth, none owed.
+  const old: Saved = { ...SAVED, rerolls: 2, buddies: [{ ...SAVED.buddies[0]!, counts: { ...zeroCounts(), turns: 2_000 } }] }
+  const shared = sharedStore(on, old)
+  const clock = world(on, null)
+  on('turn.complete', async (_$, e) => ({ text: e.answer }))
+  model(on, null, null)
+  await $.session.start(START)
+  expect(await runner($)('reroll confirm')).toBe('No more rerolls. Your next egg comes in 4,300 xp.')
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect((shared.row as Saved).you.eggs).toBe(2)
+  expect((shared.row as Saved).egg).toBeUndefined()
+})
 
 test('a main turn saves its counts when it completes; a denied call is not counted', async ($, on) => {
   const shared = sharedStore(on, RECORD)
@@ -2031,7 +2099,8 @@ test('calls counted before a swap land on the buddy that made them, and the turn
 })
 
 test('a swap while the egg is out is told to wait, and swaps nobody', async ($, on) => {
-  const shared = sharedStore(on, TWO)
+  // The mulligan is the one hatch a record can still make (Breeding spec section 2).
+  const shared = sharedStore(on, RECORD)
   const clock = world(on, null)
   let release!: () => void
   const gate = new Promise<void>(resolve => {
@@ -2051,8 +2120,10 @@ test('a swap while the egg is out is told to wait, and swaps nobody', async ($, 
   release()
   await rerolled
   await clock.settle()
-  expect(activeOf(shared.row)?.seed).not.toBe('swap-1')
-  expect((shared.row as Saved).buddies[0]?.retiredAt).toBe(TWO.buddies[0]!.retiredAt)
+  // Only the mulligan wrote: the dex is its one new buddy.
+  const saved = shared.row as Saved
+  expect(saved.buddies).toHaveLength(1)
+  expect(saved.active).not.toBe('test-seed')
 })
 
 test('a swap ends a running tour, so the buddy back is drawn as itself', async ($, on) => {
@@ -2438,7 +2509,7 @@ test('a hidden buddy does not play', async ($, on) => {
 })
 
 test('a feed, game, rename or hat while the egg is out is told to wait, and changes nobody', async ($, on) => {
-  const shared = sharedStore(on, TWO)
+  const shared = sharedStore(on, RECORD)
   const clock = world(on, null)
   let release!: () => void
   const gate = new Promise<void>(resolve => {

@@ -38,6 +38,20 @@ export type You = {
   days: number
   // Achievement id to the ISO time it was earned (Progression spec section 3). Missing reads as none.
   earned?: Record<string, string>
+  // Eggs started so far (Breeding spec section 2). Missing reads as the eggs your XP has earned,
+  // so none is owed until a flush writes it.
+  eggs?: number
+}
+
+// The egg incubating (Breeding spec section 1). It hatches into `seed` once the turns summed over
+// every buddy are HATCH_TURNS past `fromTurns`.
+export type Egg = {
+  seed: string
+  // When it started incubating.
+  startedAt: string
+  fromTurns: number
+  // Set by /buddy breed: [the active buddy then, its partner]. Missing for a wild egg.
+  parents?: [string, string]
 }
 
 // A buddy's mood (Alive spec section 2): failures push the meter toward anxious, long clean
@@ -117,6 +131,8 @@ export type Saved = {
   active: string
   buddies: Buddy[]
   you: You
+  // At most one; missing when none is incubating.
+  egg?: Egg
 }
 
 // `news` is the announcement a bubble carries (Progression spec section 4): a quip never replaces
