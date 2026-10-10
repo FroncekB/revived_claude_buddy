@@ -3,9 +3,11 @@ import { expect, test } from 'claude-code/testing'
 import type { Moment, Saved } from '../types'
 import {
   MAX_BUBBLE_W, MIN_FULL_COLS, SHIMMER, achievementsText, bandRows, bubbleRows, bubbleWidth, cardLines, cardProgress,
-  compactLine, dexLines, dexRows, dexText, isCompact, journalLines, journalRows, levelText, longDate, nameLine, pageAt,
+  compactLine, dexLines, dexRows, dexText, eggText, hatchLine, isCompact, journalLines, journalRows, levelText, longDate,
+  nameLine, pageAt,
   paintRuns, rightRuns, shortDate, spriteTint, streakLine, wrap,
 } from './layout'
+import type { DexName } from './layout'
 import { zeroCounts } from './ledger'
 import { rollBones } from './roll'
 import { MAX_SAY, cleanSay } from './voice'
@@ -287,14 +289,72 @@ test("a card's progress: the level from the buddy's own counts, and your achieve
       },
     },
   }
-  // Two earned the same day keep table order; a newer build's id is left out.
+  // Two earned the same day keep table order; a newer build's id is left out. 12,100 XP is one
+  // egg's worth and 4,000 toward the next.
   expect(cardProgress(saved, buddy)).toEqual({
     level: 12,
     stage: 'adult',
     xp: 12_100,
     earned: ['Shell regular', 'Survivor', 'Marathon'],
     retiredAt: null,
+    parents: null,
+    egg: { kind: 'next', xp: 4_000 },
   })
+})
+
+test("a card's progress names a bred buddy's parents, and the egg on its way with who broods it", () => {
+  const entry = (seed: string, name: string, parents?: [string, string]) => ({
+    seed,
+    soul: { ...SOUL, name },
+    retiredAt: null,
+    counts: zeroCounts(),
+    ...(parents ? { parents } : {}),
+  })
+  const child = entry('c', 'Sprout', ['a', 'b'])
+  const saved: Saved = {
+    schema: 2,
+    mode: 'on',
+    rerolls: 0,
+    active: 'a',
+    buddies: [entry('a', 'Pip'), entry('b', 'Mochi'), child],
+    you: { lastDay: null, streak: 0, bestStreak: 0, days: 0, eggs: 1 },
+    egg: { seed: 'e', startedAt: '2026-10-07T12:00:00.000Z', fromTurns: 0, parents: ['b', 'a'] },
+  }
+  const progress = cardProgress(saved, child)
+  expect(progress.parents).toEqual([
+    { number: 1, name: 'Pip' },
+    { number: 2, name: 'Mochi' },
+  ])
+  expect(progress.egg).toEqual({ kind: 'carrying', turns: 0, parents: ['Mochi', 'Pip'] })
+  expect(cardProgress(saved, saved.buddies[0]!).parents).toBeNull()
+  const { egg: _, ...none } = saved
+  expect(cardProgress(none, child).egg).toEqual({ kind: 'next', xp: 0 })
+})
+
+test('the text card folds the parents into the hatch line and the egg into the achievements line', () => {
+  const progress = {
+    level: 12,
+    stage: 'adult' as const,
+    xp: 13_250,
+    earned: [],
+    retiredAt: '2026-10-09T08:00:00.000Z',
+    parents: [{ number: 1, name: 'Pip' }, { number: 3, name: 'Mochi' }] as [DexName, DexName],
+    egg: { kind: 'next' as const, xp: 3_200 },
+  }
+  expect(hatchLine(SOUL, 1, progress)).toBe('Hatched 2026-10-07 from #1 Pip and #3 Mochi   Rerolls: 1   Retired 2026-10-09')
+  expect(hatchLine(SOUL, 1)).toBe('Hatched 2026-10-07   Rerolls: 1')
+  expect(eggText({ kind: 'next', xp: 3_200 })).toBe('Next egg 3,200 / 8,100 xp')
+  expect(eggText({ kind: 'carrying', turns: 40, parents: null })).toBe('Egg 40 / 150 turns')
+  expect(achievementsText(7, progress.egg)).toBe('Achievements: 7 of 17 · Next egg 3,200 / 8,100 xp')
+  const you = { lastDay: '2026-10-07', streak: 1, bestStreak: 1, days: 1 }
+  const card = [
+    ...cardLines(SOUL, rollBones('layout-seed'), 1, progress),
+    streakLine(you, zeroCounts()),
+    achievementsText(0, progress.egg),
+  ]
+  expect(card).toHaveLength(12)
+  expect(card[9]).toBe('Hatched 2026-10-07 from #1 Pip and #3 Mochi   Rerolls: 1   Retired 2026-10-09')
+  expect(card[11]).toBe('Achievements: 0 of 17 · Next egg 3,200 / 8,100 xp')
 })
 
 // Pip, a common dragon ('swap-1') retired on Nov 2 at level 30, and Mochi, a common axolotl
@@ -331,6 +391,12 @@ test('the dex lists every buddy in the order you had them, each at its own level
   ])
   expect(dexText(rows[0]!, 2)).toBe(`#1  (×vv×)  ${'Pip'.padEnd(12)}  Lv 30 elder common dragon ★  Oct 7 – Nov 2`)
   expect(dexText(rows[1]!, 3)).toBe(`#2   }◉.◉{   ${'Mochi'.padEnd(12)}  Lv 12 adult common axolotl ★  Nov 2 – now`)
+})
+
+test('a hatchling never yet active is listed by the day it hatched', () => {
+  const waiting = { ...DEX_RECORD.buddies[1]!, seed: 'swap-3', soul: { ...SOUL, name: 'Sprout', hatchedAt: '2026-11-03T09:00:00.000Z' }, retiredAt: '2026-11-03T09:00:00.000Z' }
+  const rows = dexRows({ ...DEX_RECORD, buddies: [...DEX_RECORD.buddies, waiting] }, NOV3)
+  expect(rows.map(r => r.dates)).toEqual(['Oct 7 – Nov 2', 'Nov 2 – now', 'hatched Nov 3'])
 })
 
 test('the text dex is a count, a note of any older ones, then at most the newest ten', () => {

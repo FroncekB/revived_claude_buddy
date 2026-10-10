@@ -272,7 +272,7 @@ test('card opens a pane with the name, personality, rerolls and streak, and prin
   expect(card).toMatch(/^Pip\b/m)
   expect(card).toMatch(/Counts semicolons\./)
   expect(card).toMatch(/Rerolls: 0/)
-  expect(card).toMatch(/^Streak 1 day \(best 1\) · 0 turns · 0 tool calls\nAchievements: 0 of 17$/m)
+  expect(card).toMatch(/^Streak 1 day \(best 1\) · 0 turns · 0 tool calls\nAchievements: 0 of 17 · Next egg 0 \/ 8,100 xp$/m)
 })
 
 test('the card pane is one drawn card on desktop and meters on the terminal', async ($, on) => {
@@ -300,7 +300,7 @@ test('where no pane can be placed, card prints the text card with the streak', a
   expect(card).toMatch(/^Pip, /)
   expect(card).toMatch(/DEBUGGING/)
   expect(card).toMatch(/Rerolls: 0/)
-  expect(card).toMatch(/\nStreak 1 day \(best 1\) · 0 turns · 0 tool calls\nAchievements: 0 of 17$/)
+  expect(card).toMatch(/\nStreak 1 day \(best 1\) · 0 turns · 0 tool calls\nAchievements: 0 of 17 · Next egg 0 \/ 8,100 xp$/)
 })
 
 test('reroll asks first, then replaces the buddy and counts the reroll, once', async ($, on) => {
@@ -1068,6 +1068,26 @@ test('the egg shakes, cracked, while its soul call is out', async ($, on) => {
   release()
   await clock.settle()
   expect(await ui.find({ text: /\.-\./ })).toBeUndefined()
+})
+
+test("the text card folds in a bred buddy's parents and the egg on its way, within 12 lines", async ($, on) => {
+  const sprout = {
+    seed: 'young-4',
+    soul: { ...RECORD.soul, name: 'Sprout', hatchedAt: '2026-10-06T12:00:00.000Z' },
+    retiredAt: '2026-10-06T12:00:00.000Z',
+    counts: zeroCounts(),
+    parents: ['test-seed', 'swap-1'] as [string, string],
+  }
+  const saved: Saved = { ...BROODY, buddies: [...BROODY.buddies, sprout] }
+  world(on, { buddy: saved }, false)
+  await $.session.start(START)
+  const run = runner($)
+  const card = (await run('card sprout')) ?? ''
+  expect(card.split('\n').length).toBeLessThanOrEqual(12)
+  expect(card).toContain('Hatched 2026-10-06 from #1 Pip and #2 Mochi   Rerolls: 0')
+  expect(card).toContain('Achievements: 2 of 17 · Egg 149 / 150 turns')
+  expect(await run('dex')).toContain('Sprout        Lv 1 hatchling')
+  expect(await run('dex')).toContain('hatched Oct 6')
 })
 
 test('breed is refused below five in the dex, with the count to go', async ($, on) => {
@@ -2168,10 +2188,12 @@ test('the card shows the level, the XP to the next one, and your achievements, o
   await clock.settle()
   const text = await cardText($)
   expect(text).toContain('\nLv 12 adult · 12,100 / 14,400 xp\n')
-  expect(text).toMatch(/\nAchievements: 2 of 17\nMarathon · Grown up$/)
+  expect(text).toMatch(/\nAchievements: 2 of 17 · Next egg 4,000 \/ 8,100 xp\nMarathon · Grown up$/)
   const desktop = await $.ui.mount({ plugin: 'buddy', surface: 'desktop', ...pane() })
   const svg = await desktop.find({ type: 'Svg' })
-  expect(svg?.props.alt).toContain('. Level 12, adult, 12,100 of 14,400 XP. 2 of 17 achievements: Marathon, Grown up. Hatched')
+  expect(svg?.props.alt).toContain(
+    '. Level 12, adult, 12,100 of 14,400 XP. 2 of 17 achievements: Marathon, Grown up. Next egg at 4,000 of 8,100 XP. Hatched',
+  )
   expect(String(svg?.props.source)).toContain('>Lv 12 adult</text>')
 })
 

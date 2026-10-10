@@ -4,7 +4,7 @@ import { ACHIEVEMENTS } from './achievements'
 import type { Saved } from '../types'
 import { cardAlt, cardSvg, dexAlt, dexSvg, journalAlt, journalSvg, meter, radarPoint, statAlt } from './card'
 import { dexRows } from './layout'
-import type { CardProgress } from './layout'
+import type { CardProgress, DexName } from './layout'
 import { zeroCounts } from './ledger'
 import type { Bones } from './roll'
 
@@ -201,6 +201,40 @@ test('the card grows with its chips, and progress adds 70 px under the last row'
   const all = cardSvg(SOUL, BONES, 0, undefined, { ...PROGRESS, earned: ACHIEVEMENTS.map(a => a.title) })
   expect(heightOf(all)).toBeGreaterThan(heightOf(none) + 60)
   expect(heightOf(none)).toBe(heightOf(cardSvg(SOUL, BONES, 0)) + 70)
+})
+
+test("a bred buddy's card names its parents under the hatch row, escaped, and its alt says who they were", () => {
+  const parents: [DexName, DexName] = [
+    { number: 1, name: 'Pip' },
+    { number: 3, name: 'M&M' },
+  ]
+  const bred = { ...PROGRESS, parents }
+  const svg = cardSvg(SOUL, BONES, 0, undefined, bred)
+  expect(svg).toContain('>Parents  #1 Pip × #3 M&amp;M</text>')
+  expect(heightOf(svg)).toBe(heightOf(cardSvg(SOUL, BONES, 0, undefined, PROGRESS)) + 20)
+  expect(cardAlt(SOUL, BONES, 0, undefined, bred)).toContain('Hatched Oct 7, 2026. Bred from Pip and M&M. Rerolls 0.')
+})
+
+test('the egg row under the XP bar fills toward the next egg, or with the turns of the one on its way', () => {
+  const next = cardSvg(SOUL, BONES, 0, undefined, { ...PROGRESS, egg: { kind: 'next', xp: 2_025 } })
+  expect(next).toContain('>Next egg</text>')
+  expect(next).toContain('>2,025 / 8,100 xp</text>')
+  // A quarter of the 372 px bar.
+  expect(next).toContain('width="93.0" height="6"')
+  expect(heightOf(next)).toBe(heightOf(cardSvg(SOUL, BONES, 0, undefined, PROGRESS)) + 40)
+  const carrying = { ...PROGRESS, egg: { kind: 'carrying' as const, turns: 75, parents: ['Pip', '<Mo>'] as [string, string] } }
+  const svg = cardSvg(SOUL, BONES, 0, undefined, carrying)
+  expect(svg).toContain('>Egg</text>')
+  expect(svg).toContain('>75 / 150 turns</text>')
+  expect(svg).toContain('width="186.0" height="6"')
+  expect(svg).toContain('>brooded by Pip and &lt;Mo&gt;</text>')
+  expect(heightOf(svg)).toBe(heightOf(next) + 18)
+  expect(cardAlt(SOUL, BONES, 0, undefined, { ...PROGRESS, egg: { kind: 'next', xp: 3_200 } })).toContain(
+    'Shell regular. Next egg at 3,200 of 8,100 XP. Hatched',
+  )
+  expect(cardAlt(SOUL, BONES, 0, undefined, carrying)).toContain(
+    'An egg is 75 of 150 turns along, brooded by Pip and <Mo>. Hatched',
+  )
 })
 
 // Pip, a common dragon retired on Nov 2 at level 30, and Mochi, a common axolotl here now at level 12.

@@ -15,8 +15,8 @@ import {
   MAX_QUEUED_TURNS, addCall, isRough, memoryLine, momentKey, noCalls, recall, talkMemories, turnFacts,
 } from './journal'
 import {
-  achievementsText, bandRows, cardLines, cardProgress, compactLine, dexLines, dexRows, dexText, emptyJournal, isCompact,
-  journalHeader, journalLines, journalRows, levelText, nameLine, rightRuns, spriteTint, streakLine,
+  achievementsText, bandRows, cardLines, cardProgress, compactLine, dexLines, dexRows, dexText, emptyJournal, hatchLine,
+  isCompact, journalHeader, journalLines, journalRows, levelText, nameLine, rightRuns, spriteTint, streakLine,
 } from './layout'
 import { addCounts, countEvent, mergePending, toolGroup, zeroCounts } from './ledger'
 import type { CountEvent } from './ledger'
@@ -810,7 +810,7 @@ async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | un
       return [
         ...cardLines(shown.soul, dressed(shown, saved), saved.rerolls, progress),
         streakLine(saved.you, await countsOf($, shown)),
-        achievementsText(progress.earned.length),
+        achievementsText(progress.earned.length, progress.egg),
       ].join('\n')
     }
     case 'journal': {
@@ -1255,10 +1255,7 @@ export const register: Register = on => {
           <Text>{buddy.soul.personality}</Text>
         </Box>
       )
-      const retired = progress.retiredAt ? `   Retired ${progress.retiredAt.slice(0, 10)}` : ''
-      const footer = (
-        <Text dimColor>{`Hatched ${buddy.soul.hatchedAt.slice(0, 10)}   Rerolls: ${saved.rerolls}${retired}`}</Text>
-      )
+      const footer = <Text dimColor>{hatchLine(buddy.soul, saved.rerolls, progress)}</Text>
       const cells = Math.max(8, Math.min(30, e.props.bodyColumns - 18))
       return (
         <Box flexDirection="column">
@@ -1281,7 +1278,7 @@ export const register: Register = on => {
           <Text> </Text>
           {footer}
           <Text dimColor>{streakLine(history.you, history.counts)}</Text>
-          <Text dimColor>{achievementsText(progress.earned.length)}</Text>
+          <Text dimColor>{achievementsText(progress.earned.length, progress.egg)}</Text>
           {progress.earned.length > 0 ? [<Text>{progress.earned.join(' · ')}</Text>] : []}
         </Box>
       )
