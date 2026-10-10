@@ -399,6 +399,15 @@ test('a hatchling never yet active is listed by the day it hatched', () => {
   expect(rows.map(r => r.dates)).toEqual(['Oct 7 – Nov 2', 'Nov 2 – now', 'hatched Nov 3'])
 })
 
+test("a card names a retirement only for a buddy retired after it was active, never for a hatchling yet to be", () => {
+  const waiting = { ...DEX_RECORD.buddies[1]!, seed: 'swap-3', soul: { ...SOUL, name: 'Sprout', hatchedAt: '2026-11-03T09:00:00.000Z' }, retiredAt: '2026-11-03T09:00:00.000Z' }
+  const saved = { ...DEX_RECORD, buddies: [...DEX_RECORD.buddies, waiting] }
+  expect(cardProgress(saved, waiting).retiredAt).toBeNull()
+  expect(hatchLine(waiting.soul, 0, cardProgress(saved, waiting))).toBe('Hatched 2026-11-03   Rerolls: 0')
+  expect(cardProgress(saved, DEX_RECORD.buddies[0]!).retiredAt).toBe('2026-11-02T12:00:00.000Z')
+  expect(hatchLine(SOUL, 0, cardProgress(saved, DEX_RECORD.buddies[0]!))).toBe('Hatched 2026-10-07   Rerolls: 0   Retired 2026-11-02')
+})
+
 test('the text dex is a count, a note of any older ones, then at most the newest ten', () => {
   const many = (count: number): Saved => ({
     ...DEX_RECORD,

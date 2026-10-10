@@ -1084,7 +1084,7 @@ test("the text card folds in a bred buddy's parents and the egg on its way, with
   const run = runner($)
   const card = (await run('card sprout')) ?? ''
   expect(card.split('\n').length).toBeLessThanOrEqual(12)
-  expect(card).toContain('Hatched 2026-10-06 from #1 Pip and #2 Mochi   Rerolls: 0')
+  expect(card).toMatch(/^Hatched 2026-10-06 from #1 Pip and #2 Mochi   Rerolls: 0$/m)
   expect(card).toContain('Achievements: 2 of 17 · Egg 149 / 150 turns')
   expect(await run('dex')).toContain('Sprout        Lv 1 hatchling')
   expect(await run('dex')).toContain('hatched Oct 6')

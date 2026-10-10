@@ -1,7 +1,9 @@
 // The saved record and the /buddy subcommands. Pure: no $.
 import type { Buddy, Counts, Mode, MoodEvent, Saved, SavedV1, Soul, Stage, TurnFacts } from '../types'
 import { earn } from './achievements'
-import { BREED_DEX, HATCH_TURNS, dueEgg, eggStatus, mulliganOpen, readEgg, startEgg, withEggCount } from './eggs'
+import {
+  BREED_DEX, HATCH_TURNS, dueEgg, eggStatus, mulliganOpen, neverActive, readEgg, startEgg, withEggCount,
+} from './eggs'
 import { addMoments, awayMoment, bestsOf, milestones, noticeTurns } from './journal'
 import { addCounts, localDay, visit, zeroCounts } from './ledger'
 import { applyMood, sulkFor, withSulk } from './mood'
@@ -131,7 +133,7 @@ function arrive(saved: Saved, now: number): Saved {
 // gives. A retirement time that doesn't parse leaves neither. A hatchling never yet active,
 // retired the moment it hatched, waited for nobody, so it gets neither (Breeding spec section 3).
 function welcomeBack(b: Buddy, today: string, now: number): Buddy {
-  if (b.retiredAt === b.soul.hatchedAt) return { ...b, retiredAt: null }
+  if (neverActive(b)) return { ...b, retiredAt: null }
   const left = b.retiredAt !== null && Number.isFinite(Date.parse(b.retiredAt)) ? localDay(Date.parse(b.retiredAt)) : null
   const sulk = sulkFor(left, today)
   const away = awayMoment(left, today, now)

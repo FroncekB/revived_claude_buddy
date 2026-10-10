@@ -23,6 +23,11 @@ export function lifetimeTurns(saved: Dex): number {
   return saved.buddies.reduce((sum, b) => sum + safeCounts(b.counts).turns, 0)
 }
 
+// A hatchling that joined the dex from its egg and was never the active buddy: retired as it hatched.
+export function neverActive(b: Pick<Buddy, 'retiredAt' | 'soul'>): boolean {
+  return b.retiredAt === b.soul.hatchedAt
+}
+
 // The eggs your XP has earned.
 export function earnedEggs(saved: Dex): number {
   return Math.floor(lifetimeXp(saved) / EGG_XP)

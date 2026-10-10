@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Buddy, Counts, Saved } from '../types'
 import {
   EGG_XP, HATCH_TURNS, MULLIGAN_NOTE, closedLine, dueEgg, earnedEggs, eggProgress, eggStatus, eggXpSoFar, eggsOf,
-  lifetimeTurns, lifetimeXp, mulliganOpen, owedEggs, readEgg, startEgg, withEggCount,
+  lifetimeTurns, lifetimeXp, mulliganOpen, neverActive, owedEggs, readEgg, startEgg, withEggCount,
 } from './eggs'
 import { zeroCounts } from './ledger'
 
@@ -124,4 +124,10 @@ test('the egg status says where the next egg stands', () => {
   expect(eggStatus(record([entry('a')], 0))).toBe('Your next egg comes in 8,100 xp.')
   expect(closedLine(record([entry('a')], 0))).toBe('No more rerolls. Your next egg comes in 8,100 xp.')
   expect(MULLIGAN_NOTE).toBe('Not the one? /buddy reroll works once, before level 2.')
+})
+
+test('a buddy never yet active is one retired the day it hatched, and no other', () => {
+  expect(neverActive(entry('a'))).toBe(false)
+  expect(neverActive({ ...entry('b'), retiredAt: AT })).toBe(true)
+  expect(neverActive({ ...entry('c'), retiredAt: new Date(2026, 9, 8, 12).toISOString() })).toBe(false)
 })

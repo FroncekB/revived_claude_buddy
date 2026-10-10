@@ -2,7 +2,7 @@
 import type { Buddy, Counts, Moment, Saved, Soul, Stage, You } from '../types'
 import { ACHIEVEMENTS, earnedOf, knownEarned } from './achievements'
 import { parentsOf } from './breed'
-import { EGG_XP, HATCH_TURNS, eggProgress, eggXpSoFar, readEgg } from './eggs'
+import { EGG_XP, HATCH_TURNS, eggProgress, eggXpSoFar, neverActive, readEgg } from './eggs'
 import { ageText, momentText, readable } from './journal'
 import type { Names } from './journal'
 import { RARITY, STATS } from './roll'
@@ -174,7 +174,7 @@ export type CardProgress = {
   xp: number
   // Earned achievement titles, newest first.
   earned: readonly string[]
-  // When the shown buddy was retired; null for the active one.
+  // When the shown buddy was retired; null for the active one and for one never yet active.
   retiredAt: string | null
   // A bred buddy's parents; null for a rolled one.
   parents?: [DexName, DexName] | null
@@ -200,7 +200,7 @@ export function cardProgress(saved: Saved, buddy: Buddy): CardProgress {
     stage: stageOf(level),
     xp: xpOf(buddy.counts),
     earned,
-    retiredAt: buddy.retiredAt,
+    retiredAt: neverActive(buddy) ? null : buddy.retiredAt,
     parents: pair ? [dexName(pair[0]), dexName(pair[1])] : null,
     egg: egg
       ? {
@@ -340,7 +340,7 @@ export function dexRows(saved: Saved, now: number): DexRow[] {
       bones: dressed(b, saved),
       level,
       stage: stageOf(level),
-      dates: !active && b.retiredAt === b.soul.hatchedAt ? `hatched ${hatched}` : `${hatched} – ${end}`,
+      dates: !active && neverActive(b) ? `hatched ${hatched}` : `${hatched} – ${end}`,
       active,
     }
   })
