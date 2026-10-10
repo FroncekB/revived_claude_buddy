@@ -1,6 +1,6 @@
 # `buddy` Breeding — Design Spec
 
-**Status:** design approved 2026-10-09; not built.
+**Status:** built 2026-10-09; live check pending. Plan: [`2026-10-09-buddy-breeding-plan.md`](2026-10-09-buddy-breeding-plan.md); its "Deliberate deviations" section lists the small departures from this spec.
 **Author:** Brandon Froncek + Claude
 **Date:** 2026-10-09
 **Builds on:** [`2026-10-07-buddy-mod-design.md`](2026-10-07-buddy-mod-design.md) (the base spec), [`2026-10-07-buddy-foundation-design.md`](2026-10-07-buddy-foundation-design.md) (Foundation), [`2026-10-07-buddy-alive-design.md`](2026-10-07-buddy-alive-design.md) (Alive), [`2026-10-08-buddy-memory-design.md`](2026-10-08-buddy-memory-design.md) (Memory), [`2026-10-08-buddy-progression-design.md`](2026-10-08-buddy-progression-design.md) (Progression) and [`2026-10-08-buddy-interaction-design.md`](2026-10-08-buddy-interaction-design.md) (Interaction). Section numbers below that start with "base", "Foundation", "Alive", "Memory", "Progression" or "Interaction" point there.
