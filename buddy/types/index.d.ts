@@ -137,6 +137,9 @@ export type Saved = {
   egg?: Egg
 }
 
+// You and the dex: what achievements, hats and eggs are judged on.
+export type Kin = Pick<Saved, 'you' | 'buddies'>
+
 // `news` is the announcement a bubble carries (Progression spec section 4): a quip never replaces
 // one, and a reply follows it.
 export type Bubble = { text: string; fromTick: number; untilTick: number; news?: string }

@@ -1,7 +1,7 @@
 // The band's text layout: bubble wrapping, full and compact rows, and the card.
 import type { Buddy, Counts, Moment, Saved, Soul, Stage, You } from '../types'
 import { ACHIEVEMENTS, earnedOf, knownEarned } from './achievements'
-import { parentsOf } from './breed'
+import { dexEntry, parentsOf } from './breed'
 import { EGG_XP, HATCH_TURNS, eggProgress, eggXpSoFar, neverActive, readEgg } from './eggs'
 import { ageText, momentText, readable } from './journal'
 import type { Names } from './journal'
@@ -189,9 +189,10 @@ export function cardProgress(saved: Saved, buddy: Buddy): CardProgress {
   const earned = knownEarned(saved.you)
     .sort((a, b) => (when(b.id) > when(a.id) ? 1 : when(b.id) < when(a.id) ? -1 : 0))
     .map(a => a.title)
+  // For seeds parentsOf and readEgg found in the dex.
   const dexName = (seed: string): DexName => {
-    const i = saved.buddies.findIndex(b => b.seed === seed)
-    return { number: i + 1, name: saved.buddies[i]?.soul.name ?? 'Buddy' }
+    const { number, buddy } = dexEntry(saved.buddies, seed)!
+    return { number, name: buddy.soul.name }
   }
   const pair = parentsOf(saved.buddies, buddy.parents)
   const egg = readEgg(saved)
@@ -212,11 +213,17 @@ export function cardProgress(saved: Saved, buddy: Buddy): CardProgress {
   }
 }
 
+// The egg's row as the card shows it: its label, its value, and how far along its bar is.
+export function eggParts(egg: CardEgg): [label: string, value: string, filled: number] {
+  return egg.kind === 'next'
+    ? ['Next egg', `${withCommas(egg.xp)} / ${withCommas(EGG_XP)} xp`, egg.xp / EGG_XP]
+    : ['Egg', `${egg.turns} / ${HATCH_TURNS} turns`, egg.turns / HATCH_TURNS]
+}
+
 // "Next egg 3,200 / 8,100 xp", or "Egg 40 / 150 turns".
 export function eggText(egg: CardEgg): string {
-  return egg.kind === 'next'
-    ? `Next egg ${withCommas(egg.xp)} / ${withCommas(EGG_XP)} xp`
-    : `Egg ${egg.turns} / ${HATCH_TURNS} turns`
+  const [label, value] = eggParts(egg)
+  return `${label} ${value}`
 }
 
 // The card's hatch line, with a bred buddy's parents and a retired buddy's retirement:

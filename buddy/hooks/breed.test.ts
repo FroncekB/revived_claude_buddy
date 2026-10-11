@@ -54,6 +54,7 @@ test('species and eye come from either parent half the time, and rarity never dr
   const N = 100_000
   let speciesA = 0
   let eyeA = 0
+  let uncommon = 0
   for (let i = 0; i < N; i++) {
     const c = breedBones(`breed-${i}`, A, B)
     expect([A.species, B.species]).toContain(c.species)
@@ -61,9 +62,13 @@ test('species and eye come from either parent half the time, and rarity never dr
     expect(RARITIES.indexOf(c.rarity)).toBeGreaterThanOrEqual(RARITIES.indexOf('uncommon'))
     if (c.species === A.species) speciesA++
     if (c.eye === A.eye) eyeA++
+    if (c.rarity === 'uncommon') uncommon++
   }
   expect(Math.abs((speciesA / N) * 100 - 50)).toBeLessThanOrEqual(1)
   expect(Math.abs((eyeA / N) * 100 - 50)).toBeLessThanOrEqual(1)
+  // The floor is the lower parent's, not the higher's: a common or uncommon roll, 85 in 100,
+  // comes out uncommon.
+  expect(Math.abs((uncommon / N) * 100 - 85)).toBeLessThanOrEqual(1)
 })
 
 test('a child is shiny 1 time in 100, or 4 with a shiny parent', { timeoutMs: 30_000 }, () => {
@@ -159,17 +164,42 @@ test('damaged parents, a missing parent or a loop read as a plain roll and never
   expect(bornBones(both, 't')).toEqual(breedBones('t', viaP, viaQ))
 })
 
-test('an inbred lineage, each buddy bred from the two before it, is worked out without walking it twice', () => {
-  // Walking both parents of every buddy afresh costs the Fibonacci numbers, minutes at 40.
-  const GENERATIONS = 40
+// Walking both parents of every buddy afresh costs the Fibonacci numbers, minutes at 40
+// generations, so the timeout alone tells a walk that repeats itself.
+const GENERATIONS = 40
+
+test('an inbred lineage, each buddy bred from the two before it, is worked out without walking it twice', { timeoutMs: 5_000 }, () => {
   const lineage = [entry('g0'), entry('g1')]
   for (let i = 2; i < GENERATIONS; i++) lineage.push(entry(`g${i}`, [`g${i - 2}`, `g${i - 1}`]))
-  const started = Date.now()
   const last = bornBones(lineage, `g${GENERATIONS - 1}`)
-  expect(Date.now() - started).toBeLessThan(100)
   // Worked out generation by generation, each from the two before it.
   const bones = [rollBones('g0'), rollBones('g1')]
   for (let i = 2; i < GENERATIONS; i++) bones.push(breedBones(`g${i}`, bones[i - 2]!, bones[i - 1]!))
   expect(last).toEqual(bones[GENERATIONS - 1])
   expect(bornBones(lineage, 'g9')).toEqual(bones[9])
+})
+
+test('a hand-made loop under an inbred lineage, or a ring of buddies each bred twice from the last, never stalls', { timeoutMs: 5_000 }, () => {
+  // Walked afresh, each takes millions of steps: well past the timeout, and still over in seconds.
+  // The first two closed back onto the last two: every buddy's walk meets the loop, so none is kept.
+  const LOOP = 32
+  const closed = [entry('g0', [`g${LOOP - 2}`, `g${LOOP - 1}`]), entry('g1', ['g0', `g${LOOP - 1}`])]
+  for (let i = 2; i < LOOP; i++) closed.push(entry(`g${i}`, [`g${i - 2}`, `g${i - 1}`]))
+  // Each buddy in the ring bred twice from the one before doubles the walk.
+  const RING = 22
+  const ring = Array.from({ length: RING }, (_, i) => entry(`r${i}`, [`r${(i + RING - 1) % RING}`, `r${(i + RING - 1) % RING}`]))
+  for (const [buddies, seed] of [[closed, `g${LOOP - 1}`], [ring, 'r0']] as const) {
+    const bones = bornBones(buddies, seed)
+    expect(STATS.every(s => bones.stats[s] >= 1 && bones.stats[s] <= 100)).toBe(true)
+    // The same record always reads the same way.
+    expect(bornBones(buddies, seed)).toEqual(bones)
+  }
+})
+
+test('a chain deeper than any lineage reads as a roll past its depth, and never runs out the stack', { timeoutMs: 5_000 }, () => {
+  const DEPTH = 50_000
+  const chain = [entry('c0'), entry('root')]
+  for (let i = 1; i < DEPTH; i++) chain.push(entry(`c${i}`, [`c${i - 1}`, 'root']))
+  const bones = bornBones(chain, `c${DEPTH - 1}`)
+  expect(RARITIES).toContain(bones.rarity)
 })

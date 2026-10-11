@@ -50,42 +50,70 @@ export function breedBones(seed: string, a: Bones, b: Bones): Bones {
 
 // A `parents` field as two seeds of buddies in `buddies`, or null when it is anything else.
 export function parentsOf(buddies: readonly Pick<Buddy, 'seed'>[], raw: unknown): [string, string] | null {
+  return pairOf(raw, seed => buddies.some(b => b.seed === seed))
+}
+
+function pairOf(raw: unknown, inDex: (seed: string) => boolean): [string, string] | null {
   if (!Array.isArray(raw) || raw.length !== 2) return null
   const [p0, p1] = raw as unknown[]
   if (typeof p0 !== 'string' || typeof p1 !== 'string') return null
-  return [p0, p1].every(p => buddies.some(b => b.seed === p)) ? [p0, p1] : null
+  return inDex(p0) && inDex(p1) ? [p0, p1] : null
+}
+
+// The buddy with `seed` and its dex number, or undefined when the dex has none.
+export function dexEntry(buddies: readonly Buddy[], seed: string): { number: number; buddy: Buddy } | undefined {
+  const i = buddies.findIndex(b => b.seed === seed)
+  const buddy = buddies[i]
+  return buddy ? { number: i + 1, buddy } : undefined
 }
 
 // A buddy's born bones, and whether the walk to them met a loop.
 type Born = { bones: Bones; looped: boolean }
 
+// One lookup's walk: the record by seed, the buddies on the path down to here, the bones of each
+// buddy whose lineage met no loop, and the steps it has left.
+type Walk = { bySeed: ReadonlyMap<string, Buddy>; path: Set<string>; memo: Map<string, Bones>; steps: number }
+
+// A record with no loop takes at most one step per buddy; a hand-made loop gets this many times
+// that before the rest of its walk reads as rolls, so it can't stall the band (section 9).
+const LOOP_STEPS = 4
+// The deepest a walk goes: far past any lineage eggs can breed, at one generation a week, and
+// shallow enough that a hand-made chain can't run out the stack.
+const MAX_DEPTH = 1_000
+
 // The bones `seed` was born with: bred from its parents' when it has two in the record, else
 // rolled. `path` holds the buddies on this walk, so a hand-made loop reads as a roll where it
 // closes. `memo` keeps the bones of each buddy whose lineage met no loop: those can't depend on
 // the path, and a lineage bred from itself would otherwise be walked once per path through it.
-function born(buddies: readonly Buddy[], seed: string, path: ReadonlySet<string>, memo: Map<string, Bones>): Born {
-  const known = memo.get(seed)
+function born(walk: Walk, seed: string): Born {
+  const known = walk.memo.get(seed)
   if (known) return { bones: known, looped: false }
-  const parents = parentsOf(buddies, buddies.find(b => b.seed === seed)?.parents)
-  const walked = new Set(path).add(seed)
+  const parents = pairOf(walk.bySeed.get(seed)?.parents, p => walk.bySeed.has(p))
   let result: Born
   if (!parents) {
     result = { bones: rollBones(seed), looped: false }
-  } else if (parents.some(p => walked.has(p))) {
+  } else if (parents.some(p => p === seed || walk.path.has(p)) || walk.steps <= 0 || walk.path.size >= MAX_DEPTH) {
+    // Out of steps or depth reads as a loop, so it isn't kept either.
     result = { bones: rollBones(seed), looped: true }
   } else {
-    const a = born(buddies, parents[0], walked, memo)
-    const b = born(buddies, parents[1], walked, memo)
+    walk.steps--
+    walk.path.add(seed)
+    const a = born(walk, parents[0])
+    const b = born(walk, parents[1])
+    walk.path.delete(seed)
     result = { bones: breedBones(seed, a.bones, b.bones), looped: a.looped || b.looped }
   }
-  if (!result.looped) memo.set(seed, result.bones)
+  if (!result.looped) walk.memo.set(seed, result.bones)
   return result
 }
 
 // A buddy's bones before any growth, looked up through the record. Never throws: a damaged
 // `parents`, a parent missing from the record or a loop reads as a plain roll.
 export function bornBones(buddies: readonly Buddy[], seed: string): Bones {
-  return born(buddies, seed, new Set(), new Map()).bones
+  // The first entry for a seed, as a find would give.
+  const bySeed = new Map<string, Buddy>()
+  for (const b of buddies) if (!bySeed.has(b.seed)) bySeed.set(b.seed, b)
+  return born({ bySeed, path: new Set(), memo: new Map(), steps: LOOP_STEPS * (bySeed.size + 1) }, seed).bones
 }
 
 // The bones an egg will hatch into: bred when it has two parents in the record, else rolled, as

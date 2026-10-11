@@ -1,17 +1,18 @@
 // The saved record and the /buddy subcommands. Pure: no $.
 import type { Buddy, Counts, Mode, MoodEvent, Saved, SavedV1, Soul, Stage, TurnFacts } from '../types'
 import { earn } from './achievements'
+import { bornBones, dexEntry } from './breed'
 import {
   BREED_DEX, HATCH_TURNS, dueEgg, eggStatus, mulliganOpen, neverActive, readEgg, startEgg, withEggCount,
 } from './eggs'
 import { addMoments, awayMoment, bestsOf, milestones, noticeTurns } from './journal'
 import { addCounts, localDay, visit, zeroCounts } from './ledger'
 import { applyMood, sulkFor, withSulk } from './mood'
-import { bornBones } from './breed'
 import { ADULT_LEVEL, STAGES, grewMoments, levelOf } from './progress'
 import type { Worn } from './sprites'
 import { readPlay, wearable, wornHat } from './toys'
 import type { Game, Side, Throw } from './toys'
+import { CONTROL } from './voice'
 
 export const STORE_KEY = 'buddy'
 export const USAGE =
@@ -35,9 +36,6 @@ export function classify(raw: unknown): Stored {
   }
   return { kind: 'foreign', schema: schema === undefined ? 'unknown' : String(schema) }
 }
-
-// C0 and C1 control characters, which a terminal acts on rather than shows.
-const CONTROL = /[\u0000-\u001f\u007f-\u009f]/g
 
 // The record with every buddy's name and personality fit to show. A hatch never saves a control
 // character, so only a store edited by hand carries one; it is dropped, and a name left empty
@@ -234,10 +232,12 @@ export function applyChange(saved: Saved | null, change: Change, now: number): S
       }
     }
     case 'breed': {
-      if (!saved || breedChoice(saved, change.partner, true).kind !== 'ok') return null
-      const egg = saved.egg!
+      // The stored egg itself, so fields a newer build wrote on it are kept.
+      const egg = saved?.egg
+      if (!saved || !egg || breedChoice(saved, change.partner, findBySeed).kind !== 'ok') return null
       const partner = change.partner
-      const number = (seed: string) => saved.buddies.findIndex(b => b.seed === seed) + 1
+      // Both are in the dex: the active buddy always, and the partner as breedChoice found it.
+      const number = (seed: string) => dexEntry(saved.buddies, seed)!.number
       const at = new Date(now).toISOString()
       const brooded = (b: Buddy, other: string): Buddy => ({
         ...b,
@@ -289,22 +289,20 @@ export function applyChange(saved: Saved | null, change: Change, now: number): S
 }
 
 // What /buddy breed <who> does (Breeding spec section 4): the partner to brood with, or the line
-// refusing it, checked in the spec's order. `bySeed` takes `who` as a seed, as the change does.
+// refusing it, checked in the spec's order. `find` reads `who`: a name or dex number as typed, or
+// a seed, as the change names the partner.
 export type BreedChoice = { kind: 'ok'; partner: string } | { kind: 'no'; reply: string }
 
-export function breedChoice(saved: Saved, who: string, bySeed = false): BreedChoice {
+export function breedChoice(saved: Saved, who: string, find: (saved: Saved, who: string) => Found = findBuddy): BreedChoice {
   const no = (reply: string): BreedChoice => ({ kind: 'no', reply })
   const short = BREED_DEX - saved.buddies.length
   if (short > 0) return no(`Breeding unlocks at ${BREED_DEX} buddies in the dex: ${short} to go.`)
   const egg = readEgg(saved)
   if (!egg) return no(`No egg to brood. ${eggStatus(saved)}`)
-  const nameOf = (seed: string) => saved.buddies.find(b => b.seed === seed)?.soul.name ?? 'Buddy'
+  // readEgg found both parents in the dex.
+  const nameOf = (seed: string) => dexEntry(saved.buddies, seed)!.buddy.soul.name
   if (egg.parents) return no(`${nameOf(egg.parents[0])} and ${nameOf(egg.parents[1])} are already brooding this egg.`)
-  const found: Found = bySeed
-    ? saved.buddies.some(b => b.seed === who)
-      ? { kind: 'one', seed: who }
-      : { kind: 'none' }
-    : findBuddy(saved, who)
+  const found = find(saved, who)
   if (found.kind !== 'one') return no(notFound(saved, who, found, 'breed'))
   const active = activeBuddy(saved)
   if (found.seed === active.seed) return no(`${active.soul.name} can't breed with itself. Pick one from /buddy dex.`)
@@ -391,6 +389,11 @@ export function findBuddy(saved: Saved, who: string): Found {
   if (numbers.length > 1) return { kind: 'many', numbers }
   const one = numbers[0]
   return one === undefined ? { kind: 'none' } : { kind: 'one', seed: saved.buddies[one - 1]!.seed }
+}
+
+// The buddy with `seed`, as a change names it.
+function findBySeed(saved: Saved, seed: string): Found {
+  return saved.buddies.some(b => b.seed === seed) ? { kind: 'one', seed } : { kind: 'none' }
 }
 
 // The answer when `who` names no one buddy, with `command` in the hint.

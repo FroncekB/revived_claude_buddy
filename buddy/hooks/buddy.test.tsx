@@ -3,13 +3,15 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import type { Moment, Saved } from '../types'
+import { eggBones } from './breed'
 import { duckLine, duckPrompt } from './duck'
 import { SHIMMER } from './layout'
 import { zeroCounts } from './ledger'
 import { CRUMBS, EARNED_HAT_ART, HAT_ART, HOLIDAY_HATS, SNACK_ART, bodyRows, fillEyes, headRow } from './sprites'
 import { FULL_LINES, PLAY_FALLBACKS, SNACKS, feedPrompt } from './toys'
+import { rollBones } from './roll'
 import { TOUR_TICKS } from './tour'
-import { FAIL_PLAIN, FAIL_SNARKY, FALLBACK_NAMES } from './voice'
+import { FAIL_PLAIN, FAIL_SNARKY, FALLBACK_NAMES, HELLO_PROMPT, withArticle } from './voice'
 
 const ZERO = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
 const ok = (text: string): ModelCompleteResult => ({ isAnswered: true, text, usage: ZERO })
@@ -927,6 +929,7 @@ test('the turn that carries the egg to 150 hatches it into the dex, and the budd
   // No hello: the hatchling isn't here.
   await clock.settle()
   expect(calls.hatch).toHaveLength(1)
+  expect(calls.other.filter(p => p.includes(HELLO_PROMPT))).toEqual([])
 })
 
 test('a muted hatch celebrates without a bubble', async ($, on) => {
@@ -976,6 +979,78 @@ test('an egg left due hatches when a session starts', async ($, on) => {
   await $.session.start(START)
   await clock.settle()
   expect(calls.hatch).toHaveLength(1)
+  expect((shared.row as Saved).buddies.map(b => b.soul.name)).toEqual(['Pip', 'Sprout'])
+})
+
+test('a turn saved while the egg hatches starts no second hatch', async ($, on) => {
+  const due: Saved = { ...NEARLY_HATCHED, buddies: [{ ...NEARLY_HATCHED.buddies[0]!, counts: { ...zeroCounts(), turns: 960 } }] }
+  const shared = sharedStore(on, due)
+  const clock = world(on, null)
+  on('turn.complete', async (_$, e) => ({ text: e.answer }))
+  let release!: () => void
+  const gate = new Promise<void>(resolve => {
+    release = resolve
+  })
+  const hatches: string[] = []
+  on('model.complete', async (_$, e) => {
+    if (!e.system?.includes('JSON only')) return { value: failed() }
+    hatches.push(e.prompt)
+    await gate
+    return { value: ok('{"name": "Sprout", "personality": "Fresh out."}') }
+  })
+  await $.session.start(START)
+  for (let i = 0; i < 20; i++) await clock.advance(0)
+  expect(hatches).toHaveLength(1)
+  // The turn's save finds the egg still due while its soul call is out.
+  await $.turn.complete(TURN)
+  for (let i = 0; i < 20; i++) await clock.advance(0)
+  release()
+  await clock.settle()
+  expect(hatches).toHaveLength(1)
+  expect((shared.row as Saved).buddies.map(b => b.soul.name)).toEqual(['Pip', 'Sprout'])
+})
+
+test('an egg that comes due while the buddy is off waits, and hatches once it is back', async ($, on) => {
+  const shared = sharedStore(on, NEARLY_HATCHED)
+  const clock = world(on, null)
+  const calls = hatchCalls(on, '{"name": "Sprout", "personality": "Fresh out."}')
+  await $.session.start(START)
+  await clock.settle()
+  // Another session's turn carries the egg to its 150th.
+  const now = shared.row as Saved
+  shared.row = { ...now, buddies: [{ ...now.buddies[0]!, counts: { ...now.buddies[0]!.counts, turns: 960 } }] }
+  const run = runner($)
+  await run('off')
+  await clock.settle()
+  expect(calls.hatch).toHaveLength(0)
+  expect((shared.row as Saved).egg?.seed).toBe('egg-seed')
+  await run('')
+  await clock.settle()
+  expect(calls.hatch).toHaveLength(1)
+  expect((shared.row as Saved).buddies.map(b => b.soul.name)).toEqual(['Pip', 'Sprout'])
+})
+
+test('a hatch whose save throws leaves the egg due and no longer hatching, and the next check hatches it', async ($, on) => {
+  const shared = sharedStore(on, NEARLY_HATCHED)
+  const clock = world(on, null)
+  on('turn.complete', async (_$, e) => ({ text: e.answer }))
+  // The store can't be read while the first soul call is out, so that hatch's save throws.
+  let first = true
+  const calls = hatchCalls(on, '{"name": "Sprout", "personality": "Fresh out."}', () => {
+    if (first) shared.refuseReads = true
+    first = false
+  })
+  await $.session.start(START)
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(calls.hatch).toHaveLength(1)
+  shared.refuseReads = false
+  expect((shared.row as Saved).egg?.seed).toBe('egg-seed')
+  // breed answers past its hatching check.
+  expect(await runner($)('breed pip')).toBe('Breeding unlocks at 5 buddies in the dex: 4 to go.')
+  await $.turn.complete({ ...TURN, turnId: 't2' })
+  await clock.settle()
+  expect(calls.hatch).toHaveLength(2)
   expect((shared.row as Saved).buddies.map(b => b.soul.name)).toEqual(['Pip', 'Sprout'])
 })
 
@@ -1105,6 +1180,10 @@ test('breed sets the parents with no model call, and the hatch hears about both'
   const clock = world(on, null)
   on('turn.complete', async (_$, e) => ({ text: e.answer }))
   const calls = hatchCalls(on, '{"name": "Sprout", "personality": "Takes after both."}')
+  // The child's bones are bred from both, and tell apart from the egg's own roll.
+  const bred = eggBones(BROODY.buddies, { seed: 'egg-seed', parents: ['test-seed', 'swap-1'] })
+  const rolled = rollBones('egg-seed')
+  expect(`${bred.rarity} ${bred.species}`).not.toBe(`${rolled.rarity} ${rolled.species}`)
   await $.session.start(START)
   await clock.settle()
   const run = runner($)
@@ -1115,11 +1194,89 @@ test('breed sets the parents with no model call, and the hatch hears about both'
   await $.turn.complete(TURN)
   await clock.settle()
   expect(calls.hatch).toHaveLength(1)
-  expect(calls.hatch[0]).toContain('Parents: Pip, ')
-  expect(calls.hatch[0]).toContain(', and Mochi, ')
+  expect(calls.hatch[0]).toContain(`Species: ${bred.species}. Rarity: ${bred.rarity}.`)
+  expect(calls.hatch[0]).toContain(`Parents: Pip, ${withArticle(rollBones('test-seed').species)} `)
+  expect(calls.hatch[0]).toContain(`, and Mochi, ${withArticle(rollBones('swap-1').species)} `)
   expect(calls.hatch[0]).toContain('("Naps on the stack.")')
   const saved = shared.row as Saved
   expect(saved.buddies.at(-1)).toMatchObject({ soul: { name: 'Sprout' }, parents: ['test-seed', 'swap-1'] })
+  // The news names the bred child, as its card and the dex will.
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await bubbleOf(ui)).toContain(`Meet Sprout, ${withArticle(`${bred.shiny ? 'shiny ' : ''}${bred.rarity}`)} ${bred.species}.`)
+})
+
+test('a breed that lands while the soul call is out refuses that hatch, and the egg hatches again for its parents', async ($, on) => {
+  const due: Saved = { ...BROODY, egg: { ...BROODY.egg!, fromTurns: 1_470 } }
+  const shared = sharedStore(on, due)
+  const clock = world(on, null)
+  // Another session broods the egg while the first soul call is out.
+  let brooded = false
+  const theirs = () => {
+    if (brooded) return
+    brooded = true
+    const now = shared.row as Saved
+    shared.row = { ...now, egg: { ...now.egg!, parents: ['swap-1', 'test-seed'] } }
+  }
+  const calls = hatchCalls(on, '{"name": "Sprout", "personality": "Takes after both."}', theirs)
+  await $.session.start(START)
+  await clock.settle()
+  expect(calls.hatch).toHaveLength(2)
+  expect(calls.hatch[0]).not.toContain('Parents')
+  expect(calls.hatch[1]).toContain('Parents: Mochi, ')
+  const saved = shared.row as Saved
+  expect(saved.buddies).toHaveLength(6)
+  expect(saved.buddies.at(-1)).toMatchObject({ soul: { name: 'Sprout' }, parents: ['swap-1', 'test-seed'] })
+})
+
+// A store another session writes to between this session's reads: `onGet` hears each read's number.
+function racedStore(on: On, row: unknown) {
+  const shared: { row: unknown; gets: number; onGet: (n: number) => void } = { row, gets: 0, onGet: () => undefined }
+  on('store.get', async () => {
+    shared.onGet(++shared.gets)
+    return { value: shared.row }
+  })
+  on('store.set', async (_$, e) => {
+    shared.row = e.value
+    return { value: undefined }
+  })
+  return shared
+}
+
+// BROODY as Mochi's session leaves it, brooding with Pip.
+const MOCHI_BROODS: Saved = { ...BROODY, egg: { ...BROODY.egg!, parents: ['swap-1', 'test-seed'] } }
+
+test('breed answers from the record as it now stands when another session brooded first', async ($, on) => {
+  const shared = racedStore(on, BROODY)
+  world(on, null)
+  model(on, null, null)
+  await $.session.start(START)
+  // The command reads the store, then its commit reads it again: Mochi's session broods between.
+  shared.gets = 0
+  shared.onGet = n => {
+    if (n === 2) shared.row = MOCHI_BROODS
+  }
+  expect(await runner($)('breed mochi')).toBe('Mochi and Pip are already brooding this egg.')
+  expect((shared.row as Saved).egg?.parents).toEqual(['swap-1', 'test-seed'])
+})
+
+test('breed that wrote nothing, on a record that would let it, says it hit a snag', async ($, on) => {
+  const shared = racedStore(on, BROODY)
+  world(on, null)
+  model(on, null, null)
+  await $.session.start(START)
+  // The commit reads a brooded egg, and by the time breed looks again it is unbrooded.
+  shared.gets = 0
+  shared.onGet = n => {
+    if (n === 2) shared.row = MOCHI_BROODS
+    if (n === 3) shared.row = BROODY
+  }
+  expect(await runner($)('breed mochi')).toBe('Your buddy hit a snag. Try again.')
+})
+
+test('breed while the buddy is off says it is hidden', async ($, on) => {
+  world(on, { buddy: { ...BROODY, mode: 'off' } })
+  await $.session.start(START)
+  expect(await runner($)('breed mochi')).toBe('Pip is hidden. Run /buddy to bring it back.')
 })
 
 test('breed while the egg is hatching is told to wait', async ($, on) => {

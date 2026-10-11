@@ -5,11 +5,11 @@ import type { Buddy, Counts, Moment, MoodEvent, Saved, Stage, TurnFacts } from '
 import { newsOf } from './achievements'
 import { breakDue, breakLine, nextStretch } from './breaks'
 import type { Stretch } from './breaks'
+import { bornBones, dexEntry, eggBones } from './breed'
 import { dayInfo } from './calendar'
 import { cardAlt, cardSvg, dexAlt, dexSvg, journalAlt, journalSvg, meter } from './card'
 import { DUCK_MS, duckDue, duckFallback, duckLine, duckPrompt, failsByTool, shouldNudge } from './duck'
 import type { DuckDue } from './duck'
-import { bornBones, eggBones } from './breed'
 import { HATCH_TURNS, MULLIGAN_NOTE, closedLine, dueEgg, eggProgress, hatchesIn, mulliganOpen, readEgg } from './eggs'
 import {
   MAX_QUEUED_TURNS, addCall, isRough, memoryLine, momentKey, noCalls, recall, talkMemories, turnFacts,
@@ -88,16 +88,18 @@ const lastFedAt = atom({ plugin: 'buddy', key: 'lastFedAt' } as const, 0)
 const duckUntil = atom({ plugin: 'buddy', key: 'duckUntil' } as const, 0)
 const duckTool = atom({ plugin: 'buddy', key: 'duckTool' } as const, null)
 const lastNudgeAt = atom({ plugin: 'buddy', key: 'lastNudgeAt' } as const, 0)
-const eggHatching = atom({ plugin: 'buddy', key: 'eggHatching' } as const, false)
+const carriedHatching = atom({ plugin: 'buddy', key: 'eggHatching' } as const, false)
 
 const CARD = 'card'
 const JOURNAL = 'journal'
 const DEX = 'dex'
 const NO_BUDDY = 'No buddy yet. Run /buddy to hatch one.'
+// While a first hatch or the mulligan has its egg out (`hatching`).
 const EGG = 'Wait for the egg to hatch.'
 const SAVE_FAILED = 'Could not save your buddy; it lives for this session only.'
 const SNAG = 'Your buddy hit a snag. Try again.'
-const EGG_HATCHING = 'The egg is hatching.'
+// While the egg carried beside the buddy hatches (`carriedHatching`).
+const CARRIED_HATCHING = 'The egg is hatching.'
 
 type Look = {
   sprite: string[]
@@ -233,9 +235,13 @@ async function commitNow($: EngineInterface, change: Change): Promise<string | n
   const saved = applyChange(before, change, await $.clock.now())
   if (!saved) {
     // A hatch another session won leaves nothing to write, but this one adopts the record it
-    // read, so its band stops drawing the egg (Breeding spec section 3). It says nothing, and
-    // the next adopting commit is the next check for a due egg.
-    if (change.kind === 'hatchEgg' && before) await adopt($, before)
+    // read, so its band stops drawing the egg (Breeding spec section 3). It says nothing. An egg
+    // still due there was brooded while its soul call was out, here or in another session: it
+    // hatches again, for its parents, once this hatch lets go.
+    if (change.kind === 'hatchEgg' && before) {
+      await adopt($, before)
+      if (dueEgg(before)) later($, () => hatchIfDue($))
+    }
     return null
   }
   await adopt($, saved)
@@ -681,11 +687,12 @@ async function hatchIfDue($: EngineInterface) {
     if (!saved || saved.mode === 'off' || (await read($, hatching))) return
     const egg = dueEgg(saved)
     if (!egg) return
-    await update($, eggHatching, () => true)
-    // A brooded egg's child hears who its parents are (Breeding spec section 4).
+    await update($, carriedHatching, () => true)
+    // A brooded egg's child hears who its parents are (Breeding spec section 4). readEgg found
+    // both in the dex.
     const parentOf = (seed: string): Parent => {
-      const b = saved.buddies.find(x => x.seed === seed)
-      return { name: b?.soul.name ?? 'Buddy', species: bornBones(saved.buddies, seed).species, personality: b?.soul.personality ?? '' }
+      const { soul } = dexEntry(saved.buddies, seed)!.buddy
+      return { name: soul.name, species: bornBones(saved.buddies, seed).species, personality: soul.personality }
     }
     const parents = egg.parents ? ([parentOf(egg.parents[0]), parentOf(egg.parents[1])] as const) : undefined
     const soul = await askSoul($, egg.seed, eggBones(saved.buddies, egg), parents)
@@ -702,7 +709,7 @@ async function hatchIfDue($: EngineInterface) {
     // The egg stays due: the next check tries again.
   } finally {
     eggBusy = false
-    await update($, eggHatching, () => false)
+    await update($, carriedHatching, () => false)
   }
 }
 
@@ -733,23 +740,29 @@ async function hatch($: EngineInterface, kind: 'hatch' | 'reroll'): Promise<stri
   }
 }
 
-// What /buddy breed answers when its commit wrote nothing: the reason, from the record as it now
-// stands, adopted, since another session may have set the egg's parents first.
-async function unbred($: EngineInterface, who: string): Promise<string> {
+// For a command whose commit wrote nothing: the record as it now stands, adopted, so this session
+// shows what is really there; or the line to answer with when there is none to adopt.
+async function adoptStored($: EngineInterface): Promise<Saved | string> {
   const stored = await current($)
   if (stored.kind !== 'ok') return refusal(stored) ?? NO_BUDDY
   await adopt($, stored.saved)
-  const choice = breedChoice(stored.saved, who)
+  return stored.saved
+}
+
+// What /buddy breed answers when its commit wrote nothing: the reason, from the record as it now
+// stands, since another session may have set the egg's parents first.
+async function unbred($: EngineInterface, who: string): Promise<string> {
+  const saved = await adoptStored($)
+  if (typeof saved === 'string') return saved
+  const choice = breedChoice(saved, who)
   return choice.kind === 'no' ? choice.reply : SNAG
 }
 
-// What a hatch or a reroll answers when its commit wrote nothing: the record as it now stands,
-// adopted, so this session shows the buddy that is really there.
+// What a hatch or a reroll answers when its commit wrote nothing: the buddy that is really there.
 async function unhatched($: EngineInterface, kind: 'hatch' | 'reroll'): Promise<string> {
-  const stored = await current($)
-  if (stored.kind !== 'ok') return refusal(stored) ?? NO_BUDDY
-  await adopt($, stored.saved)
-  return kind === 'hatch' ? `${activeBuddy(stored.saved).soul.name} is already here.` : closedLine(stored.saved)
+  const saved = await adoptStored($)
+  if (typeof saved === 'string') return saved
+  return kind === 'hatch' ? `${activeBuddy(saved).soul.name} is already here.` : closedLine(saved)
 }
 
 async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | undefined> {
@@ -868,7 +881,7 @@ async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | un
     }
     case 'breed': {
       if (await read($, hatching)) return EGG
-      if (await read($, eggHatching)) return EGG_HATCHING
+      if (await read($, carriedHatching)) return CARRIED_HATCHING
       if (saved.mode === 'off') return hidden
       const choice = breedChoice(saved, parsed.target)
       if (choice.kind === 'no') return choice.reply
@@ -956,7 +969,7 @@ async function carriedEgg(
     const egg = readEgg(saved)
     if (!egg) return null
     const f = eggProgress(saved, egg) / HATCH_TURNS
-    return eggGutterRows({ f, tick: t, hatching: await read($, eggHatching), still: asleep })
+    return eggGutterRows({ f, tick: t, hatching: await read($, carriedHatching), still: asleep })
   } catch {
     return null
   }
@@ -1056,7 +1069,7 @@ export const register: Register = on => {
     try {
       // A reload in the middle of a hatch leaves the egg flags set with nobody to clear them.
       await update($, hatching, () => false)
-      await update($, eggHatching, () => false)
+      await update($, carriedHatching, () => false)
       // A session start is activity: a session never opens on a sleeping buddy.
       await stir($)
       // A write that failed before a reload left the only copy in state: current() keeps it.
@@ -1080,7 +1093,7 @@ export const register: Register = on => {
       await stir($)
       return { text: await runBuddy($, parseSub(e.args)) }
     } catch {
-      return { text: 'Your buddy hit a snag. Try again.' }
+      return { text: SNAG }
     }
   })
 

@@ -1,7 +1,7 @@
 // Eggs (Breeding spec sections 2 and 3): one earned every 8,100 XP, carried 150 turns, and the one
 // mulligan at the start. XP and turns are summed over every buddy's saved counts, so two sessions
 // can never disagree about them; only the number of eggs started is saved. Pure: no $.
-import type { Buddy, Egg, Saved } from '../types'
+import type { Buddy, Egg, Kin, Saved, You } from '../types'
 import { parentsOf } from './breed'
 import { withCommas } from './ledger'
 import { isObject, levelOf, safeCounts, xpOf } from './progress'
@@ -13,7 +13,6 @@ export const HATCH_TURNS = 150
 export const MULLIGAN_LEVEL = 2
 
 type Dex = Pick<Saved, 'buddies'>
-type Eggs = Pick<Saved, 'you' | 'buddies'>
 
 export function lifetimeXp(saved: Dex): number {
   return saved.buddies.reduce((sum, b) => sum + xpOf(b.counts), 0)
@@ -33,15 +32,20 @@ export function earnedEggs(saved: Dex): number {
   return Math.floor(lifetimeXp(saved) / EGG_XP)
 }
 
+// `you.eggs` as saved, or null when it is missing or damaged.
+function savedEggs(you: You): number | null {
+  const n: unknown = you.eggs
+  return typeof n === 'number' && Number.isFinite(n) ? n : null
+}
+
 // The eggs started so far. Missing or damaged reads as the eggs your XP has earned, so none is owed
 // until a flush writes the count (section 2).
-export function eggsOf(saved: Eggs): number {
-  const n: unknown = saved.you.eggs
-  return typeof n === 'number' && Number.isFinite(n) ? n : earnedEggs(saved)
+export function eggsOf(saved: Kin): number {
+  return savedEggs(saved.you) ?? earnedEggs(saved)
 }
 
 // Eggs earned and not yet started: they wait while another incubates.
-export function owedEggs(saved: Eggs): number {
+export function owedEggs(saved: Kin): number {
   return Math.max(0, earnedEggs(saved) - eggsOf(saved))
 }
 
@@ -80,12 +84,11 @@ export function startEgg(saved: Saved, seed: string | undefined, now: number): S
 
 // `saved` with `you.eggs` written, from the counts as they stand, when it is missing or damaged.
 export function withEggCount(saved: Saved): Saved {
-  const n: unknown = saved.you.eggs
-  return typeof n === 'number' && Number.isFinite(n) ? saved : { ...saved, you: { ...saved.you, eggs: earnedEggs(saved) } }
+  return savedEggs(saved.you) !== null ? saved : { ...saved, you: { ...saved.you, eggs: earnedEggs(saved) } }
 }
 
 // The XP earned toward the next egg, from 0 to EGG_XP.
-export function eggXpSoFar(saved: Eggs): number {
+export function eggXpSoFar(saved: Kin): number {
   return Math.min(EGG_XP, Math.max(0, lifetimeXp(saved) - eggsOf(saved) * EGG_XP))
 }
 
@@ -103,7 +106,7 @@ export function mulliganOpen(saved: Pick<Saved, 'buddies' | 'rerolls'>): boolean
   return saved.buddies.length === 1 && levelOf(only?.counts) < MULLIGAN_LEVEL && saved.rerolls === 0
 }
 
-export const MULLIGAN_NOTE = 'Not the one? /buddy reroll works once, before level 2.'
+export const MULLIGAN_NOTE = `Not the one? /buddy reroll works once, before level ${MULLIGAN_LEVEL}.`
 
 // What /buddy reroll answers once the mulligan is spent, or was never there.
 export function closedLine(saved: Saved): string {

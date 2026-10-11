@@ -1,6 +1,6 @@
 // Toys (Interaction spec section 2): feed, play, rename and hat. What each does and says, worked
 // out here from the rolls it is given. Pure: no $.
-import type { Buddy, Saved, Snack } from '../types'
+import type { Buddy, Kin, Snack } from '../types'
 import { ACHIEVEMENTS, EARNED_HAT_NAME, earnedHats } from './achievements'
 import { bornBones } from './breed'
 import { bonesFor } from './progress'
@@ -39,9 +39,6 @@ export const HAT_NAME: Record<Wearable, string> = {
 
 const WEARABLES: readonly Wearable[] = [...HATS, ...EARNED_HATS]
 const isEarned = (hat: Worn) => (EARNED_HATS as readonly string[]).includes(hat)
-
-// What a hat is judged against: your achievements, and the dex, where a bred buddy's parents are.
-export type Kin = Pick<Saved, 'you' | 'buddies'>
 
 // What `buddy` can wear: its own rolled hat if it rolled one, every hat you've earned in table
 // order, then none. Never another buddy's rolled hat, so a tiny duck still means legendary. A
