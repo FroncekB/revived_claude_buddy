@@ -788,10 +788,16 @@ async function unhatched($: EngineInterface, kind: 'hatch' | 'reroll'): Promise<
 }
 
 // /buddy forget: asks, and once confirmed erases everything saved, in the commit queue so no save
-// lands between. A damaged or newer record is erased too: this is the way past one.
+// lands between. A damaged or newer record is erased too: this is the way past one. Not while an egg
+// is out: the hatch would save its buddy right after.
 async function forget($: EngineInterface, confirmed: boolean): Promise<string> {
+  if (await read($, hatching)) return EGG
   const stored = await current($)
-  if (stored.kind === 'none') return NOTHING_SAVED
+  if (stored.kind === 'none') {
+    // Erased in another session: nothing here to show either.
+    await release($)
+    return NOTHING_SAVED
+  }
   if (!confirmed) {
     if (stored.kind !== 'ok') return "This erases the saved buddy, which this mod can't read, for good. Run /buddy forget confirm."
     const { name } = activeBuddy(stored.saved).soul
@@ -813,10 +819,9 @@ async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | un
   if (parsed.sub === 'forget' || parsed.sub === 'forget-confirm') return forget($, parsed.sub === 'forget-confirm')
   const stored = await current($)
   if (stored.kind === 'none') {
-    if (parsed.sub === 'show') return hatch($, 'hatch')
-    // Erased in another session: nothing here to show either.
+    // Erased in another session: this one's copy goes first, so a hatch starts from nothing.
     await release($)
-    return NO_BUDDY
+    return parsed.sub === 'show' ? hatch($, 'hatch') : NO_BUDDY
   }
   if (stored.kind !== 'ok') return refusal(stored) ?? undefined
   const saved = stored.saved

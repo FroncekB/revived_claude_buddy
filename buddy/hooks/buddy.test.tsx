@@ -446,6 +446,97 @@ test('a command with no buddy saved, while the first egg hatches, leaves the egg
   await hatched
 })
 
+test('forget while the egg is out is told to wait, and erases nothing', async ($, on) => {
+  const shared = sharedStore(on, RECORD)
+  const clock = world(on, null)
+  // Hatch requests wait for the test.
+  let release!: () => void
+  const gate = new Promise<void>(resolve => {
+    release = resolve
+  })
+  on('model.complete', async (_$, e) => {
+    if (e.system?.includes('JSON only')) {
+      await gate
+      return { value: ok('{"name": "Bix", "personality": "New here."}') }
+    }
+    return { value: failed() }
+  })
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  const rerolled = runner($)('reroll confirm')
+  for (let i = 0; i < 100 && !(await ui.find({ text: /hatching/ })); i++) await Promise.resolve()
+  expect(await runner($)('forget')).toBe('Wait for the egg to hatch.')
+  expect(await runner($)('forget confirm')).toBe('Wait for the egg to hatch.')
+  expect(shared.row).toBeDefined()
+  release()
+  expect(await rerolled).toMatch(/^Bix, /)
+  expect((shared.row as Saved).rerolls).toBe(1)
+})
+
+test("forget in a session that missed another's erase says nothing is saved, and its band agrees", async ($, on) => {
+  const shared = sharedStore(on, RECORD)
+  const clock = world(on, null)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  shared.row = undefined
+  expect(await runner($)('forget')).toBe('Nothing is saved.')
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await ui.find({ text: 'engine band' })).toBeDefined()
+})
+
+test("after another session's forget, /buddy here hatches a fresh buddy that isn't full", async ($, on) => {
+  const shared = sharedStore(on, RECORD)
+  const clock = world(on, null)
+  model(on, '{"name": "Bix", "personality": "New here."}', 'Crunchy.')
+  await $.session.start(START)
+  await clock.settle()
+  const run = runner($)
+  expect(await run('feed')).toBeUndefined()
+  await clock.settle()
+  shared.row = undefined
+  expect(await run('')).toMatch(/^Bix, an? [^.]*, hatched\./)
+  await clock.advance(10_000)
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await run('feed')).toBeUndefined()
+  await clock.settle()
+  expect(FULL_LINES).not.toContain(await bubbleOf(ui))
+  expect(activeOf(shared.row)?.counts.pets).toBe(1)
+})
+
+test("after another session's forget, a turn during the new hatch leaves the egg wobbling", async ($, on) => {
+  const shared = sharedStore(on, RECORD)
+  const clock = world(on, null)
+  engineBelow(on)
+  // Hatch requests wait for the test.
+  let release!: () => void
+  const gate = new Promise<void>(resolve => {
+    release = resolve
+  })
+  on('model.complete', async (_$, e) => {
+    if (e.system?.includes('JSON only')) await gate
+    return { value: failed() }
+  })
+  await $.session.start(START)
+  await clock.settle()
+  shared.row = undefined
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  const hatched = runner($)('')
+  for (let i = 0; i < 100 && !(await ui.find({ text: /hatching/ })); i++) await Promise.resolve()
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  await $.turn.complete(TURN)
+  // Seven seconds of ticks cross a wobble frame (sprites.ts frameAt) while the timer runs.
+  const drawn = new Set<string>()
+  for (let i = 0; i < 14; i++) {
+    await clock.advance(500)
+    drawn.add((await drawnSprite(ui)).join('\n'))
+  }
+  expect(drawn.size).toBeGreaterThan(1)
+  release()
+  await hatched
+})
+
 test('forget with nothing saved says so', async ($, on) => {
   world(on)
   await $.session.start(START)
