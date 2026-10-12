@@ -15,8 +15,10 @@ import type { Game, Side, Throw } from './toys'
 import { CONTROL } from './voice'
 
 export const STORE_KEY = 'buddy'
-export const USAGE =
-  'Usage: /buddy [pet | feed | play [game] | card [who] | journal [who] | dex | swap <who> | breed <who> | rename <name> | hat [hat] | mute | unmute | off | reroll [confirm]]'
+// What /buddy takes, as the slash command's argument hint shows it and USAGE spells it out.
+export const SUBCOMMANDS =
+  '[pet | feed | play [game] | card [who] | journal [who] | dex | swap <who> | breed <who> | rename <name> | hat [hat] | mute | unmute | off | reroll [confirm] | forget [confirm]]'
+export const USAGE = `Usage: /buddy ${SUBCOMMANDS}`
 
 // What the store holds, as this build reads it (Foundation spec section 1).
 export type Stored =
@@ -150,9 +152,11 @@ export function applyChange(saved: Saved | null, change: Change, now: number): S
   switch (change.kind) {
     case 'hatch':
     case 'reroll': {
-      const counted = change.kind === 'reroll' ? 1 : 0
       if (!saved) {
-        const born = fresh(change.seed, change.soul, counted)
+        // A reroll needs a buddy to replace: with the record erased meanwhile, it writes nothing,
+        // and the next hatch is a first one, with its mulligan.
+        if (change.kind === 'reroll') return null
+        const born = fresh(change.seed, change.soul, 0)
         return { ...born, you: visit(born.you, today) }
       }
       // A hatch only makes the first record: new buddies come from eggs (Breeding spec section 2).
@@ -319,7 +323,8 @@ function sameParents(a: readonly string[] | undefined, b: readonly string[] | nu
 }
 
 type Plain =
-  'show' | 'pet' | 'feed' | 'dex' | 'mute' | 'unmute' | 'off' | 'reroll' | 'reroll-confirm' | 'debug-off' | 'usage'
+  | 'show' | 'pet' | 'feed' | 'dex' | 'mute' | 'unmute' | 'off' | 'reroll' | 'reroll-confirm' | 'forget' | 'forget-confirm'
+  | 'debug-off' | 'usage'
 export type Sub = Plain | 'card' | 'journal' | 'swap' | 'breed' | 'debug' | 'rename' | 'hat' | 'play'
 
 // A /buddy command as parsed: the subcommand, and what it was given (Progression spec section 7).
@@ -348,6 +353,10 @@ export function parseSub(args: string): Parsed {
   if (first === 'reroll') {
     if (words.length === 1) return { sub: 'reroll' }
     return { sub: words.length === 2 && second === 'confirm' ? 'reroll-confirm' : 'usage' }
+  }
+  if (first === 'forget') {
+    if (words.length === 1) return { sub: 'forget' }
+    return { sub: words.length === 2 && second === 'confirm' ? 'forget-confirm' : 'usage' }
   }
   // Hidden: left out of USAGE, the argument hint and the README on purpose.
   if (first === 'debug') {

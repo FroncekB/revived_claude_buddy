@@ -7,7 +7,8 @@
     {
       "name": "buddy",
       "description": "A seeded ASCII companion above the prompt that hatches with a Claude-written name and personality, reacts to your turns, and answers when you talk to it by name.",
-      "source": "./buddy"
+      "source": "./buddy",
+      "license": "MIT"
     }
   ]
 }

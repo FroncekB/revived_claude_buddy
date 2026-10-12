@@ -53,7 +53,7 @@ test('subcommands', () => {
   expect(parseSub('hat')).toEqual({ sub: 'hat' })
   expect(parseSub('HAT Flower  Crown')).toEqual({ sub: 'hat', hat: 'Flower Crown' })
   expect(USAGE).toBe(
-    'Usage: /buddy [pet | feed | play [game] | card [who] | journal [who] | dex | swap <who> | breed <who> | rename <name> | hat [hat] | mute | unmute | off | reroll [confirm]]',
+    'Usage: /buddy [pet | feed | play [game] | card [who] | journal [who] | dex | swap <who> | breed <who> | rename <name> | hat [hat] | mute | unmute | off | reroll [confirm] | forget [confirm]]',
   )
   expect(sub('mute')).toBe('mute')
   expect(sub('unmute')).toBe('unmute')
@@ -61,6 +61,10 @@ test('subcommands', () => {
   expect(sub('reroll')).toBe('reroll')
   expect(sub('reroll confirm')).toBe('reroll-confirm')
   expect(sub('reroll now')).toBe('usage')
+  expect(sub('forget')).toBe('forget')
+  expect(sub('Forget CONFIRM')).toBe('forget-confirm')
+  expect(sub('forget everything')).toBe('usage')
+  expect(sub('forget confirm now')).toBe('usage')
   expect(sub('pet twice')).toBe('usage')
   expect(sub('dance')).toBe('usage')
 })
@@ -150,6 +154,10 @@ test('the mulligan writes nothing once its window has shut', () => {
   // A second buddy in the dex.
   const two = { ...first, buddies: [...first.buddies, { ...first.buddies[0]!, seed: 't', retiredAt: AT }] }
   expect(applyChange(two, reroll, NOON)).toBeNull()
+})
+
+test('a reroll onto an erased record writes nothing, so the next hatch keeps its mulligan', () => {
+  expect(applyChange(null, { kind: 'reroll', seed: 'n', soul: SOUL }, NOON)).toBeNull()
 })
 
 test('a hatch only makes the first record: onto a stored one it writes nothing', () => {
