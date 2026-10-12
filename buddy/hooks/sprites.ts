@@ -259,6 +259,34 @@ export function topRow(o: {
   return BLANK
 }
 
+// The egg carried beside the buddy (Breeding spec section 6): 3 rows by 5 columns, whole and
+// cracked, standing in a gutter 7 columns wide so it can lean a column either way.
+export const EGG_GUTTER = 7
+export const SMALL_EGG: readonly string[] = [' .-. ', '(   )', " '-' "]
+export const SMALL_EGG_CRACKED: readonly string[] = [' .-. ', '(\\/\\)', " '-' "]
+
+// The ticks of the 16-tick cycle a wobble starts on, leaning left, then right on the next: more
+// often as the egg nears its hatch.
+function wobbleStarts(f: number): readonly number[] {
+  if (f >= 0.9) return [0, 4, 8, 12]
+  if (f >= 0.5) return [4, 12]
+  return [8]
+}
+
+// The gutter's 5 rows at `tick`, the egg on the bottom 3, standing on the sprite's ground row. `f`
+// is how far along it is, 0 to 1. Cracked from 0.9, and shaking every tick while it hatches; still
+// while the buddy sleeps.
+export function eggGutterRows(o: { f: number; tick: number; hatching: boolean; still: boolean }): string[] {
+  const t = ((o.tick % 16) + 16) % 16
+  const starts = wobbleStarts(o.f)
+  let lean = 0
+  if (o.hatching) lean = t % 2 === 0 ? -1 : 1
+  else if (!o.still && starts.includes(t)) lean = -1
+  else if (!o.still && starts.includes(t - 1)) lean = 1
+  const art = o.hatching || o.f >= 0.9 ? SMALL_EGG_CRACKED : SMALL_EGG
+  return ['', '', ...art].map(row => (row ? ' '.repeat(1 + lean) + row : '').padEnd(EGG_GUTTER))
+}
+
 export function eggRows(frame: Frame): string[] {
   const [whole, cracked] = parseArt(EGG) as [string[], string[]]
   const body = frame === 0 ? whole : frame === 1 ? whole.map(row => ' ' + row) : cracked

@@ -4,9 +4,9 @@ import { ADULT } from './art-adult'
 import { STAGES } from './progress'
 import { EYES, HATS, SPECIES, fnv1a32 } from './roll'
 import {
-  BLANK, CONFETTI, CRUMBS, DUCK_PROP, EARNED_HATS, EARNED_HAT_ART, HAT_ART, HEARTS, HOLIDAY_HATS, POSES, POSE_EYE, PROPS,
-  PROP_ROWS, PROP_W, SNACK_ART, SPRITE_W, ZZZ, bodyRows, eggRows, faceFor, fillEyes, frameAt, hatArt, headRow, spriteRows,
-  topRow,
+  BLANK, CONFETTI, CRUMBS, DUCK_PROP, EARNED_HATS, EARNED_HAT_ART, EGG_GUTTER, HAT_ART, HEARTS, HOLIDAY_HATS, POSES,
+  POSE_EYE, PROPS, PROP_ROWS, PROP_W, SMALL_EGG, SMALL_EGG_CRACKED, SNACK_ART, SPRITE_W, ZZZ, bodyRows, eggGutterRows,
+  eggRows, faceFor, fillEyes, frameAt, hatArt, headRow, spriteRows, topRow,
 } from './sprites'
 import type { Prop } from './sprites'
 
@@ -51,6 +51,41 @@ test('hats, hearts and egg frames fit the same 12-column box', () => {
     expect(egg).toHaveLength(5)
     expect(egg.every(r => r.length === SPRITE_W)).toBe(true)
   }
+})
+
+test('the carried egg is 3 rows of 5 columns, whole and cracked', () => {
+  for (const art of [SMALL_EGG, SMALL_EGG_CRACKED]) {
+    expect(art).toHaveLength(3)
+    expect(art.every(row => row.length === 5)).toBe(true)
+  }
+  expect(SMALL_EGG_CRACKED).not.toEqual(SMALL_EGG)
+})
+
+test('the egg stands on the ground row of its 7-column gutter, and wobbles more as it nears its hatch', () => {
+  // The column the egg's middle row starts on: 1 at rest, 0 leaning left, 2 leaning right.
+  const at = (f: number, tick: number, o: { hatching?: boolean; still?: boolean } = {}) =>
+    eggGutterRows({ f, tick, hatching: o.hatching ?? false, still: o.still ?? false })
+  const lean = (rows: string[]) => rows[3]!.indexOf('(')
+  for (const f of [0, 0.5, 0.95]) {
+    for (let tick = 0; tick < 32; tick++) {
+      const rows = at(f, tick)
+      expect(rows).toHaveLength(5)
+      expect(rows.every(row => row.length === EGG_GUTTER)).toBe(true)
+      expect(rows.slice(0, 2).every(row => row.trim() === '')).toBe(true)
+    }
+  }
+  const leans = (f: number, o = {}) => Array.from({ length: 16 }, (_, tick) => lean(at(f, tick, o))).join('')
+  expect(leans(0.25)).toBe('1111111102111111')
+  expect(leans(0.75)).toBe('1111021111110211')
+  expect(leans(0.95)).toBe('0211021102110211')
+  expect(leans(0.95, { still: true })).toBe('1111111111111111')
+  expect(leans(1, { hatching: true })).toBe('0202020202020202')
+  // Whole until 90% along, then cracked, as it is while hatching.
+  expect(at(0.89, 0)[3]).toBe(' (   ) ')
+  expect(at(0.9, 0)[3]).toBe('(\\/\\)  ')
+  expect(at(0.9, 2)[3]).toBe(' (\\/\\) ')
+  expect(at(0.1, 2, { hatching: true })[3]).toBe('(\\/\\)  ')
+  expect(at(0.25, 0).slice(2)).toEqual(['  .-.  ', ' (   ) ', "  '-'  "])
 })
 
 test('every compact face is at most 6 columns', () => {

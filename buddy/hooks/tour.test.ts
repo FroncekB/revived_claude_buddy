@@ -3,7 +3,10 @@ import { expect, test } from 'claude-code/testing'
 import { HOLIDAYS } from './calendar'
 import { EYES, HATS, RARITIES, SPECIES } from './roll'
 import { EARNED_HATS } from './sprites'
-import { DECOR_TICKS, MOOD_TICKS, TOUR_DECORATIONS, TOUR_STEPS, TOUR_STEP_TICKS, TOUR_TICKS, tourAt } from './tour'
+import {
+  DECOR_TICKS, EGG_TICKS, MOOD_TICKS, TOUR_DECORATIONS, TOUR_EGGS, TOUR_MOODS, TOUR_STEPS, TOUR_STEP_TICKS, TOUR_TICKS,
+  tourAt,
+} from './tour'
 
 const SPECIES_TICKS = TOUR_STEPS * TOUR_STEP_TICKS
 
@@ -38,10 +41,30 @@ test('then the real buddy wears each holiday, hatch day last, then each mood', (
   ])
 })
 
-test('the tour runs 636 ticks, and is over before it starts and after its last mood', () => {
-  expect(TOUR_TICKS).toBe(636)
+test('then the real buddy carries an egg a quarter along, three quarters, 95%, then hatching', () => {
+  const eggsFrom = SPECIES_TICKS + TOUR_DECORATIONS.length * DECOR_TICKS + TOUR_MOODS.length * MOOD_TICKS
+  expect(EGG_TICKS).toBe(16)
+  expect(TOUR_EGGS).toEqual([
+    { f: 0.25, hatching: false },
+    { f: 0.75, hatching: false },
+    { f: 0.95, hatching: false },
+    { f: 1, hatching: true },
+  ])
+  const steps = [0, 1, 2, 3].map(i => tourAt(eggsFrom + i * EGG_TICKS + 5)!)
+  expect(steps.map(s => [s.name, s.egg, s.tick, s.mood, s.holiday])).toEqual([
+    ['tour: egg 25%', { f: 0.25, hatching: false }, 5, 'neutral', null],
+    ['tour: egg 75%', { f: 0.75, hatching: false }, 5, 'neutral', null],
+    ['tour: egg 95%', { f: 0.95, hatching: false }, 5, 'neutral', null],
+    ['tour: egg hatching', { f: 1, hatching: true }, 5, 'neutral', null],
+  ])
+  // No other phase carries one.
+  for (const elapsed of [0, SPECIES_TICKS, eggsFrom - 1]) expect(tourAt(elapsed)?.egg).toBeNull()
+})
+
+test('the tour runs 700 ticks, and is over before it starts and after its egg hatches', () => {
+  expect(TOUR_TICKS).toBe(700)
   expect(tourAt(-1)).toBeNull()
-  expect(tourAt(TOUR_TICKS - 1)?.mood).toBe('sulky')
+  expect(tourAt(TOUR_TICKS - 1)?.egg).toEqual({ f: 1, hatching: true })
   expect(tourAt(TOUR_TICKS)).toBeNull()
 })
 

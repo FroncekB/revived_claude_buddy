@@ -99,6 +99,27 @@ test('earning keeps the dates already there, dates new ones now, and with nothin
   expect(earn(done, NOON + 1)).toBe(done)
 })
 
+test('news names a hatchling that joined the dex, and an egg that started', () => {
+  const base = record([buddy('a')])
+  // 'hat-10' rolls an uncommon capybara.
+  const hatchling = buddy('hat-10', {}, { soul: { ...SOUL, name: 'Sprout' } })
+  const joined: Saved = { ...base, buddies: [...base.buddies, hatchling] }
+  expect(newsOf(base, joined)).toEqual({
+    level: null,
+    stage: null,
+    earned: [],
+    hatched: { name: 'Sprout', rarity: 'uncommon', species: 'capybara', shiny: false, swapBy: 'Sprout' },
+  })
+  // A name another buddy has, in any case, is swapped to by number.
+  const twin: Saved = { ...base, buddies: [...base.buddies, { ...hatchling, soul: { ...SOUL, name: 'PIP' } }] }
+  expect(newsOf(base, twin)?.hatched?.swapBy).toBe('#2')
+  const egg = { seed: 'e', startedAt: AT, fromTurns: 0 }
+  expect(newsOf(base, { ...base, egg })).toEqual({ level: null, stage: null, earned: [], egg: true })
+  // The same egg, or a new active buddy, is no news.
+  expect(newsOf({ ...base, egg }, { ...base, egg })).toBeNull()
+  expect(newsOf(base, { ...joined, active: 'hat-10' })).toBeNull()
+})
+
 test("a damaged earned field reads as none; a newer build's id is kept but not counted", () => {
   for (const damaged of [null, 'all', 7, ['shell']]) {
     expect(earnedOf({ ...NOBODY, earned: damaged as unknown as Record<string, string> })).toEqual({})

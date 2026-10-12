@@ -3,8 +3,9 @@
 
 import type { Counts, Soul, Stage, You } from '../types'
 import { ACHIEVEMENTS } from './achievements'
-import { countsText, emptyJournal, journalHeader, longDate, streakLine, streakText, wrap } from './layout'
-import type { CardProgress, DexRow, JournalRow } from './layout'
+import { EGG_XP, HATCH_TURNS } from './eggs'
+import { countsText, eggParts, emptyJournal, journalHeader, longDate, streakLine, streakText, wrap } from './layout'
+import type { CardEgg, CardProgress, DexRow, JournalRow } from './layout'
 import { withCommas } from './ledger'
 import { nextLevelXp, xpForLevel } from './progress'
 import { RARITY, STATS } from './roll'
@@ -179,10 +180,20 @@ export function cardSvg(soul: Soul, bones: Dressed, rerolls: number, history?: C
     `<text x="${W - PAD}" y="${foot + 22}" text-anchor="end" font-size="12" fill="${INK}">Rerolls ${rerolls}</text>`,
   )
 
+  // A bred buddy's parents get a row under the hatch row (Breeding spec section 6).
+  let last = foot + 22
+  const p = progress?.parents
+  if (p) {
+    last += 20
+    const names = `#${p[0].number} ${p[0].name} × #${p[1].number} ${p[1].name}`
+    marks.push(`<text x="${PAD}" y="${last}" font-size="12" fill="${INK}">Parents  ${esc(names)}</text>`)
+  }
+
   if (history) {
+    last += 20
     marks.push(
-      `<text x="${PAD}" y="${foot + 42}" font-size="12" fill="${INK}">${esc(streakText(history.you))}</text>`,
-      `<text x="${W - PAD}" y="${foot + 42}" text-anchor="end" font-size="12" fill="${INK}">${esc(countsText(history.counts))}</text>`,
+      `<text x="${PAD}" y="${last}" font-size="12" fill="${INK}">${esc(streakText(history.you))}</text>`,
+      `<text x="${W - PAD}" y="${last}" text-anchor="end" font-size="12" fill="${INK}">${esc(countsText(history.counts))}</text>`,
     )
   }
 
@@ -192,27 +203,24 @@ export function cardSvg(soul: Soul, bones: Dressed, rerolls: number, history?: C
     )
   }
 
-  const last = foot + (history ? 42 : 22)
   return framed(color, (progress ? growthMarks(marks, color, progress, last) : last) + 16, marks)
 }
 
 // The level, its XP bar and your achievements under the card's last row, whose baseline is at
 // `last` (Progression spec section 6). Pushes onto `marks` and returns the new last baseline.
 function growthMarks(marks: string[], color: string, p: CardProgress, last: number): number {
-  const span = W - 2 * PAD
   const levelY = last + 30
   const barY = levelY + 10
   const from = xpForLevel(p.level)
   const next = nextLevelXp(p.level)
-  const filled = next !== null ? Math.min(1, Math.max(0, (p.xp - from) / (next - from))) : 1
+  const filled = next !== null ? (p.xp - from) / (next - from) : 1
   const label = next !== null ? `${withCommas(p.xp)} / ${withCommas(next)} xp` : `${withCommas(p.xp)} xp`
   marks.push(
     `<text x="${PAD}" y="${levelY}" font-size="13" font-weight="700" fill="${color}">Lv ${p.level} ${p.stage}</text>`,
     `<text x="${W - PAD}" y="${levelY}" text-anchor="end" font-size="12" fill="${INK}">${label}</text>`,
-    `<rect x="${PAD}" y="${barY}" width="${span}" height="6" rx="3" fill="${color}" fill-opacity="0.15"/>`,
-    `<rect x="${PAD}" y="${barY}" width="${(span * filled).toFixed(1)}" height="6" rx="3" fill="${color}"/>`,
   )
-  const headY = barY + 30
+  barMarks(marks, color, barY, filled)
+  const headY = (p.egg ? eggMarks(marks, color, p.egg, barY) : barY) + 30
   marks.push(
     `<text x="${PAD}" y="${headY}" font-size="12" fill="${INK}">Achievements ${p.earned.length} of ${ACHIEVEMENTS.length}</text>`,
   )
@@ -229,6 +237,38 @@ function growthMarks(marks: string[], color: string, p: CardProgress, last: numb
     x += w + 8
   }
   return p.earned.length > 0 ? top + 22 : headY
+}
+
+// Your egg under the XP bar, whose top is at `above` (Breeding spec section 6): the XP toward the
+// next, or the turns of the one incubating and who broods it. Returns the y the next row counts from.
+function eggMarks(marks: string[], color: string, egg: CardEgg, above: number): number {
+  const y = above + 30
+  const barY = y + 10
+  const [label, value, filled] = eggParts(egg)
+  marks.push(
+    `<text x="${PAD}" y="${y}" font-size="12" fill="${INK}">${label}</text>`,
+    `<text x="${W - PAD}" y="${y}" text-anchor="end" font-size="12" fill="${INK}">${value}</text>`,
+  )
+  barMarks(marks, color, barY, filled)
+  if (egg.kind !== 'carrying' || !egg.parents) return barY
+  marks.push(
+    `<text x="${PAD}" y="${barY + 24}" font-size="11" fill="${INK}" fill-opacity="0.8">${esc(broodedBy(egg.parents))}</text>`,
+  )
+  return barY + 18
+}
+
+// A progress bar across the card at `y`: its track, and its fill `filled` of the way along.
+function barMarks(marks: string[], color: string, y: number, filled: number) {
+  const span = W - 2 * PAD
+  marks.push(
+    `<rect x="${PAD}" y="${y}" width="${span}" height="6" rx="3" fill="${color}" fill-opacity="0.15"/>`,
+    `<rect x="${PAD}" y="${y}" width="${(span * Math.min(1, Math.max(0, filled))).toFixed(1)}" height="6" rx="3" fill="${color}"/>`,
+  )
+}
+
+// "brooded by Pip and Mochi"
+function broodedBy(parents: readonly [string, string]): string {
+  return `brooded by ${parents[0]} and ${parents[1]}`
 }
 
 // The card's frame around `marks`: a rounded border in the rarity color, `h` px tall.
@@ -273,7 +313,9 @@ export function cardAlt(soul: Soul, bones: Dressed, rerolls: number, history?: C
     `${soul.name}, ${bones.rarity} ${bones.species}, ${stars} star${stars === 1 ? '' : 's'}. ` +
     `"${soul.personality}" ${chips(bones).join(', ')}. ${statAlt(bones)}. ` +
     (progress ? `${growthAlt(progress)} ` : '') +
+    (progress?.egg ? `${eggAlt(progress.egg)} ` : '') +
     `Hatched ${longDate(soul.hatchedAt)}.` +
+    (progress?.parents ? ` Bred from ${progress.parents[0].name} and ${progress.parents[1].name}.` : '') +
     (progress?.retiredAt ? ` Retired ${longDate(progress.retiredAt)}.` : '') +
     ` Rerolls ${rerolls}.` +
     (history ? ` ${streakLine(history.you, history.counts)}.` : '')
@@ -286,6 +328,13 @@ function growthAlt(p: CardProgress): string {
   const xp = next !== null ? `${withCommas(p.xp)} of ${withCommas(next)} XP` : `${withCommas(p.xp)} XP`
   const earned = `${p.earned.length} of ${ACHIEVEMENTS.length} achievements${p.earned.length > 0 ? `: ${p.earned.join(', ')}` : ''}`
   return `Level ${p.level}, ${p.stage}, ${xp}. ${earned}.`
+}
+
+// "Next egg at 3,200 of 8,100 XP." or "An egg is 40 of 150 turns along, brooded by Pip and Mochi."
+function eggAlt(egg: CardEgg): string {
+  if (egg.kind === 'next') return `Next egg at ${withCommas(egg.xp)} of ${withCommas(EGG_XP)} XP.`
+  const by = egg.parents ? `, ${broodedBy(egg.parents)}` : ''
+  return `An egg is ${egg.turns} of ${HATCH_TURNS} turns along${by}.`
 }
 
 export function statAlt(bones: Dressed): string {

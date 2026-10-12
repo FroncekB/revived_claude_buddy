@@ -3,6 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Buddy, You } from '../types'
 import { zeroCounts } from './ledger'
 import { bonesFor } from './progress'
+import { rollBones } from './roll'
 import {
   FULL_LINES, FULL_MS, HAT_NAME, PLAY_FALLBACKS, SNACKS, THROWS, dressed, feedFallback, feedPrompt, fullLine, hatChoice,
   hatFallback, hatList, hatPrompt, isFull, play, playFallback, playPrompt, renameFallback, renamePrompt, renameRefusal,
@@ -30,29 +31,49 @@ const EARNED: You = { ...NOBODY, earned: { goodFriend: AT, elder: AT } }
 // 'hat-10' rolls an uncommon capybara in a crown; 'test-seed' a common ghost with no hat.
 const CROWNED = { seed: 'hat-10' }
 const BARE = { seed: 'test-seed' }
+// Your achievements with nobody in the dex: every buddy here is its seed's roll.
+const KIN = { you: EARNED, buddies: [] }
 
 test('a buddy can wear its own rolled hat, every hat you have earned, or none', () => {
-  expect(wearable(CROWNED, EARNED)).toEqual(['crown', 'flowercrown', 'laurel', 'none'])
-  expect(wearable(BARE, EARNED)).toEqual(['flowercrown', 'laurel', 'none'])
-  expect(wearable(BARE, NOBODY)).toEqual(['none'])
+  expect(wearable(CROWNED, KIN)).toEqual(['crown', 'flowercrown', 'laurel', 'none'])
+  expect(wearable(BARE, KIN)).toEqual(['flowercrown', 'laurel', 'none'])
+  expect(wearable(BARE, { you: NOBODY, buddies: [] })).toEqual(['none'])
+})
+
+test("a bred buddy's rolled hat is the one its bred bones give", () => {
+  const entry = (seed: string, parents?: [string, string]): Buddy => ({
+    seed,
+    soul: { name: seed, personality: 'x', hatchedAt: AT },
+    retiredAt: null,
+    counts: zeroCounts(),
+    ...(parents ? { parents } : {}),
+  })
+  // 'bred-4' bred from 'tint-11' and 'hat-10' is an uncommon penguin in a crown; its own roll is
+  // a common octopus with no hat.
+  const child = entry('bred-4', ['tint-11', 'hat-10'])
+  const kin = { you: NOBODY, buddies: [entry('tint-11'), entry('hat-10'), child] }
+  expect(rollBones('bred-4').hat).toBe('none')
+  expect(wearable(child, kin)).toEqual(['crown', 'none'])
+  expect(wornHat(child, kin)).toBe('crown')
+  expect(dressed(child, kin).hat).toBe('crown')
 })
 
 test('a buddy wears its choice when it can, and the hat it rolled otherwise', () => {
-  expect(wornHat(CROWNED, EARNED)).toBe('crown')
-  expect(wornHat({ ...CROWNED, hat: 'none' }, EARNED)).toBe('none')
-  expect(wornHat({ ...CROWNED, hat: 'laurel' }, EARNED)).toBe('laurel')
-  expect(wornHat({ ...CROWNED, hat: 'crown' }, EARNED)).toBe('crown')
+  expect(wornHat(CROWNED, KIN)).toBe('crown')
+  expect(wornHat({ ...CROWNED, hat: 'none' }, KIN)).toBe('none')
+  expect(wornHat({ ...CROWNED, hat: 'laurel' }, KIN)).toBe('laurel')
+  expect(wornHat({ ...CROWNED, hat: 'crown' }, KIN)).toBe('crown')
   // Not earned, another buddy's rolled hat, unknown, and not a string.
-  expect(wornHat({ ...CROWNED, hat: 'hardhat' }, EARNED)).toBe('crown')
-  expect(wornHat({ ...BARE, hat: 'crown' }, EARNED)).toBe('none')
-  expect(wornHat({ ...BARE, hat: 'jetpack' }, EARNED)).toBe('none')
-  expect(wornHat({ ...CROWNED, hat: 7 } as unknown as Buddy, EARNED)).toBe('crown')
-  const drawn = dressed({ ...CROWNED, counts: zeroCounts(), hat: 'laurel' }, EARNED)
-  expect(drawn).toEqual({ ...bonesFor(CROWNED), hat: 'laurel' })
+  expect(wornHat({ ...CROWNED, hat: 'hardhat' }, KIN)).toBe('crown')
+  expect(wornHat({ ...BARE, hat: 'crown' }, KIN)).toBe('none')
+  expect(wornHat({ ...BARE, hat: 'jetpack' }, KIN)).toBe('none')
+  expect(wornHat({ ...CROWNED, hat: 7 } as unknown as Buddy, KIN)).toBe('crown')
+  const drawn = dressed({ ...CROWNED, counts: zeroCounts(), hat: 'laurel' }, KIN)
+  expect(drawn).toEqual({ ...bonesFor(CROWNED, []), hat: 'laurel' })
 })
 
 test('a hat asked for by name, in any case and with spaces, is worn or refused with the reason', () => {
-  const can = wearable(CROWNED, EARNED)
+  const can = wearable(CROWNED, KIN)
   const ask = (words: string, worn: 'crown' | 'none' = 'crown') => hatChoice({ name: 'Pip', words, worn, can })
   expect(ask('laurel')).toEqual({ wear: 'laurel' })
   expect(ask('Flower Crown')).toEqual({ wear: 'flowercrown' })
@@ -66,7 +87,7 @@ test('a hat asked for by name, in any case and with spaces, is worn or refused w
 })
 
 test('the hat list, and what is said around a new hat', () => {
-  expect(hatList('Pip', 'crown', wearable(CROWNED, EARNED))).toBe(
+  expect(hatList('Pip', 'crown', wearable(CROWNED, KIN))).toBe(
     'Pip is wearing a crown. It can wear: crown, flowercrown, laurel, none.',
   )
   expect(hatList('Pip', 'none', ['none'])).toBe('Pip has no hat on. It can wear: none. Achievements unlock more.')

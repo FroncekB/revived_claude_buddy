@@ -3,7 +3,9 @@ import { expect, test } from 'claude-code/testing'
 import type { Bests, Saved, TurnFacts } from '../types'
 import { newsOf } from './achievements'
 import { countEvent, zeroCounts } from './ledger'
-import { USAGE, activeBuddy, applyChange, classify, findBuddy, migrate, parseSub, shownBuddy, targetOf } from './record'
+import {
+  USAGE, activeBuddy, applyChange, breedChoice, classify, findBuddy, migrate, parseSub, shownBuddy, targetOf,
+} from './record'
 import type { Change } from './record'
 
 const SOUL = { name: 'Pip', personality: 'x', hatchedAt: '2026-10-07T00:00:00.000Z' }
@@ -41,13 +43,17 @@ test('subcommands', () => {
   expect(parseSub('swap #2')).toEqual({ sub: 'swap', target: '#2' })
   expect(sub('swap')).toBe('usage')
   expect(sub('swap Pip now')).toBe('usage')
+  expect(parseSub('breed Mochi')).toEqual({ sub: 'breed', target: 'Mochi' })
+  expect(parseSub('BREED #3')).toEqual({ sub: 'breed', target: '#3' })
+  expect(sub('breed')).toBe('usage')
+  expect(sub('breed Pip Mochi')).toBe('usage')
   expect(parseSub('rename Mochi')).toEqual({ sub: 'rename', name: 'Mochi' })
   expect(parseSub('RENAME  Sir   Pip')).toEqual({ sub: 'rename', name: 'Sir Pip' })
   expect(sub('rename')).toBe('usage')
   expect(parseSub('hat')).toEqual({ sub: 'hat' })
   expect(parseSub('HAT Flower  Crown')).toEqual({ sub: 'hat', hat: 'Flower Crown' })
   expect(USAGE).toBe(
-    'Usage: /buddy [pet | feed | play [game] | card [who] | journal [who] | dex | swap <who> | rename <name> | hat [hat] | mute | unmute | off | reroll [confirm]]',
+    'Usage: /buddy [pet | feed | play [game] | card [who] | journal [who] | dex | swap <who> | breed <who> | rename <name> | hat [hat] | mute | unmute | off | reroll [confirm]]',
   )
   expect(sub('mute')).toBe('mute')
   expect(sub('unmute')).toBe('unmute')
@@ -108,7 +114,7 @@ test('migration keeps the buddy and starts its counts and the streak at zero', (
     rerolls: 3,
     active: 's',
     buddies: [{ seed: 's', soul: SOUL, retiredAt: null, counts: zeroCounts() }],
-    you: { lastDay: null, streak: 0, bestStreak: 0, days: 0 },
+    you: { lastDay: null, streak: 0, bestStreak: 0, days: 0, eggs: 0 },
   })
 })
 
@@ -119,23 +125,36 @@ test('a first hatch starts a record on, with today as its first visit', () => {
     rerolls: 0,
     active: 'h',
     buddies: [{ seed: 'h', retiredAt: null }],
-    you: { lastDay: '2026-10-07', streak: 1, bestStreak: 1, days: 1 },
+    you: { lastDay: '2026-10-07', streak: 1, bestStreak: 1, days: 1, eggs: 0 },
   })
 })
 
-test('a reroll retires the active buddy and appends the new one', () => {
-  const saved = applyChange(migrate(V1), { kind: 'reroll', seed: 'n', soul: { ...SOUL, name: 'Bix' } }, NOON)!
-  expect(saved.buddies.map(b => b.seed)).toEqual(['s', 'n'])
-  expect(saved.buddies[0]?.retiredAt).toBe(new Date(NOON).toISOString())
-  expect(saved.buddies[1]?.retiredAt).toBeNull()
-  expect(saved).toMatchObject({ active: 'n', rerolls: 4, mode: 'on' })
-  expect(activeBuddy(saved).soul.name).toBe('Bix')
+// A first hatch, as a new person has it: one buddy, level 1, nothing rerolled.
+const firstHatch = () => applyChange(null, { kind: 'hatch', seed: 's', soul: SOUL }, NOON)!
+
+test('the mulligan replaces buddy #1 in place and counts the reroll', () => {
+  const muted = { ...firstHatch(), mode: 'muted' as const }
+  const saved = applyChange(muted, { kind: 'reroll', seed: 'n', soul: { ...SOUL, name: 'Bix' } }, NOON)!
+  expect(saved.buddies).toEqual([{ seed: 'n', soul: { ...SOUL, name: 'Bix' }, retiredAt: null, counts: zeroCounts() }])
+  expect(saved).toMatchObject({ active: 'n', rerolls: 1, mode: 'on' })
 })
 
-test('a hatch onto a stored record keeps the buddy already there without counting a reroll', () => {
-  const saved = applyChange(migrate(V1), { kind: 'hatch', seed: 'n', soul: SOUL }, NOON)!
-  expect(saved.buddies.map(b => b.seed)).toEqual(['s', 'n'])
-  expect(saved).toMatchObject({ active: 'n', rerolls: 3 })
+test('the mulligan writes nothing once its window has shut', () => {
+  const reroll: Change = { kind: 'reroll', seed: 'n', soul: SOUL }
+  // Rerolled already.
+  expect(applyChange(migrate(V1), reroll, NOON)).toBeNull()
+  const first = firstHatch()
+  // Level 2.
+  const grown = { ...first, buddies: [{ ...first.buddies[0]!, counts: { ...zeroCounts(), turns: 10 } }] }
+  expect(applyChange(grown, reroll, NOON)).toBeNull()
+  // A second buddy in the dex.
+  const two = { ...first, buddies: [...first.buddies, { ...first.buddies[0]!, seed: 't', retiredAt: AT }] }
+  expect(applyChange(two, reroll, NOON)).toBeNull()
+})
+
+test('a hatch only makes the first record: onto a stored one it writes nothing', () => {
+  expect(applyChange(migrate(V1), { kind: 'hatch', seed: 'n', soul: SOUL }, NOON)).toBeNull()
+  expect(applyChange(firstHatch(), { kind: 'hatch', seed: 'n', soul: SOUL }, NOON)).toBeNull()
 })
 
 test('a flush adds counts by seed, drops unknown seeds, and records the visit', () => {
@@ -171,7 +190,6 @@ test('fields this build does not know survive every change', () => {
     { kind: 'flush', pending: {}, mood: { s: ['fail'] } },
     { kind: 'flush', pending: {}, turns: { s: [{ ...FACTS, failRun: 6 }] } },
     { kind: 'visit' },
-    { kind: 'reroll', seed: 'n', soul: SOUL },
     { kind: 'rename', seed: 's', name: 'Rex' },
   ]
   for (const change of changes) {
@@ -179,6 +197,9 @@ test('fields this build does not know survive every change', () => {
     expect(after).toMatchObject({ journal: ['x'], you: { hats: ['crown'] } })
     expect(after.buddies[0]).toMatchObject({ xp: 7 })
   }
+  // The mulligan replaces the buddy itself, but the rest of the record survives it.
+  const rerolled = applyChange({ ...future, rerolls: 0 }, { kind: 'reroll', seed: 'n', soul: SOUL }, NOON)
+  expect(rerolled).toMatchObject({ journal: ['x'], you: { hats: ['crown'] } })
 })
 
 test('a flush applies mood events to the right buddy and drops an unknown seed', () => {
@@ -210,14 +231,13 @@ test('a new day after two or more missed ones leaves the active buddy sulking', 
   expect(applyChange(visited, { kind: 'visit' }, NOON)).toBeNull()
 })
 
-test("a reroll after days away leaves the sulk with the buddy left alone, and the new one starts neutral", () => {
-  const away: Saved = { ...migrate(V1), you: { lastDay: '2026-10-02', streak: 4, bestStreak: 4, days: 9 } }
+test('the mulligan makes the visit, and the buddy it brings starts neutral', () => {
+  const away: Saved = { ...firstHatch(), you: { lastDay: '2026-10-02', streak: 4, bestStreak: 4, days: 9 } }
   const rerolled = applyChange(away, { kind: 'reroll', seed: 'n', soul: SOUL }, NOON)!
+  expect(rerolled.you.lastDay).toBe('2026-10-07')
   // The first save after it finds the visit already made, so it moves no mood.
   const flushed = applyChange(rerolled, { kind: 'flush', pending: {}, mood: { n: ['longClean'] } }, NOON)!
-  expect(flushed.buddies[0]?.mood).toMatchObject({ sulk: 3 })
   expect(activeBuddy(flushed).mood).toMatchObject({ meter: 1, sulk: 0 })
-  expect(flushed.you.lastDay).toBe('2026-10-07')
 })
 
 test('a pet in the flush that sets the sulk still eases it by one step', () => {
@@ -276,12 +296,54 @@ test('a new day after three or more missed days writes "away" on the buddy left 
   const moment = [{ at: AT, kind: 'away', n: 5 }]
   expect(activeBuddy(applyChange(away, { kind: 'visit' }, NOON)!).journal).toEqual(moment)
   expect(activeBuddy(applyChange(away, { kind: 'flush', pending: {} }, NOON)!).journal).toEqual(moment)
-  const rerolled = applyChange(away, { kind: 'reroll', seed: 'n', soul: SOUL }, NOON)!
-  expect(rerolled.buddies[0]?.journal).toEqual(moment)
-  expect(activeBuddy(rerolled).journal).toBeUndefined()
   // Two missed days leave a sulk but no moment.
   const weekend: Saved = { ...away, you: { ...away.you, lastDay: '2026-10-04' } }
   expect(activeBuddy(applyChange(weekend, { kind: 'visit' }, NOON)!).journal).toBeUndefined()
+})
+
+// One turn's counts for buddy 's', and a flush of them carrying an egg seed.
+const turnOf = (n = 1) => ({ ...zeroCounts(), turns: n })
+const eggFlush = (n = 1, eggSeed = 'egg-1'): Change => ({ kind: 'flush', pending: { s: turnOf(n) }, eggSeed })
+
+test("the first flush after the upgrade writes the egg count from the XP before its own counts", () => {
+  const base = migrate(V1)
+  // 2,000 turns stored is 20,000 XP: two eggs' worth, none owed.
+  const old: Saved = { ...base, you: { lastDay: null, streak: 0, bestStreak: 0, days: 0 }, buddies: [{ ...base.buddies[0]!, counts: turnOf(2_000) }] }
+  const saved = applyChange(old, eggFlush(), NOON)!
+  expect(saved.you.eggs).toBe(2)
+  expect(saved.egg).toBeUndefined()
+  // Crossing 24,300 XP earns the third.
+  const crossed = applyChange({ ...saved, buddies: [{ ...saved.buddies[0]!, counts: turnOf(2_429) }] }, eggFlush(), NOON)!
+  expect(crossed.you.eggs).toBe(3)
+  expect(crossed.egg).toEqual({ seed: 'egg-1', startedAt: AT, fromTurns: 2_430 })
+})
+
+test("the upgrade flush that crosses 8,100 XP counts the stored XP first, so its own turns earn the egg", () => {
+  const base = migrate(V1)
+  // 809 turns stored is 8,090 XP: no egg's worth, and no count yet.
+  const old: Saved = { ...base, you: { lastDay: null, streak: 0, bestStreak: 0, days: 0 }, buddies: [{ ...base.buddies[0]!, counts: turnOf(809) }] }
+  expect(old.you.eggs).toBeUndefined()
+  // Counted from the stored XP the count is 0, and the flush's turn earns the first egg. Counted
+  // after the flush it would read 1 already, and no egg would start.
+  const saved = applyChange(old, eggFlush(), NOON)!
+  expect(saved.you.eggs).toBe(1)
+  expect(saved.egg).toEqual({ seed: 'egg-1', startedAt: AT, fromTurns: 810 })
+})
+
+test('a flush that crosses 8,100 XP starts an egg from its seed; one with an egg out starts none', () => {
+  const first = firstHatch()
+  const near: Saved = { ...first, buddies: [{ ...first.buddies[0]!, counts: turnOf(809) }] }
+  const saved = applyChange(near, eggFlush(), NOON)!
+  expect(saved.egg).toEqual({ seed: 'egg-1', startedAt: AT, fromTurns: 810 })
+  expect(saved.you.eggs).toBe(1)
+  // 8,100 XP more is owed while the first incubates: it waits.
+  const more = applyChange(saved, eggFlush(810, 'egg-2'), NOON)!
+  expect(more.egg?.seed).toBe('egg-1')
+  expect(more.you.eggs).toBe(1)
+  // A flush with no seed starts nothing, and the egg stays owed.
+  const seedless = applyChange(near, { kind: 'flush', pending: { s: turnOf(1) } }, NOON)!
+  expect(seedless.egg).toBeUndefined()
+  expect(seedless.you.eggs).toBe(0)
 })
 
 // V1's buddy one turn short of level 10.
@@ -394,6 +456,141 @@ test('a swap on a new day keeps the streak but earns nothing; the next flush ear
   const flushed = applyChange(swapped, { kind: 'flush', pending: { a: ONE_TURN } }, NOON + 1_000)!
   expect(flushed.you.earned).toEqual({ regular: new Date(NOON + 1_000).toISOString() })
   expect(newsOf(swapped, flushed)?.earned).toEqual(['regular'])
+})
+
+test('a hatchling never yet active comes in from the dex with no sulk and no away', () => {
+  // It joined the dex retired the moment it hatched, five days ago.
+  const hatchedAt = new Date(2026, 9, 2, 12).toISOString()
+  const waiting = pair(hatchedAt, '2026-10-04')
+  const fresh: Saved = { ...waiting, buddies: [{ ...waiting.buddies[0]!, soul: { ...SOUL, hatchedAt } }, waiting.buddies[1]!] }
+  const saved = applyChange(fresh, { kind: 'swap', seed: 'a' }, NOON)!
+  expect(saved.active).toBe('a')
+  expect(saved.buddies[0]?.retiredAt).toBeNull()
+  expect(saved.buddies[0]?.mood).toBeUndefined()
+  expect(saved.buddies[0]?.journal).toBeUndefined()
+})
+
+// Bix ('b', active, 960 turns) carrying an egg started at 810: 150 turns in, so due. `parents`,
+// when given, are the egg's.
+function carrying(parents?: [string, string]): Saved {
+  const base = pair(YESTERDAY)
+  return {
+    ...base,
+    buddies: [base.buddies[0]!, { ...base.buddies[1]!, counts: { ...zeroCounts(), turns: 960 } }],
+    you: { ...base.you, eggs: 1 },
+    egg: { seed: 'e', startedAt: AT, fromTurns: 810, ...(parents ? { parents } : {}) },
+  }
+}
+const HATCHED_AT = new Date(NOON - 5_000).toISOString()
+const hatchEgg = (o: Partial<Extract<Change, { kind: 'hatchEgg' }>> = {}): Change => ({
+  kind: 'hatchEgg',
+  seed: 'e',
+  parents: null,
+  soul: { ...SOUL, name: 'Sprout', hatchedAt: HATCHED_AT },
+  eggSeed: 'next-egg',
+  ...o,
+})
+
+test('a due egg hatches into the dex, retired as it hatched, and the active buddy stays', () => {
+  const before = carrying()
+  const saved = applyChange(before, hatchEgg(), NOON)!
+  expect(saved.active).toBe('b')
+  expect(saved.mode).toBe(before.mode)
+  expect(saved.egg).toBeUndefined()
+  expect(saved.buddies.map(b => b.seed)).toEqual(['a', 'b', 'e'])
+  expect(saved.buddies[2]).toEqual({
+    seed: 'e',
+    soul: { ...SOUL, name: 'Sprout', hatchedAt: HATCHED_AT },
+    retiredAt: HATCHED_AT,
+    counts: zeroCounts(),
+    journal: [{ at: AT, kind: 'hatched', n: 150 }],
+  })
+  expect(saved.you.eggs).toBe(1)
+  // A brooded egg's parents go with it.
+  const bred = applyChange(carrying(['b', 'a']), hatchEgg({ parents: ['b', 'a'] }), NOON)!
+  expect(bred.buddies[2]?.parents).toEqual(['b', 'a'])
+})
+
+test('a hatch starts the next owed egg, and the fifth buddy earns Collector', () => {
+  const base = carrying()
+  // 1,620 turns is 16,200 XP: a second egg is owed and waiting.
+  const owing: Saved = { ...base, buddies: [base.buddies[0]!, { ...base.buddies[1]!, counts: { ...zeroCounts(), turns: 1_620 } }], egg: { ...base.egg!, fromTurns: 1_470 } }
+  const saved = applyChange(owing, hatchEgg(), NOON)!
+  expect(saved.egg).toEqual({ seed: 'next-egg', startedAt: AT, fromTurns: 1_620 })
+  expect(saved.you.eggs).toBe(2)
+  const four: Saved = { ...base, buddies: [...base.buddies, { ...base.buddies[0]!, seed: 'c' }, { ...base.buddies[0]!, seed: 'd' }] }
+  expect(applyChange(four, hatchEgg(), NOON)?.you.earned).toMatchObject({ collector: AT })
+})
+
+test('a hatch writes nothing for another egg, an egg not yet due, or parents its soul was not made for', () => {
+  expect(applyChange(carrying(), hatchEgg({ seed: 'other' }), NOON)).toBeNull()
+  const early = carrying()
+  expect(applyChange({ ...early, egg: { ...early.egg!, fromTurns: 811 } }, hatchEgg(), NOON)).toBeNull()
+  expect(applyChange(carrying(['b', 'a']), hatchEgg(), NOON)).toBeNull()
+  expect(applyChange(carrying(), hatchEgg({ parents: ['b', 'a'] }), NOON)).toBeNull()
+  expect(applyChange(carrying(['b', 'a']), hatchEgg({ parents: ['a', 'b'] }), NOON)).toBeNull()
+  const { egg: _, ...none } = carrying()
+  expect(applyChange(none, hatchEgg(), NOON)).toBeNull()
+  expect(applyChange(null, hatchEgg(), NOON)).toBeNull()
+})
+
+// Five in the dex: Pip ('a', retired) and Bix ('b', here), adults at 810 turns each, then three
+// hatchlings, Nib, Dot and Moss. An egg 40 turns in, with no parents yet, unless `egg` says
+// otherwise; `egg: null` leaves none.
+function brood(egg?: Saved['egg'] | null): Saved {
+  const base = pair(YESTERDAY)
+  const adult = { ...zeroCounts(), turns: 810 }
+  const young = (seed: string, name: string) => ({ seed, soul: { ...SOUL, name }, retiredAt: AT, counts: zeroCounts() })
+  return {
+    ...base,
+    buddies: [
+      { ...base.buddies[0]!, counts: adult },
+      { ...base.buddies[1]!, counts: adult },
+      young('c', 'Nib'),
+      young('d', 'Dot'),
+      young('e', 'Moss'),
+    ],
+    you: { ...base.you, eggs: 2 },
+    ...(egg === null ? {} : { egg: egg ?? { seed: 'egg', startedAt: AT, fromTurns: 1_580 } }),
+  }
+}
+
+test('breeding is refused, in order, until five are in the dex, an egg waits for parents, and both are adults', () => {
+  const reply = (saved: Saved, who: string) => {
+    const choice = breedChoice(saved, who)
+    return choice.kind === 'no' ? choice.reply : choice.partner
+  }
+  const four: Saved = { ...brood(), buddies: brood().buddies.slice(0, 4) }
+  expect(reply(four, 'Pip')).toBe('Breeding unlocks at 5 buddies in the dex: 1 to go.')
+  expect(reply(pair(YESTERDAY), 'Pip')).toBe('Breeding unlocks at 5 buddies in the dex: 3 to go.')
+  expect(reply(brood(null), 'Pip')).toBe('No egg to brood. Your next egg comes in 8,100 xp.')
+  const brooding = brood({ seed: 'egg', startedAt: AT, fromTurns: 1_580, parents: ['b', 'a'] })
+  expect(reply(brooding, 'Pip')).toBe('Bix and Pip are already brooding this egg.')
+  expect(reply(brood(), 'Rex')).toBe('No buddy named Rex in the dex.')
+  expect(reply(brood(), 'bix')).toBe("Bix can't breed with itself. Pick one from /buddy dex.")
+  expect(reply(brood(), 'Nib')).toBe('Nib is level 1. Buddies breed from level 10.')
+  const youngHere: Saved = { ...brood(), active: 'c' }
+  expect(reply(youngHere, 'Pip')).toBe('Nib is level 1. Buddies breed from level 10.')
+  expect(reply(brood(), 'pip')).toBe('a')
+  expect(reply(brood(), '#1')).toBe('a')
+})
+
+test('breeding sets the egg parents, active first, and logs it on both, with no visit', () => {
+  const before = brood()
+  const saved = applyChange(before, { kind: 'breed', partner: 'a' }, NOON)!
+  expect(saved.egg).toEqual({ seed: 'egg', startedAt: AT, fromTurns: 1_580, parents: ['b', 'a'] })
+  expect(saved.buddies[0]?.journal).toEqual([{ at: AT, kind: 'brooded', n: 2 }])
+  expect(saved.buddies[1]?.journal).toEqual([{ at: AT, kind: 'brooded', n: 1 }])
+  expect(saved.buddies.slice(2).every(b => b.journal === undefined)).toBe(true)
+  expect(saved.you).toEqual(before.you)
+  // Parents can't change once set, and the refusals write nothing.
+  expect(applyChange(saved, { kind: 'breed', partner: 'a' }, NOON)).toBeNull()
+  expect(applyChange(brood(null), { kind: 'breed', partner: 'a' }, NOON)).toBeNull()
+  expect(applyChange(brood(), { kind: 'breed', partner: 'b' }, NOON)).toBeNull()
+  expect(applyChange(brood(), { kind: 'breed', partner: 'c' }, NOON)).toBeNull()
+  expect(applyChange(brood(), { kind: 'breed', partner: 'gone' }, NOON)).toBeNull()
+  expect(applyChange({ ...before, buddies: before.buddies.slice(0, 4) }, { kind: 'breed', partner: 'a' }, NOON)).toBeNull()
+  expect(applyChange(null, { kind: 'breed', partner: 'a' }, NOON)).toBeNull()
 })
 
 test("a rename changes only that buddy's name, with no visit, and nothing when the name or seed is wrong", () => {
