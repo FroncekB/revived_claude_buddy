@@ -39,6 +39,7 @@ To install from a local copy of this repo instead, run `claude plugin marketplac
 | `/buddy mute` / `unmute` | Stop or resume its comments (it still answers when you talk to it) |
 | `/buddy off` | Hide it |
 | `/buddy reroll`, then `/buddy reroll confirm` | Once only, before your first buddy reaches level 2: swap it for a new one |
+| `/buddy forget`, then `/buddy forget confirm` | Erase everything it saved: every buddy, your streak, your achievements and your egg. The next `/buddy` hatches a new one |
 | `<name>, how's it going?` | Talk to it. That prompt goes to the buddy, not to Claude |
 
 It has moods. A run of failed tools makes it anxious, long clean turns make it smug, and days away make it sulk until you pet it, talk to it, or give it some time. It flinches when a tool fails, celebrates a long clean turn, and dozes off when left alone, sooner after midnight. On US federal holidays, Easter, April Fools' Day, Halloween week and its own hatch day, it dresses for the occasion. Its stats change how it acts: CHAOS makes it chattier, PATIENCE makes it wait longer between comments, DEBUGGING makes it speak up the moment a tool fails, SNARK sharpens its canned lines, and WISDOM makes it bring up old memories.
@@ -56,17 +57,17 @@ It notices how you're doing. When one tool fails three times across two turns, i
 A mod runs inside Claude Code with your permissions, so here is exactly what this one touches. To see its hooks and calls for yourself, run `claude plugin validate ./buddy`.
 
 - **Model calls.** It calls Haiku on your account for five things:
-  - once when it hatches, or when an egg does
+  - when it hatches: once for its name and personality, then once to say hello. An egg hatching is one call, for its name and personality
   - when you pet it, feed it, play with it, rename it, change its hat or talk to it
-  - once when a swap brings a buddy back, to say hello
-  - for a comment after a turn, at most one every 3 minutes (longer for a patient buddy)
-  - to offer to talk it through when a tool keeps failing, at most twice an hour
+  - to say hello each time you run `/buddy` on its own, and when a swap brings a buddy back
+  - for a comment after a turn, at most one every 3 minutes (longer for a patient buddy) in each open session
+  - to offer to talk it through when a tool keeps failing, at most twice an hour in each open session
 
-  Moods, reactions, holidays, the journal, levels, achievements, earning, carrying and brooding eggs, game results, break nudges and the line it says when a tool fails need no model call. An egg's hatch call hears its parents' names, species and personalities, so the hatchling can take after them.
-- **What a turn comment sees.** Only the turn's outcome, how long it took, which tools ran or failed, the buddy's mood, whether today is a holiday or its hatch day, and now and then one of its journal moments. It never sees your prompt, Claude's answer, file contents or command arguments. The rubber-duck offer sees the same mood and day, plus the name of the tool that keeps failing and how often it failed, and nothing else from the turn.
-- **Prompts addressed to it.** A prompt that starts with the buddy's name and a comma or colon (`Pip, hi`) is dropped before it reaches Claude, and the buddy answers it. Prompts that carry an attachment always go to Claude.
-- **What it saves.** One record in the mod's own store. For each buddy you've had: its seed, name, personality, hatch date, the time it was retired, a bred buddy's parents (their seeds), the hat you chose for it, lifetime counts of turns, failed turns, longest turn, tool calls by kind, failed calls, pets and talks, its mood (two small numbers and when they last moved), its three other bests (the longest run of failed calls, the most calls in one turn and the longest rough stretch a clean turn ended), and its journal (up to 20 moments, each a kind, a number and a time, plus the tool group of a run of failed calls). Then the mode (on, muted or off), the reroll count, and your streak: the last day you visited, your current and best streak, and the days you've visited, and the achievements you've earned, each with when you earned it, and how many eggs you've had. The egg you're carrying: its seed, when it started, the turn count it started from, and who is brooding it. Its XP, level and stage aren't saved: they're worked out from its counts, and a bred buddy's species, stats and the rest are worked out from its seed and its parents'. Never prompt text, answers, file contents or command arguments.
-- **Upgrading.** The record is now schema 2, and the first save after the update converts an older one. A session still open on 0.1.x doesn't know schema 2 and answers `Saved buddy uses schema 2; this mod knows 1.` until you reload it with `/reload-plugins`. Likewise, a session still open on 0.6 allows free rerolls and draws a bred buddy as a plain roll of its seed until you reload it.
+  Those limits are kept per session, so two open sessions each comment and offer on their own schedule. Moods, reactions, holidays, the journal, levels, achievements, earning, carrying and brooding eggs, game results, break nudges and the line it says when a tool fails need no model call. An egg's hatch call hears its parents' names, species and personalities, so the hatchling can take after them.
+- **What a turn comment sees.** Only the turn's outcome, how long it took, which tools ran or failed, by name only (an MCP tool without its `mcp__server__` prefix), the buddy's mood, whether today is a holiday or its hatch day, and now and then one of its journal moments. It never sees your prompt, Claude's answer, file contents or command arguments. The rubber-duck offer sees the same mood and day, plus the name of the tool that keeps failing and how often it failed, and nothing else from the turn.
+- **Prompts addressed to it.** A prompt that starts with the buddy's name and a comma or colon (`Pip, hi`) is dropped before it reaches Claude, and the buddy answers it: Haiku sees that message (its first 500 characters), the buddy's mood and a few of its journal moments. Prompts that carry an attachment always go to Claude.
+- **What it saves.** One record in the mod's own store. For each buddy you've had: its seed, name, personality, hatch date, the time it was retired, a bred buddy's parents (their seeds), the hat you chose for it, lifetime counts of turns, failed turns, longest turn, tool calls by kind, failed calls, pets and talks, its mood (two small numbers and when they last moved), its three other bests (the longest run of failed calls, the most calls in one turn and the longest rough stretch a clean turn ended), and its journal (up to 20 moments, each a kind, a number and a time, plus the tool group of a run of failed calls). Then the mode (on, muted or off), the reroll count, and your streak: the last day you visited, your current and best streak, and how many days you've visited, and the achievements you've earned, each with when you earned it, and how many eggs you've had. The egg you're carrying: its seed, when it started, the turn count it started from, and who is brooding it. Its XP, level and stage aren't saved: they're worked out from its counts, and a bred buddy's species, stats and the rest are worked out from its seed and its parents'. Never prompt text, answers, file contents or command arguments. `/buddy forget confirm` erases all of it.
+- **Upgrading.** The record is now schema 2, and the first save after the update converts an older one. A session still open on 0.1.x doesn't know schema 2 and answers `Saved buddy uses schema 2; this mod knows 1.` until you reload it with `/reload-plugins`. Likewise, a session still open on 0.6 allows free rerolls and draws a bred buddy as a plain roll of its seed until you reload it, and one still open on 0.7.0 keeps drawing a forgotten buddy until you reload it, though it never saves it again.
 
 ## Develop
 
@@ -74,6 +75,18 @@ The mod lives in `buddy/`. To run its tests:
 
 ```bash
 claude plugin test ./buddy
+```
+
+To typecheck it, load your copy once so Claude Code writes the plugin API's types beside it, in `buddy/.claude-plugin/types/` (ignored by git). Quit once the session opens, and load it again after you update Claude Code so the types match:
+
+```bash
+claude --plugin-dir ./buddy
+```
+
+Then run `tsc` on it:
+
+```bash
+npx -p typescript tsc -p buddy
 ```
 
 ## Design
