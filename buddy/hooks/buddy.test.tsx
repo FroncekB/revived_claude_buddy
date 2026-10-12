@@ -419,6 +419,33 @@ test('after forget, /buddy hatches a fresh first buddy, hungry and with its one 
   expect(await run('reroll')).toMatch(/^This replaces Bix, /)
 })
 
+test('a command with no buddy saved, while the first egg hatches, leaves the egg wobbling', async ($, on) => {
+  const clock = world(on)
+  // Hatch requests wait for the test.
+  let release!: () => void
+  const gate = new Promise<void>(resolve => {
+    release = resolve
+  })
+  on('model.complete', async (_$, e) => {
+    if (e.system?.includes('JSON only')) await gate
+    return { value: failed() }
+  })
+  await $.session.start(START)
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  const hatched = runner($)('')
+  for (let i = 0; i < 100 && !(await ui.find({ text: /hatching/ })); i++) await Promise.resolve()
+  expect(await runner($)('pet')).toBe(NO_BUDDY)
+  // Seven seconds of ticks cross a wobble frame (sprites.ts frameAt) while the timer runs.
+  const drawn = new Set<string>()
+  for (let i = 0; i < 14; i++) {
+    await clock.advance(500)
+    drawn.add((await drawnSprite(ui)).join('\n'))
+  }
+  expect(drawn.size).toBeGreaterThan(1)
+  release()
+  await hatched
+})
+
 test('forget with nothing saved says so', async ($, on) => {
   world(on)
   await $.session.start(START)

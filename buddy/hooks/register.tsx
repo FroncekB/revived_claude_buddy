@@ -193,8 +193,10 @@ async function adopt($: EngineInterface, saved: Saved) {
 }
 
 // Nothing is saved any more, erased here or in another session: this session lets its copy go,
-// so the band, the panes and the next hatch start from nothing. A fresh buddy is never full.
+// so the band, the panes and the next hatch start from nothing. A fresh buddy is never full. With no
+// copy there is nothing to let go, and a first egg's wobble keeps its timer.
 async function release($: EngineInterface) {
+  if (!(await read($, record))) return
   await update($, record, () => null)
   await update($, unsaved, () => false)
   await update($, lastFedAt, () => 0)
