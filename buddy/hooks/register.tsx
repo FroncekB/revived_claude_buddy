@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, PromptOrigin, Register } from 'claude-code'
 
 import type { Buddy, Counts, Moment, MoodEvent, Saved, Stage, TurnFacts } from '../types'
 import { newsOf } from './achievements'
@@ -27,7 +27,8 @@ import type { MoodName } from './mood'
 import { bonesFor, levelOf, stageOf } from './progress'
 import { mergeQueues, queueNewest } from './queue'
 import {
-  STORE_KEY, USAGE, activeBuddy, applyChange, breedChoice, classify, findBuddy, notFound, parseSub, shownBuddy, targetOf,
+  STORE_KEY, SUBCOMMANDS, USAGE, activeBuddy, applyChange, breedChoice, classify, findBuddy, notFound, parseSub,
+  shownBuddy, targetOf,
 } from './record'
 import type { Change, Parsed, Stored } from './record'
 import { RARITY, STATS, rollBones } from './roll'
@@ -103,6 +104,7 @@ const CARRIED_HATCHING = 'The egg is hatching.'
 const NOTHING_SAVED = 'Nothing is saved.'
 const FORGOTTEN = 'Forgotten. Nothing of your buddies is saved. Run /buddy to hatch a new one.'
 const ERASE_FAILED = 'Could not erase your buddy. Try again.'
+const ONLY_YOU_ERASE = 'Only you can erase your buddy: type /buddy forget confirm yourself.'
 
 type Look = {
   sprite: string[]
@@ -153,7 +155,8 @@ let flaggedTurn = -1
 let stretch: Stretch | null = null
 // The last main turn's failed calls by tool, for the rubber duck (Interaction spec section 4).
 let prevFails: Record<string, number> = {}
-// The last commit this session started. The next one waits for it to settle.
+// The last store write this session queued, a commit or forget's erase. The next one waits for it
+// to settle.
 let lastCommit: Promise<unknown> = Promise.resolve()
 // True from the moment this session starts hatching the egg, before any await, so a second check
 // can never start a second hatch (Breeding spec section 3).
@@ -179,6 +182,12 @@ function later($: EngineInterface, work: () => Promise<unknown>) {
   })
 }
 
+// Made by the person themselves: their Enter at the terminal, or their message through Remote
+// Control. Never another plugin's, a peer session's, or one the engine can't trace.
+function fromPerson(origin: PromptOrigin): boolean {
+  return origin.kind === 'composer' || origin.kind === 'bridge'
+}
+
 // Make `saved` the session's buddy: into state, and the timer to match its mode. A run of rough
 // turns never crosses "off" or a new buddy, whichever session made the change (Memory spec
 // section 3).
@@ -193,15 +202,16 @@ async function adopt($: EngineInterface, saved: Saved) {
 }
 
 // Nothing is saved any more, erased here or in another session: this session lets its copy go,
-// so the band, the panes and the next hatch start from nothing. A fresh buddy is never full. With no
-// copy there is nothing to let go, and a first egg's wobble keeps its timer.
+// so the band, the panes and the next hatch start from nothing. Its last snack goes too, so a
+// fresh buddy is hungry. With no copy there is nothing to let go. An egg that is out keeps its
+// timer, whether a first egg's or a reroll's: the hatch stops it if nothing is left to draw.
 async function release($: EngineInterface) {
   if (!(await read($, record))) return
   await update($, record, () => null)
   await update($, unsaved, () => false)
   await update($, lastFedAt, () => 0)
   roughTurns = 0
-  stopTimer()
+  if (!(await read($, hatching))) stopTimer()
 }
 
 // What this session builds on. The store is shared between sessions, so it is the truth,
@@ -226,7 +236,8 @@ function refusal(stored: Stored): string | null {
   return null
 }
 
-// The only writer of the store: read fresh, make one change, write (Foundation spec section 2).
+// The only writer of the store besides forget's erase, which runs in the same queue: read fresh,
+// make one change, write (Foundation spec section 2).
 // Returns null when it wrote, or had nothing to write. A record it must not touch comes back
 // as its refusal line, and a failed write, which leaves the result in state marked unsaved, as
 // SAVE_FAILED.
@@ -237,11 +248,11 @@ function refusal(stored: Stored): string | null {
 // and its caller still sees the throw. Nothing inside `commitNow` may call `commit`, which
 // would wait on itself.
 function commit($: EngineInterface, change: Change): Promise<string | null> {
-  return inTurn(() => commitNow($, change))
+  return afterWrites(() => commitNow($, change))
 }
 
 // Runs `work` once every write this session started before it has settled.
-function inTurn<T>(work: () => Promise<T>): Promise<T> {
+function afterWrites<T>(work: () => Promise<T>): Promise<T> {
   const run = lastCommit.then(work)
   lastCommit = run.catch(() => undefined)
   return run
@@ -253,9 +264,9 @@ async function commitNow($: EngineInterface, change: Change): Promise<string | n
   if (refused) return refused
   const before = base.kind === 'ok' ? base.saved : null
   const saved = applyChange(before, change, await $.clock.now())
-  // Another session erased everything: this one's copy goes too, and nothing writes it back.
-  if (!saved && base.kind === 'none') await release($)
   if (!saved) {
+    // Another session erased everything: this one's copy goes too, and nothing writes it back.
+    if (base.kind === 'none') await release($)
     // A hatch another session won leaves nothing to write, but this one adopts the record it
     // read, so its band stops drawing the egg (Breeding spec section 3). It says nothing. An egg
     // still due there was brooded while its soul call was out, here or in another session: it
@@ -515,7 +526,8 @@ async function soothe($: EngineInterface, event: CountEvent, who: Who, prompt: s
   try {
     await countAndFlush($, event, ['soothe'])
   } finally {
-    await reply($, who, prompt, fallback)
+    // Forgotten in another session: the flush let this session's copy go, and nobody is left to answer.
+    if (await read($, record)) await reply($, who, prompt, fallback)
   }
 }
 
@@ -757,8 +769,10 @@ async function hatch($: EngineInterface, kind: 'hatch' | 'reroll'): Promise<stri
     // A first hatch says the mulligan is there (Breeding spec section 2).
     return note ?? (kind === 'hatch' ? `${said} ${MULLIGAN_NOTE}` : said)
   } finally {
-    // The egg never stays out, whatever went wrong above.
+    // The egg never stays out, whatever went wrong above. With no buddy to draw after it, refused
+    // or erased meanwhile, its timer stops too.
     await update($, hatching, () => false)
+    if (!(await read($, record))) stopTimer()
   }
 }
 
@@ -789,8 +803,9 @@ async function unhatched($: EngineInterface, kind: 'hatch' | 'reroll'): Promise<
 
 // /buddy forget: asks, and once confirmed erases everything saved, in the commit queue so no save
 // lands between. A damaged or newer record is erased too: this is the way past one. Not while an egg
-// is out: the hatch would save its buddy right after.
-async function forget($: EngineInterface, confirmed: boolean): Promise<string> {
+// is out: the hatch would save its buddy right after. Only the person's own confirm erases: a run
+// another plugin made, or one the engine can't trace to them, is told so.
+async function forget($: EngineInterface, confirmed: boolean, byPerson: boolean): Promise<string> {
   if (await read($, hatching)) return EGG
   const stored = await current($)
   if (stored.kind === 'none') {
@@ -803,7 +818,8 @@ async function forget($: EngineInterface, confirmed: boolean): Promise<string> {
     const { name } = activeBuddy(stored.saved).soul
     return `This erases everything saved: ${name}, the dex, your streak, your achievements and your egg. Run /buddy forget confirm.`
   }
-  return inTurn(async () => {
+  if (!byPerson) return ONLY_YOU_ERASE
+  return afterWrites(async () => {
     try {
       await $.store.delete(STORE_KEY)
     } catch {
@@ -814,9 +830,11 @@ async function forget($: EngineInterface, confirmed: boolean): Promise<string> {
   })
 }
 
-async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | undefined> {
+async function runBuddy($: EngineInterface, parsed: Parsed, origin: PromptOrigin): Promise<string | undefined> {
   if (parsed.sub === 'usage') return USAGE
-  if (parsed.sub === 'forget' || parsed.sub === 'forget-confirm') return forget($, parsed.sub === 'forget-confirm')
+  if (parsed.sub === 'forget' || parsed.sub === 'forget-confirm') {
+    return forget($, parsed.sub === 'forget-confirm', fromPerson(origin))
+  }
   const stored = await current($)
   if (stored.kind === 'none') {
     // Erased in another session: this one's copy goes first, so a hatch starts from nothing.
@@ -1113,7 +1131,7 @@ export const register: Register = on => {
       await $.command.register({
         name: 'buddy',
         description: 'Hatch, pet, or manage your terminal buddy',
-        argumentHint: USAGE.replace('Usage: /buddy ', ''),
+        argumentHint: SUBCOMMANDS,
         immediate: true,
       })
     } catch {
@@ -1144,7 +1162,7 @@ export const register: Register = on => {
   on('command.run', { command: 'buddy' }, async ($, e) => {
     try {
       await stir($)
-      return { text: await runBuddy($, parseSub(e.args)) }
+      return { text: await runBuddy($, parseSub(e.args), e.origin) }
     } catch {
       return { text: SNAG }
     }
@@ -1212,10 +1230,15 @@ export const register: Register = on => {
       later($, () => stir($))
       const saved = await read($, record)
       const buddy = saved && saved.mode !== 'off' ? activeBuddy(saved) : null
-      const fromPerson = e.origin.kind === 'composer' || e.origin.kind === 'bridge'
       // A prompt carrying images or files is a request for Claude, whatever it starts with.
       const bare = !e.attachments || e.attachments.length === 0
-      const message = buddy && fromPerson && bare ? matchAddress(buddy.soul.name, e.text) : null
+      const message = buddy && fromPerson(e.origin) && bare ? matchAddress(buddy.soul.name, e.text) : null
+      // Forgotten in another session: nobody is left to answer, so this session's copy goes and
+      // the prompt goes to Claude.
+      if (message !== null && (await current($)).kind === 'none') {
+        await release($)
+        return next(e)
+      }
       if (buddy && message !== null) {
         later($, async () => {
           const prompt = talkPrompt(message, await talkMemoryLines($, buddy.journal), await duckTalk($))

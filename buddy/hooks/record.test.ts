@@ -156,6 +156,10 @@ test('the mulligan writes nothing once its window has shut', () => {
   expect(applyChange(two, reroll, NOON)).toBeNull()
 })
 
+test('a reroll onto an erased record writes nothing, so the next hatch keeps its mulligan', () => {
+  expect(applyChange(null, { kind: 'reroll', seed: 'n', soul: SOUL }, NOON)).toBeNull()
+})
+
 test('a hatch only makes the first record: onto a stored one it writes nothing', () => {
   expect(applyChange(migrate(V1), { kind: 'hatch', seed: 'n', soul: SOUL }, NOON)).toBeNull()
   expect(applyChange(firstHatch(), { kind: 'hatch', seed: 'n', soul: SOUL }, NOON)).toBeNull()

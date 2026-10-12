@@ -102,17 +102,36 @@ const runner = ($: Engine) => async (args: string) =>
   (await $.command.run({ command: 'buddy', args, ...RUN })).text
 
 // A store this test can look into and turn off, for writes or for reads: one row under `buddy`,
-// as another session sharing it would see it.
+// as another session sharing it would see it. Any other key is refused, so a write or an erase
+// aimed at the wrong one shows. With `hold` set, each write waits on it, counted in `held`.
 function sharedStore(on: On, row: unknown) {
-  const shared = { row, writes: 0, refuse: false, refuseReads: false, refuseDeletes: false }
-  on('store.get', async () => (shared.refuseReads ? { deny: 'disk offline' } : { value: shared.row }))
+  const shared = {
+    row,
+    writes: 0,
+    refuse: false,
+    refuseReads: false,
+    refuseDeletes: false,
+    hold: null as Promise<void> | null,
+    held: 0,
+  }
+  const WRONG_KEY = { deny: 'not the buddy key' }
+  on('store.get', async (_$, e) => {
+    if (e.key !== 'buddy') return WRONG_KEY
+    return shared.refuseReads ? { deny: 'disk offline' } : { value: shared.row }
+  })
   on('store.set', async (_$, e) => {
+    if (e.key !== 'buddy') return WRONG_KEY
+    if (shared.hold) {
+      shared.held++
+      await shared.hold
+    }
     if (shared.refuse) return { deny: 'disk full' }
     shared.row = e.value
     shared.writes++
     return { value: undefined }
   })
-  on('store.delete', async () => {
+  on('store.delete', async (_$, e) => {
+    if (e.key !== 'buddy') return WRONG_KEY
     if (shared.refuseDeletes) return { deny: 'disk offline' }
     shared.row = undefined
     return { value: undefined }
@@ -612,6 +631,154 @@ test("after another session's forget, a /buddy command here finds no buddy, and 
   expect(await ui.find({ text: 'engine band' })).toBeDefined()
 })
 
+test('forget waits for a save already on its way to the disk, and nothing writes the record back', async ($, on) => {
+  const shared = sharedStore(on, RECORD)
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  // The turn's save waits for the test.
+  let land!: () => void
+  shared.hold = new Promise<void>(resolve => {
+    land = resolve
+  })
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(shared.held).toBe(1)
+  const erased = runner($)('forget confirm')
+  await clock.settle()
+  // The erase waits behind the save, so the save can't land after it.
+  expect(shared.row).toBeDefined()
+  land()
+  expect(await erased).toBe(FORGOTTEN)
+  await clock.settle()
+  expect(shared.row).toBeUndefined()
+})
+
+test('forget while the carried egg hatches erases it, and the hatch writes nothing back', async ($, on) => {
+  const due: Saved = { ...BROODY, egg: { ...BROODY.egg!, fromTurns: 1_470 } }
+  const shared = sharedStore(on, due)
+  const clock = world(on, null)
+  engineBelow(on)
+  // Hatch requests wait for the test.
+  let hatch!: () => void
+  const gate = new Promise<void>(resolve => {
+    hatch = resolve
+  })
+  on('model.complete', async (_$, e) => {
+    if (e.system?.includes('JSON only')) {
+      await gate
+      return { value: ok('{"name": "Sprout", "personality": "Takes after both."}') }
+    }
+    return { value: failed() }
+  })
+  await $.session.start(START)
+  await clock.settle()
+  const writes = shared.writes
+  expect(await runner($)('forget confirm')).toBe(FORGOTTEN)
+  hatch()
+  await clock.settle()
+  expect(shared.row).toBeUndefined()
+  expect(shared.writes).toBe(writes)
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await ui.find({ text: 'engine band' })).toBeDefined()
+})
+
+test('forget in a session whose saves failed erases the copy it kept, and the next hatch is a first one', async ($, on) => {
+  const shared = sharedStore(on, undefined)
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, '{"name": "Bix", "personality": "New here."}', null)
+  await $.session.start(START)
+  shared.refuse = true
+  const run = runner($)
+  expect(await run('')).toBe('Could not save your buddy; it lives for this session only.')
+  await clock.settle()
+  expect(await run('forget')).toMatch(/^This erases everything saved: Bix, /)
+  expect(await run('forget confirm')).toBe(FORGOTTEN)
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await ui.find({ text: 'engine band' })).toBeDefined()
+  // With the disk back, nothing this session held writes the forgotten buddy.
+  shared.refuse = false
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(shared.writes).toBe(0)
+  expect(await run('')).toMatch(/^Bix, an? [^.]*, hatched\. Not the one\?/)
+})
+
+test("a reroll that lands after another session's forget writes nothing, and its egg wobbles until then", async ($, on) => {
+  const shared = sharedStore(on, RECORD)
+  const clock = world(on, null)
+  // Hatch requests wait for the test.
+  let release!: () => void
+  const gate = new Promise<void>(resolve => {
+    release = resolve
+  })
+  on('model.complete', async (_$, e) => {
+    if (e.system?.includes('JSON only')) {
+      await gate
+      return { value: ok('{"name": "Bix", "personality": "New here."}') }
+    }
+    return { value: failed() }
+  })
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  const rerolled = runner($)('reroll confirm')
+  for (let i = 0; i < 100 && !(await ui.find({ text: /hatching/ })); i++) await Promise.resolve()
+  expect(await ui.find({ text: /hatching/ })).toBeDefined()
+  shared.row = undefined
+  // The command lets this session's copy go, and the egg keeps its timer.
+  expect(await runner($)('pet')).toBe(NO_BUDDY)
+  // Seven seconds of ticks cross a wobble frame (sprites.ts frameAt) while the timer runs.
+  const drawn = new Set<string>()
+  for (let i = 0; i < 14; i++) {
+    await clock.advance(500)
+    drawn.add((await drawnSprite(ui)).join('\n'))
+  }
+  expect(drawn.size).toBeGreaterThan(1)
+  release()
+  expect(await rerolled).toBe(NO_BUDDY)
+  expect(shared.row).toBeUndefined()
+  // The next hatch is a first one, with its mulligan.
+  expect(await runner($)('')).toMatch(/^Bix, an? [^.]*, hatched\. Not the one\?/)
+  expect((shared.row as Saved).rerolls).toBe(0)
+})
+
+test("after another session's forget, a prompt addressed to the buddy goes to Claude", async ($, on) => {
+  const shared = sharedStore(on, RECORD)
+  const clock = world(on, null)
+  engineBelow(on)
+  const prompts = model(on, null, 'Hi.')
+  await $.session.start(START)
+  await clock.settle()
+  shared.row = undefined
+  const passed = await $.prompt.submit({ text: 'Pip, are you there?', wait: false, origin: { kind: 'composer' } })
+  expect(passed).toMatchObject({ text: 'Pip, are you there?' })
+  await clock.settle()
+  expect(prompts).toHaveLength(0)
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await ui.find({ text: 'engine band' })).toBeDefined()
+})
+
+test("forget confirm erases only when the person runs it, not another plugin", async ($, on) => {
+  const shared = sharedStore(on, RECORD)
+  const clock = world(on, null)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  const byPlugin = (args: string) =>
+    $.command.run({ ...RUN, command: 'buddy', args, origin: { kind: 'plugin', name: 'other' } })
+  expect((await byPlugin('forget')).text).toMatch(/^This erases everything saved: Pip, /)
+  expect((await byPlugin('forget confirm')).text).toBe('Only you can erase your buddy: type /buddy forget confirm yourself.')
+  expect(shared.row).toBeDefined()
+  expect(await runner($)('forget confirm')).toBe(FORGOTTEN)
+  expect(shared.row).toBeUndefined()
+})
+
 test('the slash command hint lists what USAGE lists', async ($, on) => {
   const hints: string[] = []
   mock.clock(on, { now: NOON })
@@ -780,7 +947,7 @@ test('a turn with a failed tool gets one reaction, then the cooldown holds', asy
   await $.turn.complete(TURN)
   await clock.settle()
   expect(reactions()).toHaveLength(1)
-  expect(reactions()[0]).toContain('Failed tools: Bash.')
+  expect(reactions()[0]).toContain('Failed tools: "Bash".')
   const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
   expect(await ui.find({ text: /Ouch\./ })).toBeDefined()
   await $.tool.call({ tool: 'Bash', command: 'false' })
