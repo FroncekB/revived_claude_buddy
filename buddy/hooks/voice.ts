@@ -3,6 +3,7 @@
 import type { Mode, Soul, TurnReason, You } from '../types'
 import { ACHIEVEMENTS, EARNED_HAT_NAME } from './achievements'
 import type { News } from './achievements'
+import { toolName } from './duck'
 import { HATCH_TURNS } from './eggs'
 import { STATS, rngFor } from './roll'
 import type { Bones, StatName, Stats } from './roll'
@@ -114,14 +115,17 @@ export function personaSystem(soul: Soul, b: Bones, extra: readonly string[] = [
   ].join('\n')
 }
 
-// `memory` is a journal line the quip may call back to (Memory spec section 4).
+// `memory` is a journal line the quip may call back to (Memory spec section 4). Tools are named as
+// the buddy says them (duck.ts): an MCP server names its own tools, so its text is kept out.
 export function reactionPrompt(s: TurnSummary, memory: string | null = null): string {
-  const tools = Object.entries(s.tools).map(([tool, n]) => `${tool} x${n}`).join(', ') || 'none'
+  const used: Record<string, number> = {}
+  for (const [tool, n] of Object.entries(s.tools)) used[toolName(tool)] = (used[toolName(tool)] ?? 0) + n
+  const tools = Object.entries(used).map(([tool, n]) => `${tool} x${n}`).join(', ') || 'none'
   return [
     'Claude just finished a turn for the developer.',
     `Outcome: ${s.reason}. Took ${Math.round(s.durationMs / 1000)}s.`,
     `Tools used: ${tools}.`,
-    `Failed tools: ${s.failed.length ? s.failed.join(', ') : 'none'}.`,
+    `Failed tools: ${s.failed.length ? s.failed.map(toolName).join(', ') : 'none'}.`,
     ...(memory ? [memory] : []),
     'React in one line.',
   ].join('\n')
