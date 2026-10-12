@@ -11,6 +11,7 @@ import { CRUMBS, EARNED_HAT_ART, HAT_ART, HOLIDAY_HATS, SNACK_ART, bodyRows, fil
 import { FULL_LINES, PLAY_FALLBACKS, SNACKS, feedPrompt } from './toys'
 import { rollBones } from './roll'
 import { TOUR_TICKS } from './tour'
+import { USAGE } from './record'
 import { FAIL_PLAIN, FAIL_SNARKY, FALLBACK_NAMES, HELLO_PROMPT, withArticle } from './voice'
 
 const ZERO = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
@@ -103,12 +104,17 @@ const runner = ($: Engine) => async (args: string) =>
 // A store this test can look into and turn off, for writes or for reads: one row under `buddy`,
 // as another session sharing it would see it.
 function sharedStore(on: On, row: unknown) {
-  const shared = { row, writes: 0, refuse: false, refuseReads: false }
+  const shared = { row, writes: 0, refuse: false, refuseReads: false, refuseDeletes: false }
   on('store.get', async () => (shared.refuseReads ? { deny: 'disk offline' } : { value: shared.row }))
   on('store.set', async (_$, e) => {
     if (shared.refuse) return { deny: 'disk full' }
     shared.row = e.value
     shared.writes++
+    return { value: undefined }
+  })
+  on('store.delete', async () => {
+    if (shared.refuseDeletes) return { deny: 'disk offline' }
+    shared.row = undefined
     return { value: undefined }
   })
   return shared
@@ -337,7 +343,7 @@ test('off hides the buddy and /buddy brings it back', async ($, on) => {
 
 const UNTOUCHABLE = [
   ['a record from a newer schema is never touched', { schema: 3, seed: 'future' }, 'Saved buddy uses schema 3; this mod knows 1 and 2.'],
-  ['a damaged record is never touched', { schema: 2, active: 'gone', buddies: [] }, "Saved buddy is damaged; this mod won't overwrite it."],
+  ['a damaged record is never touched', { schema: 2, active: 'gone', buddies: [] }, "Saved buddy is damaged; this mod won't overwrite it. Run /buddy forget to erase it."],
 ] as const
 
 for (const [name, row, line] of UNTOUCHABLE) {
@@ -359,6 +365,149 @@ for (const [name, row, line] of UNTOUCHABLE) {
     expect(await ui.find({ text: 'engine band' })).toBeDefined()
   })
 }
+
+const NO_BUDDY = 'No buddy yet. Run /buddy to hatch one.'
+const FORGOTTEN = 'Forgotten. Nothing of your buddies is saved. Run /buddy to hatch a new one.'
+
+test('forget asks first, then erases everything saved, and the buddy leaves this session', async ($, on) => {
+  const shared = sharedStore(on, RECORD)
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  const run = runner($)
+  expect(await run('forget')).toBe(
+    'This erases everything saved: Pip, the dex, your streak, your achievements and your egg. Run /buddy forget confirm.',
+  )
+  expect(shared.row).toBeDefined()
+  expect(await run('forget confirm')).toBe(FORGOTTEN)
+  expect(shared.row).toBeUndefined()
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await ui.find({ text: 'engine band' })).toBeDefined()
+  expect(await run('pet')).toBe(NO_BUDDY)
+  const card = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...pane() })
+  expect(await card.find({ text: NO_BUDDY })).toBeDefined()
+  // Nothing this session still holds writes the record back.
+  const writes = shared.writes
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(shared.row).toBeUndefined()
+  expect(shared.writes).toBe(writes)
+})
+
+test('after forget, /buddy hatches a fresh first buddy, hungry and with its one reroll', async ($, on) => {
+  const shared = sharedStore(on, RECORD)
+  const clock = world(on, null)
+  model(on, '{"name": "Bix", "personality": "New here."}', 'Crunchy.')
+  await $.session.start(START)
+  await clock.settle()
+  const run = runner($)
+  expect(await run('feed')).toBeUndefined()
+  await clock.settle()
+  expect(await run('forget confirm')).toBe(FORGOTTEN)
+  expect(await run('')).toMatch(/^Bix, an? [^.]*, hatched\. Not the one\?/)
+  await clock.advance(10_000)
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await run('feed')).toBeUndefined()
+  await clock.settle()
+  expect(FULL_LINES).not.toContain(await bubbleOf(ui))
+  expect((shared.row as Saved).buddies).toHaveLength(1)
+  expect(activeOf(shared.row)?.soul.name).toBe('Bix')
+  expect(activeOf(shared.row)?.counts.pets).toBe(1)
+  expect(await run('reroll')).toMatch(/^This replaces Bix, /)
+})
+
+test('forget with nothing saved says so', async ($, on) => {
+  world(on)
+  await $.session.start(START)
+  const run = runner($)
+  expect(await run('forget')).toBe('Nothing is saved.')
+  expect(await run('forget confirm')).toBe('Nothing is saved.')
+})
+
+const UNREADABLE = [
+  ['a damaged record', { schema: 2, active: 'gone', buddies: [] }],
+  ['a record from a newer schema', { schema: 3, seed: 'future' }],
+] as const
+
+for (const [name, row] of UNREADABLE) {
+  test(`forget erases ${name}, which nothing else touches`, async ($, on) => {
+    const shared = sharedStore(on, row)
+    const clock = world(on, null)
+    model(on, '{"name": "Bix", "personality": "New here."}', 'Hi.')
+    await $.session.start(START)
+    const run = runner($)
+    expect(await run('forget')).toBe("This erases the saved buddy, which this mod can't read, for good. Run /buddy forget confirm.")
+    expect(shared.row).toEqual(row)
+    expect(await run('forget confirm')).toBe(FORGOTTEN)
+    expect(shared.row).toBeUndefined()
+    expect(await run('')).toMatch(/^Bix, an? [^.]*, hatched\./)
+    await clock.settle()
+    expect(activeOf(shared.row)?.soul.name).toBe('Bix')
+  })
+}
+
+test('an erase the store refuses changes nothing', async ($, on) => {
+  const shared = sharedStore(on, RECORD)
+  const clock = world(on, null)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  shared.refuseDeletes = true
+  const before = shared.row
+  expect(await runner($)('forget confirm')).toBe('Could not erase your buddy. Try again.')
+  expect(shared.row).toBe(before)
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await ui.find({ text: 'engine band' })).toBeUndefined()
+  expect(await runner($)('pet')).toBeUndefined()
+})
+
+test("another session's forget takes the buddy off this one at its next save, and nothing writes it back", async ($, on) => {
+  const shared = sharedStore(on, RECORD)
+  const clock = world(on, null)
+  engineBelow(on)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  const writes = shared.writes
+  shared.row = undefined
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(shared.row).toBeUndefined()
+  expect(shared.writes).toBe(writes)
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await ui.find({ text: 'engine band' })).toBeDefined()
+})
+
+test("after another session's forget, a /buddy command here finds no buddy, and the band agrees", async ($, on) => {
+  const shared = sharedStore(on, RECORD)
+  const clock = world(on, null)
+  model(on, null, null)
+  await $.session.start(START)
+  await clock.settle()
+  shared.row = undefined
+  expect(await runner($)('pet')).toBe(NO_BUDDY)
+  const ui = await $.ui.mount({ plugin: 'buddy', surface: 'terminal', ...band() })
+  expect(await ui.find({ text: 'engine band' })).toBeDefined()
+})
+
+test('the slash command hint lists what USAGE lists', async ($, on) => {
+  const hints: string[] = []
+  mock.clock(on, { now: NOON })
+  mock.store(on, {})
+  on('command.register', async (_$, e) => {
+    hints.push(e.argumentHint ?? '')
+    return { value: { command: e.name } }
+  })
+  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+  await $.session.start(START)
+  expect(hints).toHaveLength(1)
+  expect(hints[0]).toContain('forget [confirm]')
+  expect(`Usage: /buddy ${hints[0]}`).toBe(USAGE)
+})
 
 test('a failed store write keeps the buddy alive for the session', async ($, on) => {
   // A store that reads empty and refuses every write.
@@ -820,7 +969,7 @@ test('a record that turns damaged during a hatch is not written over, and nobody
     return { value: ok('{"name": "Bix", "personality": "New here."}') }
   })
   await $.session.start(START)
-  expect(await runner($)('')).toBe("Saved buddy is damaged; this mod won't overwrite it.")
+  expect(await runner($)('')).toBe("Saved buddy is damaged; this mod won't overwrite it. Run /buddy forget to erase it.")
   await clock.settle()
   expect(asked).toHaveLength(1)
   expect(shared.writes).toBe(0)

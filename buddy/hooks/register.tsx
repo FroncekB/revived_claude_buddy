@@ -100,6 +100,9 @@ const SAVE_FAILED = 'Could not save your buddy; it lives for this session only.'
 const SNAG = 'Your buddy hit a snag. Try again.'
 // While the egg carried beside the buddy hatches (`carriedHatching`).
 const CARRIED_HATCHING = 'The egg is hatching.'
+const NOTHING_SAVED = 'Nothing is saved.'
+const FORGOTTEN = 'Forgotten. Nothing of your buddies is saved. Run /buddy to hatch a new one.'
+const ERASE_FAILED = 'Could not erase your buddy. Try again.'
 
 type Look = {
   sprite: string[]
@@ -189,6 +192,16 @@ async function adopt($: EngineInterface, saved: Saved) {
   else if (!timer) startTimer($)
 }
 
+// Nothing is saved any more, erased here or in another session: this session lets its copy go,
+// so the band, the panes and the next hatch start from nothing. A fresh buddy is never full.
+async function release($: EngineInterface) {
+  await update($, record, () => null)
+  await update($, unsaved, () => false)
+  await update($, lastFedAt, () => 0)
+  roughTurns = 0
+  stopTimer()
+}
+
 // What this session builds on. The store is shared between sessions, so it is the truth,
 // unless this session's last write failed: then its own copy in state carries on until a
 // write succeeds.
@@ -207,7 +220,7 @@ async function current($: EngineInterface): Promise<Stored> {
 // The line a command answers with when the store holds a record this build must not touch.
 function refusal(stored: Stored): string | null {
   if (stored.kind === 'foreign') return `Saved buddy uses schema ${stored.schema}; this mod knows 1 and 2.`
-  if (stored.kind === 'damaged') return "Saved buddy is damaged; this mod won't overwrite it."
+  if (stored.kind === 'damaged') return "Saved buddy is damaged; this mod won't overwrite it. Run /buddy forget to erase it."
   return null
 }
 
@@ -222,7 +235,12 @@ function refusal(stored: Stored): string | null {
 // and its caller still sees the throw. Nothing inside `commitNow` may call `commit`, which
 // would wait on itself.
 function commit($: EngineInterface, change: Change): Promise<string | null> {
-  const run = lastCommit.then(() => commitNow($, change))
+  return inTurn(() => commitNow($, change))
+}
+
+// Runs `work` once every write this session started before it has settled.
+function inTurn<T>(work: () => Promise<T>): Promise<T> {
+  const run = lastCommit.then(work)
   lastCommit = run.catch(() => undefined)
   return run
 }
@@ -233,6 +251,8 @@ async function commitNow($: EngineInterface, change: Change): Promise<string | n
   if (refused) return refused
   const before = base.kind === 'ok' ? base.saved : null
   const saved = applyChange(before, change, await $.clock.now())
+  // Another session erased everything: this one's copy goes too, and nothing writes it back.
+  if (!saved && base.kind === 'none') await release($)
   if (!saved) {
     // A hatch another session won leaves nothing to write, but this one adopts the record it
     // read, so its band stops drawing the egg (Breeding spec section 3). It says nothing. An egg
@@ -765,10 +785,37 @@ async function unhatched($: EngineInterface, kind: 'hatch' | 'reroll'): Promise<
   return kind === 'hatch' ? `${activeBuddy(saved).soul.name} is already here.` : closedLine(saved)
 }
 
+// /buddy forget: asks, and once confirmed erases everything saved, in the commit queue so no save
+// lands between. A damaged or newer record is erased too: this is the way past one.
+async function forget($: EngineInterface, confirmed: boolean): Promise<string> {
+  const stored = await current($)
+  if (stored.kind === 'none') return NOTHING_SAVED
+  if (!confirmed) {
+    if (stored.kind !== 'ok') return "This erases the saved buddy, which this mod can't read, for good. Run /buddy forget confirm."
+    const { name } = activeBuddy(stored.saved).soul
+    return `This erases everything saved: ${name}, the dex, your streak, your achievements and your egg. Run /buddy forget confirm.`
+  }
+  return inTurn(async () => {
+    try {
+      await $.store.delete(STORE_KEY)
+    } catch {
+      return ERASE_FAILED
+    }
+    await release($)
+    return FORGOTTEN
+  })
+}
+
 async function runBuddy($: EngineInterface, parsed: Parsed): Promise<string | undefined> {
   if (parsed.sub === 'usage') return USAGE
+  if (parsed.sub === 'forget' || parsed.sub === 'forget-confirm') return forget($, parsed.sub === 'forget-confirm')
   const stored = await current($)
-  if (stored.kind === 'none') return parsed.sub === 'show' ? hatch($, 'hatch') : NO_BUDDY
+  if (stored.kind === 'none') {
+    if (parsed.sub === 'show') return hatch($, 'hatch')
+    // Erased in another session: nothing here to show either.
+    await release($)
+    return NO_BUDDY
+  }
   if (stored.kind !== 'ok') return refusal(stored) ?? undefined
   const saved = stored.saved
   // Another session may have changed the store since this one last looked.
@@ -1059,8 +1106,7 @@ export const register: Register = on => {
       await $.command.register({
         name: 'buddy',
         description: 'Hatch, pet, or manage your terminal buddy',
-        argumentHint:
-          '[pet | feed | play [game] | card [who] | journal [who] | dex | swap <who> | breed <who> | rename <name> | hat [hat] | mute | unmute | off | reroll [confirm]]',
+        argumentHint: USAGE.replace('Usage: /buddy ', ''),
         immediate: true,
       })
     } catch {

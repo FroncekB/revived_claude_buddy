@@ -16,7 +16,7 @@ import { CONTROL } from './voice'
 
 export const STORE_KEY = 'buddy'
 export const USAGE =
-  'Usage: /buddy [pet | feed | play [game] | card [who] | journal [who] | dex | swap <who> | breed <who> | rename <name> | hat [hat] | mute | unmute | off | reroll [confirm]]'
+  'Usage: /buddy [pet | feed | play [game] | card [who] | journal [who] | dex | swap <who> | breed <who> | rename <name> | hat [hat] | mute | unmute | off | reroll [confirm] | forget [confirm]]'
 
 // What the store holds, as this build reads it (Foundation spec section 1).
 export type Stored =
@@ -319,7 +319,8 @@ function sameParents(a: readonly string[] | undefined, b: readonly string[] | nu
 }
 
 type Plain =
-  'show' | 'pet' | 'feed' | 'dex' | 'mute' | 'unmute' | 'off' | 'reroll' | 'reroll-confirm' | 'debug-off' | 'usage'
+  | 'show' | 'pet' | 'feed' | 'dex' | 'mute' | 'unmute' | 'off' | 'reroll' | 'reroll-confirm' | 'forget' | 'forget-confirm'
+  | 'debug-off' | 'usage'
 export type Sub = Plain | 'card' | 'journal' | 'swap' | 'breed' | 'debug' | 'rename' | 'hat' | 'play'
 
 // A /buddy command as parsed: the subcommand, and what it was given (Progression spec section 7).
@@ -348,6 +349,10 @@ export function parseSub(args: string): Parsed {
   if (first === 'reroll') {
     if (words.length === 1) return { sub: 'reroll' }
     return { sub: words.length === 2 && second === 'confirm' ? 'reroll-confirm' : 'usage' }
+  }
+  if (first === 'forget') {
+    if (words.length === 1) return { sub: 'forget' }
+    return { sub: words.length === 2 && second === 'confirm' ? 'forget-confirm' : 'usage' }
   }
   // Hidden: left out of USAGE, the argument hint and the README on purpose.
   if (first === 'debug') {
